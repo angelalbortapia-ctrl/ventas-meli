@@ -36,14 +36,19 @@ const SettingsView = (() => {
         UI.toast('Ajustes guardados');
     }
 
+    function syncApi() {
+        return window.Sync || (typeof Sync !== 'undefined' ? Sync : null);
+    }
+
     function loadSyncForm() {
-        if (!window.Sync) return;
-        const cfg = Sync.loadConfig();
+        const S = syncApi();
+        if (!S) return;
+        const cfg = S.loadConfig();
         const url = document.getElementById('sync-url');
         const key = document.getElementById('sync-anon');
         if (url) url.value = cfg.url || '';
         if (key) key.value = cfg.anonKey || '';
-        paintSyncStatus(Sync.getStatus());
+        paintSyncStatus(S.getStatus());
     }
 
     function paintSyncStatus(st) {
@@ -69,20 +74,28 @@ const SettingsView = (() => {
     }
 
     function initSyncUi() {
-        if (!window.Sync) return;
+        const S = syncApi();
+        if (!S) {
+            const el = document.getElementById('sync-status');
+            if (el) el.textContent = '🔴 Sync no cargó — recarga con Cmd+Shift+R';
+            return;
+        }
 
-        Sync.onStatus(paintSyncStatus);
+        S.onStatus(paintSyncStatus);
 
         document.getElementById('btn-sync-save')?.addEventListener('click', async () => {
-            const url = document.getElementById('sync-url')?.value || '';
+            const urlEl = document.getElementById('sync-url');
+            const url = urlEl?.value || '';
             const anonKey = document.getElementById('sync-anon')?.value || '';
             try {
-                const r = await Sync.configure({ url, anonKey });
+                const r = await S.configure({ url, anonKey });
                 if (!r.ok) throw new Error(r.error || 'Config inválida');
+                if (urlEl && r.url) urlEl.value = r.url;
                 UI.toast('Supabase configurado');
-                paintSyncStatus(Sync.getStatus());
+                paintSyncStatus(S.getStatus());
             } catch (err) {
                 UI.toast(err.message || 'Error', 'error');
+                paintSyncStatus(S.getStatus());
             }
         });
 
@@ -94,9 +107,9 @@ const SettingsView = (() => {
                 return;
             }
             try {
-                await Sync.signUp(email, password);
+                await S.signUp(email, password);
                 UI.toast('Cuenta creada / revisa confirmación');
-                paintSyncStatus(Sync.getStatus());
+                paintSyncStatus(S.getStatus());
             } catch (err) {
                 UI.toast(err.message || 'Error al registrar', 'error');
             }
@@ -110,23 +123,23 @@ const SettingsView = (() => {
                 return;
             }
             try {
-                await Sync.signIn(email, password);
+                await S.signIn(email, password);
                 UI.toast('Sesión iniciada — sync activo');
-                paintSyncStatus(Sync.getStatus());
+                paintSyncStatus(S.getStatus());
             } catch (err) {
                 UI.toast(err.message || 'Error al entrar', 'error');
             }
         });
 
         document.getElementById('btn-sync-out')?.addEventListener('click', async () => {
-            await Sync.signOut();
+            await S.signOut();
             UI.toast('Sesión cerrada');
-            paintSyncStatus(Sync.getStatus());
+            paintSyncStatus(S.getStatus());
         });
 
         document.getElementById('btn-sync-now')?.addEventListener('click', async () => {
             try {
-                await Sync.pushNow();
+                await S.pushNow();
                 UI.toast('Subido a Supabase');
             } catch (err) {
                 UI.toast(err.message || 'Error al subir', 'error');

@@ -102,13 +102,42 @@ const Sync = (() => {
         client = null;
     }
 
+    /** Normaliza URL del proyecto (sin /rest/v1 ni slash final). */
+    function normalizeUrl(raw) {
+        let u = String(raw || '').trim();
+        if (!u) return '';
+        u = u.replace(/\/rest\/v1\/?$/i, '');
+        u = u.replace(/\/+$/, '');
+        return u;
+    }
+
     async function configure({ url, anonKey }) {
-        saveConfig({ url: (url || '').trim(), anonKey: (anonKey || '').trim() });
+        const cleanUrl = normalizeUrl(url);
+        const key = String(anonKey || '').trim();
+        if (!cleanUrl || !key) {
+            setStatus({ state: 'off', detail: 'Faltan URL o anon key' });
+            return { ok: false, error: 'Faltan URL o anon key' };
+        }
+        if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(cleanUrl)) {
+            // Permitir custom domains, pero avisar si parece REST path
+            if (/\/rest\//i.test(String(url || ''))) {
+                return { ok: false, error: 'Quita /rest/v1/ de la URL. Solo: https://xxxx.supabase.co' };
+            }
+        }
+        saveConfig({ url: cleanUrl, anonKey: key });
         resetClient();
         const c = ensureClient();
-        if (!c) return { ok: false, error: 'Faltan URL o anon key' };
+        if (!c) return { ok: false, error: 'No se pudo crear el cliente Supabase' };
+        try {
+            // Ping ligero de auth (no requiere login)
+            const { error } = await c.auth.getSession();
+            if (error) throw error;
+        } catch (err) {
+            setStatus({ state: 'error', detail: err.message || 'URL o key inválidos' });
+            return { ok: false, error: err.message || 'URL o key inválidos' };
+        }
         await bootSession();
-        return { ok: true };
+        return { ok: true, url: cleanUrl };
     }
 
     async function bootSession() {
@@ -371,3 +400,6 @@ const Sync = (() => {
         bootSession,
     };
 })();
+
+// Exponer en window: settings/app usan window.Sync (const no queda en window).
+window.Sync = Sync;
