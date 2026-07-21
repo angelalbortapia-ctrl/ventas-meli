@@ -53,6 +53,44 @@ const Calc = (() => {
         return Math.max(0, costo);
     }
 
+    /**
+     * Compara costo actual vs costo ideal para un margen objetivo.
+     * Partiendo del precio de venta, descuenta fees (comisión, cargo fijo, envío, SAT).
+     */
+    function analisisCostoIdeal(lote, margenObjetivo = 0.25, settings = DEFAULT_SETTINGS) {
+        const s = { ...DEFAULT_SETTINGS, ...settings };
+        const precio = Number(lote.precio) || 0;
+        if (precio <= 0) return null;
+        const ideal = costoIdeal(lote, margenObjetivo, s);
+        if (ideal == null) return null;
+        const actual = Number(lote.costo) || 0;
+        const at = utilidadAtPrice(lote, precio, s);
+        const fees = at.comisionVariable + at.cargoFijo + (Number(lote.envio) || 0) + at.retIVA + at.retISR;
+        const diff = actual - ideal; // + = compraste más caro que el tope
+        let verdict = 'en_objetivo';
+        if (diff > 0.5) verdict = 'arriba';
+        else if (diff < -0.5) verdict = 'mejor';
+        return {
+            precio,
+            ideal,
+            actual,
+            fees,
+            margenObjetivo,
+            margenActual: at.margen,
+            utilidadActual: at.utilidad,
+            diff,
+            verdict,
+            breakdown: {
+                comisionVariable: at.comisionVariable,
+                cargoFijo: at.cargoFijo,
+                envio: Number(lote.envio) || 0,
+                retIVA: at.retIVA,
+                retISR: at.retISR,
+                pctComision: at.pctComision,
+            },
+        };
+    }
+
     /** Rango sano de compra: [tope para 30% margen, tope para 20% margen]. */
     function rangoCompraIdeal(lote, settings = DEFAULT_SETTINGS) {
         const para30 = costoIdeal(lote, 0.30, settings);
@@ -349,6 +387,7 @@ const Calc = (() => {
         computeLote,
         utilidadAtPrice,
         costoIdeal,
+        analisisCostoIdeal,
         rangoCompraIdeal,
         syncVendidas,
         estatusKey,

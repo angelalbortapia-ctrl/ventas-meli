@@ -4,6 +4,7 @@
    Schema de lote v3:
      id, productId, sku, producto, variante, tipo, fecha, categoria, notas,
      costo, unidades, precioCompetencia, precio, envio, vendidas, estatus,
+     imagen,   // data URL JPEG comprimido; compartida por productId (familia)
      ventas:   [{ id, fecha, precio, unidades, notas }]
      historial:[{ ts, tipo, meta }]
    vendidas se deriva de ventas[] cuando hay eventos (una sola verdad).
@@ -88,11 +89,34 @@ const Data = (() => {
             precio: Number(l.precio) || 0,
             envio: Number(l.envio) || 0,
             estatus: l.estatus || '✅ Activa / En Venta',
+            imagen: typeof l.imagen === 'string' ? l.imagen : '',
             ventas,
             historial: Array.isArray(l.historial) ? l.historial : [],
         };
         out.vendidas = syncVendidasFromVentas(out);
         return out;
+    }
+
+    /** Imagen compartida de la familia (primera no vacía). */
+    function familyImage(lotes, productId) {
+        if (!productId) return '';
+        const hit = lotes.find(l => l.productId === productId && l.imagen);
+        return hit ? hit.imagen : '';
+    }
+
+    /**
+     * Asigna o limpia la imagen de la familia (productId).
+     * Se guarda una sola copia (en el lote de id más estable) para no
+     * multiplicar base64 en localStorage por cada color/variante.
+     */
+    function setFamilyImage(lotes, productId, imagen) {
+        if (!productId) return lotes;
+        const img = typeof imagen === 'string' ? imagen : '';
+        const siblings = lotes.filter(l => l.productId === productId)
+            .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+        if (!siblings.length) return lotes;
+        siblings.forEach((l, i) => { l.imagen = i === 0 ? img : ''; });
+        return lotes;
     }
 
     /** Migra lote[] asegurando productId compartido por nombre legacy. */
@@ -188,6 +212,8 @@ const Data = (() => {
             l.ventas = Array.isArray(lote.ventas) ? lote.ventas : (prev.ventas || []);
             l.vendidas = syncVendidasFromVentas(l);
             if (!lote.productId) l.productId = prev.productId || l.productId;
+            // imagen: conservar si el upsert no la trae (edits de formulario)
+            if (lote.imagen === undefined) l.imagen = prev.imagen || '';
 
             const changes = diffLote(prev, l);
             if (changes.length) {
@@ -224,7 +250,16 @@ const Data = (() => {
     }
 
     function deleteLote(lotes, id) {
-        return lotes.filter(l => l.id !== id);
+        const doomed = lotes.find(l => l.id === id);
+        const next = lotes.filter(l => l.id !== id);
+        // Si el lote borrado guardaba la foto de familia, muévela a un hermano.
+        if (doomed?.productId && doomed.imagen) {
+            const sib = next
+                .filter(l => l.productId === doomed.productId)
+                .sort((a, b) => String(a.id).localeCompare(String(b.id)))[0];
+            if (sib && !sib.imagen) sib.imagen = doomed.imagen;
+        }
+        return next;
     }
 
     function duplicateLote(lote) {
@@ -233,6 +268,7 @@ const Data = (() => {
             id: newId(),
             productId: lote.productId, // misma familia
             sku: (lote.sku || '') + '-COPIA',
+            imagen: '', // la foto de familia ya vive en otro lote del productId
             vendidas: 0,
             ventas: [],
             historial: [],
@@ -352,6 +388,7 @@ const Data = (() => {
                     // Conservar identidad y eventos
                     id: prev.id,
                     productId: prev.productId,
+                    imagen: prev.imagen || '',
                     ventas: prev.ventas,
                     historial: prev.historial,
                     // vendidas se recalcula desde ventas
@@ -395,6 +432,8 @@ const Data = (() => {
         autoSku,
         normalize,
         migrateLotes,
+        familyImage,
+        setFamilyImage,
         upsertLote,
         deleteLote,
         duplicateLote,

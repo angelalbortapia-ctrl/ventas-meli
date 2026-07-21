@@ -1,7 +1,7 @@
 /* Service worker minimalista: cache-first para assets estáticos.
    Deja pasar las peticiones al CDN de SheetJS y Google Fonts como network-first. */
 
-const VERSION = 'vm-v8';
+const VERSION = 'vm-v11';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -15,6 +15,7 @@ const STATIC_ASSETS = [
     './js/insights.js',
     './js/lotes.js',
     './js/dashboard.js',
+    './js/sync.js',
     './js/settings.js',
     './js/app.js',
 ];

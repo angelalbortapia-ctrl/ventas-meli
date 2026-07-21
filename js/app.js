@@ -140,6 +140,9 @@ const App = (() => {
     function refreshBackupHint() {
         const foot = document.querySelector('.sb-foot span:last-child');
         if (!foot) return;
+        // Si Supabase está activo, Sync pinta el footer
+        const syncSt = window.Sync?.getStatus?.()?.state;
+        if (syncSt && syncSt !== 'off') return;
         const ui = window.State.ui || {};
         const last = ui.lastBackupAt ? new Date(ui.lastBackupAt) : null;
         const days = last ? Math.floor((Date.now() - last.getTime()) / 86400000) : null;
@@ -287,6 +290,11 @@ const App = (() => {
             if (!window.__skipBackupDirty) markBackupNeeded();
         };
 
+        // Sync Supabase (después de wrap de dirty, Sync vuelve a envolver save)
+        if (window.Sync) {
+            Sync.init().catch(err => console.warn('[sync] init', err));
+        }
+
         refreshBackupHint();
         setTimeout(() => maybeRemindBackup(), 1200);
 
@@ -299,5 +307,13 @@ const App = (() => {
         init();
     }
 
-    return { switchTab, exportExcel, openBackup, resetSettings };
+    return {
+        switchTab,
+        exportExcel,
+        openBackup,
+        resetSettings,
+        markBackupDone,
+        markBackupNeeded,
+        refreshBackupHint,
+    };
 })();

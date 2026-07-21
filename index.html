@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=14">
+    <link rel="stylesheet" href="css/styles.css?v=18">
 </head>
 <body>
 
@@ -177,6 +177,38 @@
             </div>
 
             <div class="settings-grid">
+                <div class="card sync-card wide-card">
+                    <h3>☁️ Sync Supabase (Mac ↔ iPhone)</h3>
+                    <p class="muted small" style="margin-bottom:12px">
+                        Recomendado: abre esta PWA en <strong>Safari</strong> → Compartir → <strong>Añadir a pantalla de inicio</strong>.
+                        No hace falta App Store. Necesitas hospedar la app en HTTPS (GitHub Pages, Netlify, etc.) y el mismo login en ambos dispositivos.
+                    </p>
+                    <ol class="sync-steps muted small">
+                        <li>Crea un proyecto en <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a></li>
+                        <li>SQL Editor → pega y ejecuta <code>supabase/schema.sql</code></li>
+                        <li>Project Settings → API → copia URL y <code>anon</code> key aquí</li>
+                        <li>Crea cuenta / inicia sesión con el mismo email en Mac e iPhone</li>
+                    </ol>
+                    <div class="form-grid" style="margin-top:12px">
+                        <label class="wide"><span>Project URL</span><input type="url" id="sync-url" placeholder="https://xxxx.supabase.co" autocomplete="off"></label>
+                        <label class="wide"><span>anon public key</span><input type="password" id="sync-anon" placeholder="eyJ…" autocomplete="off"></label>
+                    </div>
+                    <div class="sync-actions" style="margin:10px 0">
+                        <button class="btn primary btn-sm" type="button" id="btn-sync-save">Guardar proyecto</button>
+                    </div>
+                    <div class="form-grid">
+                        <label><span>Email</span><input type="email" id="sync-email" placeholder="tu@email.com" autocomplete="username"></label>
+                        <label><span>Contraseña</span><input type="password" id="sync-password" placeholder="mín. 6 caracteres" autocomplete="current-password"></label>
+                    </div>
+                    <div class="sync-actions" style="margin-top:10px">
+                        <button class="btn primary btn-sm" type="button" id="btn-sync-signin">Iniciar sesión</button>
+                        <button class="btn btn-sm" type="button" id="btn-sync-signup">Crear cuenta</button>
+                        <button class="btn ghost btn-sm" type="button" id="btn-sync-now">Subir ahora</button>
+                        <button class="btn ghost btn-sm" type="button" id="btn-sync-out">Cerrar sesión</button>
+                    </div>
+                    <div id="sync-status" class="sync-status" style="margin-top:12px">⚪ Sin configurar</div>
+                </div>
+
                 <div class="card">
                     <h3>Comisiones Mercado Libre</h3>
                     <label><span>Comisión Clásica (%)</span><input type="number" step="0.01" id="set-com-clasica"></label>
@@ -290,16 +322,18 @@
 <div id="dialog-host"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="js/calc.js?v=5"></script>
-<script src="js/data.js?v=5"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/calc.js?v=6"></script>
+<script src="js/data.js?v=6"></script>
 <script src="js/excel.js?v=2"></script>
 <script src="js/ui.js?v=2"></script>
 <script src="js/palette.js?v=3"></script>
 <script src="js/insights.js?v=2"></script>
-<script src="js/lotes.js?v=10"></script>
+<script src="js/lotes.js?v=13"></script>
 <script src="js/dashboard.js?v=5"></script>
-<script src="js/settings.js?v=3"></script>
-<script src="js/app.js?v=7"></script>
+<script src="js/sync.js?v=1"></script>
+<script src="js/settings.js?v=4"></script>
+<script src="js/app.js?v=8"></script>
 
 </body>
 </html>

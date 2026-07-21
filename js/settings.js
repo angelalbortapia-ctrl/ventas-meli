@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Vista Ajustes: umbrales, retenciones, comisiones, tope CPA.
+   Vista Ajustes: umbrales, retenciones, comisiones, tope CPA + Supabase sync.
    ========================================================================== */
 
 const SettingsView = (() => {
@@ -22,6 +22,7 @@ const SettingsView = (() => {
             const el = document.getElementById(id);
             if (el) el.value = toDisplay(s[key]);
         });
+        loadSyncForm();
     }
 
     function onChange(e) {
@@ -35,13 +36,112 @@ const SettingsView = (() => {
         UI.toast('Ajustes guardados');
     }
 
+    function loadSyncForm() {
+        if (!window.Sync) return;
+        const cfg = Sync.loadConfig();
+        const url = document.getElementById('sync-url');
+        const key = document.getElementById('sync-anon');
+        if (url) url.value = cfg.url || '';
+        if (key) key.value = cfg.anonKey || '';
+        paintSyncStatus(Sync.getStatus());
+    }
+
+    function paintSyncStatus(st) {
+        const el = document.getElementById('sync-status');
+        if (!el || !st) return;
+        const map = {
+            off: '⚪ Sin configurar',
+            ready: '🟡 Listo — inicia sesión',
+            signed_in: '🟡 Sesión activa',
+            syncing: '🔵 Sincronizando…',
+            synced: '🟢 Sincronizado (realtime)',
+            error: '🔴 Error',
+        };
+        el.innerHTML = `<strong>${map[st.state] || st.state}</strong>`
+            + (st.email ? `<br><span class="muted small">${esc(st.email)}</span>` : '')
+            + (st.detail ? `<br><span class="muted small">${esc(st.detail)}</span>` : '');
+    }
+
+    function esc(s) {
+        return String(s).replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        }[c]));
+    }
+
+    function initSyncUi() {
+        if (!window.Sync) return;
+
+        Sync.onStatus(paintSyncStatus);
+
+        document.getElementById('btn-sync-save')?.addEventListener('click', async () => {
+            const url = document.getElementById('sync-url')?.value || '';
+            const anonKey = document.getElementById('sync-anon')?.value || '';
+            try {
+                const r = await Sync.configure({ url, anonKey });
+                if (!r.ok) throw new Error(r.error || 'Config inválida');
+                UI.toast('Supabase configurado');
+                paintSyncStatus(Sync.getStatus());
+            } catch (err) {
+                UI.toast(err.message || 'Error', 'error');
+            }
+        });
+
+        document.getElementById('btn-sync-signup')?.addEventListener('click', async () => {
+            const email = document.getElementById('sync-email')?.value?.trim();
+            const password = document.getElementById('sync-password')?.value || '';
+            if (!email || password.length < 6) {
+                UI.toast('Email y contraseña (mín. 6)', 'error');
+                return;
+            }
+            try {
+                await Sync.signUp(email, password);
+                UI.toast('Cuenta creada / revisa confirmación');
+                paintSyncStatus(Sync.getStatus());
+            } catch (err) {
+                UI.toast(err.message || 'Error al registrar', 'error');
+            }
+        });
+
+        document.getElementById('btn-sync-signin')?.addEventListener('click', async () => {
+            const email = document.getElementById('sync-email')?.value?.trim();
+            const password = document.getElementById('sync-password')?.value || '';
+            if (!email || !password) {
+                UI.toast('Email y contraseña', 'error');
+                return;
+            }
+            try {
+                await Sync.signIn(email, password);
+                UI.toast('Sesión iniciada — sync activo');
+                paintSyncStatus(Sync.getStatus());
+            } catch (err) {
+                UI.toast(err.message || 'Error al entrar', 'error');
+            }
+        });
+
+        document.getElementById('btn-sync-out')?.addEventListener('click', async () => {
+            await Sync.signOut();
+            UI.toast('Sesión cerrada');
+            paintSyncStatus(Sync.getStatus());
+        });
+
+        document.getElementById('btn-sync-now')?.addEventListener('click', async () => {
+            try {
+                await Sync.pushNow();
+                UI.toast('Subido a Supabase');
+            } catch (err) {
+                UI.toast(err.message || 'Error al subir', 'error');
+            }
+        });
+    }
+
     function init() {
         FIELDS.forEach(([id]) => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('change', onChange);
         });
-        document.getElementById('btn-reset-settings').addEventListener('click', () => window.App && window.App.resetSettings());
+        document.getElementById('btn-reset-settings')?.addEventListener('click', () => window.App && window.App.resetSettings());
         loadIntoForm();
+        initSyncUi();
     }
 
     return { init, loadIntoForm };

@@ -1,7 +1,7 @@
 /* ==========================================================================
    Vista Lotes — Inbox + Split resizable.
    Componentes: stats strip, chips multi-select, sorts, kebab menu,
-   tabs en detalle (Rentabilidad · Inventario · Recomendación · Historial),
+   tabs en detalle (Rentabilidad · Inventario · Sugerencias · Historial),
    registro de ventas, sparkline, inline edit de precio y stock.
    ========================================================================== */
 
@@ -15,6 +15,7 @@ const LotesView = (() => {
         selectedVariant: null,   // id del lote/variante activa
         sort: { key: 'utilidad', dir: 'desc' },
         detailTab: 'renta',
+        margenObjetivoPct: 25,   // % editable en Sugerencias → compra ideal
     };
 
     let editing = null;
@@ -79,10 +80,16 @@ const LotesView = (() => {
                 (STRAT_PRIORITY[a.calc.estrategia] ?? 9) - (STRAT_PRIORITY[b.calc.estrategia] ?? 9)
             )[0].calc.estrategia;
             const colores = [...new Set(variants.map(v => v.lote.variante).filter(Boolean))];
+            const productId = variants[0].lote.productId;
+            const imagen = Data.familyImage(window.State.lotes, productId)
+                || variants.map(v => v.lote.imagen).find(Boolean)
+                || '';
             return {
                 key,
+                productId,
                 producto: variants[0].lote.producto,
                 categoria: variants[0].lote.categoria,
+                imagen,
                 variants,
                 colores,
                 stockRest,
@@ -374,9 +381,13 @@ const LotesView = (() => {
                     ? esc(f.colores[0])
                     : `${f.colores.length} colores · ${f.colores.map(esc).join(' · ')}`)
                 : `${f.variants.length} variante${f.variants.length === 1 ? '' : 's'}`;
+            const thumb = f.imagen
+                ? `<img class="lotes-row-thumb" src="${f.imagen}" alt="" loading="lazy">`
+                : `<span class="lotes-row-thumb is-empty" aria-hidden="true"></span>`;
             return `
             <div class="lotes-row ${f.key===local.selected?'active':''}" data-select="${esc(f.key)}">
                 <span class="lotes-dot ${cls(f.estrategia)}" title="${label(f.estrategia)}"></span>
+                ${thumb}
                 <div class="lotes-info">
                     <div class="lotes-name">${esc(f.producto)}</div>
                     <div class="lotes-sub">
@@ -411,6 +422,8 @@ const LotesView = (() => {
         }
         const { lote, calc } = row;
         const multi = family.variants.length > 1;
+        const imagen = family.imagen || lote.imagen || '';
+        const productId = family.productId || lote.productId || '';
 
         const colorPills = multi ? `
             <div class="variant-pills" role="tablist" aria-label="Colores / variantes">
@@ -427,10 +440,27 @@ const LotesView = (() => {
             </div>
         ` : '';
 
+        const imageBlock = `
+            <div class="product-image" data-product-image="${esc(productId)}">
+                ${imagen
+                    ? `<button type="button" class="product-image-thumb-btn" data-action="pick-image" data-product-id="${esc(productId)}" title="Cambiar imagen" aria-label="Cambiar imagen">
+                        <img class="product-image-thumb" src="${imagen}" alt="Foto de ${esc(lote.producto)}">
+                       </button>`
+                    : `<button type="button" class="product-image-placeholder" data-action="pick-image" data-product-id="${esc(productId)}" title="Agregar imagen" aria-label="Agregar imagen">
+                        <span class="product-image-ph-icon" aria-hidden="true"></span>
+                        <span>Agregar imagen</span>
+                       </button>`}
+                <div class="product-image-actions">
+                    <button type="button" class="btn ghost sm" data-action="pick-image" data-product-id="${esc(productId)}">${imagen ? 'Cambiar' : 'Subir'}</button>
+                    ${imagen ? `<button type="button" class="btn ghost sm danger-text" data-action="clear-image" data-product-id="${esc(productId)}">Quitar</button>` : ''}
+                </div>
+            </div>
+        `;
+
         const tabs = [
             { key: 'renta', label: 'Rentabilidad' },
             { key: 'inv',   label: 'Inventario' },
-            { key: 'reco',  label: 'Recomendación' },
+            { key: 'reco',  label: 'Sugerencias' },
             { key: 'hist',  label: `Historial${lote.historial?.length ? ` (${lote.historial.length})` : ''}` },
         ];
 
@@ -459,13 +489,18 @@ const LotesView = (() => {
                         </div>
                     </div>
                 </div>
-                <h2 class="lotes-detail-name">${esc(lote.producto)}</h2>
-                ${colorPills}
-                <div class="lotes-detail-variant">
-                    ${multi ? '' : `<strong>${esc(lote.variante || '—')}</strong> · `}
-                    <span class="editable-price" data-edit-field="precio" data-id="${lote.id}" title="Click para editar precio">${Calc.fmtMXN(lote.precio)}</span>
-                    ${lote.precioCompetencia ? `· <span class="muted">Competencia: ${Calc.fmtMXN(lote.precioCompetencia)}</span>` : ''}
-                    · <span class="badge ${cls(calc.estrategia)}">${label(calc.estrategia)}</span>
+                <div class="lotes-detail-title-row">
+                    ${imageBlock}
+                    <div class="lotes-detail-title-text">
+                        <h2 class="lotes-detail-name">${esc(lote.producto)}</h2>
+                        ${colorPills}
+                        <div class="lotes-detail-variant">
+                            ${multi ? '' : `<strong>${esc(lote.variante || '—')}</strong> · `}
+                            <span class="editable-price" data-edit-field="precio" data-id="${lote.id}" title="Click para editar precio">${Calc.fmtMXN(lote.precio)}</span>
+                            ${lote.precioCompetencia ? `· <span class="muted">Competencia: ${Calc.fmtMXN(lote.precioCompetencia)}</span>` : ''}
+                            · <span class="badge ${cls(calc.estrategia)}">${label(calc.estrategia)}</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -485,7 +520,7 @@ const LotesView = (() => {
                 ${(() => {
                     const r = Calc.rangoCompraIdeal(lote, window.State.settings);
                     if (!r) return `
-                        <div class="kpi-mini">
+                        <div class="kpi-mini kpi-ideal">
                             <div class="kpi-mini-label">Compra ideal</div>
                             <div class="kpi-mini-value">—</div>
                         </div>`;
@@ -658,7 +693,7 @@ const LotesView = (() => {
 
     function renderTabRecomendacion(lote, calc) {
         const recs = Calc.getRecomendaciones(lote, calc);
-        return recs.map(rec => `
+        const recsHTML = recs.map(rec => `
             <div class="recomend ${rec.cls === 'danger' ? 'danger' : rec.cls === 'warn' ? 'warn' : ''}">
                 <span class="recomend-icon">${rec.icon}</span>
                 <div class="recomend-text">
@@ -667,6 +702,171 @@ const LotesView = (() => {
                 </div>
             </div>
         `).join('');
+
+        return `
+            ${renderCompraIdealSection(lote)}
+            <h4 style="margin-top:18px">Acciones sugeridas</h4>
+            ${recsHTML || `<p class="muted small">Sin sugerencias adicionales por ahora.</p>`}
+        `;
+    }
+
+    function renderCompraIdealSection(lote) {
+        const pct = Number(local.margenObjetivoPct);
+        const margen = (Number.isFinite(pct) ? pct : 25) / 100;
+        const a = Calc.analisisCostoIdeal(lote, margen, window.State.settings);
+
+        if (!a) {
+            return `
+                <section class="compra-ideal" id="compra-ideal-panel" data-lote-id="${esc(lote.id)}">
+                    <h4>Costo de adquisición ideal</h4>
+                    <p class="muted small">Define un precio de venta para calcular el costo máximo de compra.</p>
+                </section>
+            `;
+        }
+
+        return `
+            <section class="compra-ideal" id="compra-ideal-panel" data-lote-id="${esc(lote.id)}">
+                <h4>Costo de adquisición ideal</h4>
+                <p class="ci-explain muted small">
+                    Partimos del <strong>precio de venta</strong> (${Calc.fmtMXN(a.precio)}), restamos comisión Meli,
+                    cargo fijo, envío y retenciones SAT. El resultado es el <strong>costo máximo</strong> al que
+                    deberías comprar para lograr el margen objetivo.
+                </p>
+                <div class="ci-margen-row">
+                    <label class="ci-margen-label">
+                        <span>Margen objetivo</span>
+                        <span class="ci-margen-input-wrap">
+                            <input type="number" id="ci-margen" value="${Number.isFinite(pct) ? pct : 25}" min="5" max="60" step="1" inputmode="decimal">
+                            <span class="ci-margen-suffix">%</span>
+                        </span>
+                    </label>
+                    <div class="ci-margen-presets" role="group" aria-label="Márgenes rápidos">
+                        ${[20, 25, 30].map(p => `
+                            <button type="button" class="ci-preset ${p === Math.round(margen * 100) ? 'active' : ''}" data-margen-preset="${p}">${p}%</button>
+                        `).join('')}
+                    </div>
+                </div>
+                <div id="compra-ideal-body">
+                    ${compraIdealBodyHTML(a)}
+                </div>
+            </section>
+        `;
+    }
+
+    function compraIdealBodyHTML(a) {
+        const b = a.breakdown;
+        const verdictMap = {
+            mejor: {
+                cls: '',
+                icon: '✅',
+                title: 'Por debajo del tope',
+                text: `Tu costo actual (${Calc.fmtMXN(a.actual)}) está <strong>${Calc.fmtMXN(Math.abs(a.diff))}</strong> bajo el ideal.
+                    Margen actual <strong>${Calc.fmtPct(a.margenActual)}</strong> vs objetivo <strong>${Calc.fmtPct(a.margenObjetivo)}</strong>.`,
+            },
+            en_objetivo: {
+                cls: '',
+                icon: '🎯',
+                title: 'En el costo ideal',
+                text: `Compraste muy cerca del tope para ${Calc.fmtPct(a.margenObjetivo)}. Margen actual: <strong>${Calc.fmtPct(a.margenActual)}</strong>.`,
+            },
+            arriba: {
+                cls: 'warn',
+                icon: '⚠️',
+                title: 'Arriba del costo ideal',
+                text: `Tu costo actual (${Calc.fmtMXN(a.actual)}) supera el tope por <strong>${Calc.fmtMXN(a.diff)}</strong>.
+                    Para ${Calc.fmtPct(a.margenObjetivo)} deberías comprar a lo sumo <strong>${Calc.fmtMXN(a.ideal)}</strong>.
+                    Hoy tu margen es <strong>${Calc.fmtPct(a.margenActual)}</strong>.`,
+            },
+        };
+        const v = verdictMap[a.verdict] || verdictMap.en_objetivo;
+        const diffCls = a.diff > 0.5 ? 'neg' : a.diff < -0.5 ? 'pos' : '';
+
+        return `
+            <div class="breakdown">
+                <div class="breakdown-row"><span class="label">Precio de venta</span><span class="val">${Calc.fmtMXN(a.precio)}</span></div>
+                <div class="breakdown-row"><span class="label">Comisión Meli (${(b.pctComision * 100).toFixed(0)}%)</span><span class="val">− ${Calc.fmtMXN(b.comisionVariable)}</span></div>
+                ${b.cargoFijo ? `<div class="breakdown-row"><span class="label">Cargo fijo</span><span class="val">− ${Calc.fmtMXN(b.cargoFijo)}</span></div>` : ''}
+                <div class="breakdown-row"><span class="label">Envío</span><span class="val">− ${Calc.fmtMXN(b.envio)}</span></div>
+                <div class="breakdown-row"><span class="label">Retención IVA SAT</span><span class="val">− ${Calc.fmtMXN(b.retIVA)}</span></div>
+                <div class="breakdown-row"><span class="label">Retención ISR SAT</span><span class="val">− ${Calc.fmtMXN(b.retISR)}</span></div>
+                <div class="breakdown-row"><span class="label">Margen objetivo (${Calc.fmtPct(a.margenObjetivo)})</span><span class="val">− ${Calc.fmtMXN(a.precio * a.margenObjetivo)}</span></div>
+                <div class="breakdown-row total">
+                    <span class="label">Costo ideal máx. de compra</span>
+                    <span class="val pos">${Calc.fmtMXN(a.ideal)}</span>
+                </div>
+            </div>
+            <div class="ci-compare">
+                <div class="ci-compare-item">
+                    <div class="ci-compare-label">Tu costo actual</div>
+                    <div class="ci-compare-value">${Calc.fmtMXN(a.actual)}</div>
+                </div>
+                <div class="ci-compare-item">
+                    <div class="ci-compare-label">Costo ideal</div>
+                    <div class="ci-compare-value pos">${Calc.fmtMXN(a.ideal)}</div>
+                </div>
+                <div class="ci-compare-item">
+                    <div class="ci-compare-label">Diferencia</div>
+                    <div class="ci-compare-value ${diffCls}">${a.diff > 0 ? '+' : ''}${Calc.fmtMXN(a.diff)}</div>
+                </div>
+            </div>
+            <div class="recomend ${v.cls}" style="margin-top:12px;margin-bottom:0">
+                <span class="recomend-icon">${v.icon}</span>
+                <div class="recomend-text">
+                    <strong>${v.title}</strong>
+                    <div style="margin-top:4px">${v.text}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    function refreshCompraIdealBody(loteId) {
+        const body = document.getElementById('compra-ideal-body');
+        if (!body) return;
+        const lote = window.State.lotes.find(x => x.id === loteId);
+        if (!lote) return;
+        const pct = Number(local.margenObjetivoPct);
+        const margen = (Number.isFinite(pct) ? Math.min(60, Math.max(5, pct)) : 25) / 100;
+        const a = Calc.analisisCostoIdeal(lote, margen, window.State.settings);
+        if (!a) {
+            body.innerHTML = `<p class="muted small">No se pudo calcular.</p>`;
+            return;
+        }
+        body.innerHTML = compraIdealBodyHTML(a);
+        document.querySelectorAll('[data-margen-preset]').forEach(btn => {
+            btn.classList.toggle('active', Number(btn.dataset.margenPreset) === Math.round(margen * 100));
+        });
+    }
+
+    function bindCompraIdealControls() {
+        const panel = document.getElementById('compra-ideal-panel');
+        if (!panel) return;
+        const loteId = panel.dataset.loteId;
+        const input = document.getElementById('ci-margen');
+        if (input) {
+            input.addEventListener('input', () => {
+                let pct = Number(input.value);
+                if (!Number.isFinite(pct)) return;
+                pct = Math.min(60, Math.max(5, pct));
+                local.margenObjetivoPct = pct;
+                refreshCompraIdealBody(loteId);
+            });
+            input.addEventListener('change', () => {
+                let pct = Number(input.value);
+                if (!Number.isFinite(pct)) pct = 25;
+                pct = Math.min(60, Math.max(5, pct));
+                local.margenObjetivoPct = pct;
+                input.value = String(pct);
+                refreshCompraIdealBody(loteId);
+            });
+        }
+        document.querySelectorAll('[data-margen-preset]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const pct = Number(btn.dataset.margenPreset);
+                local.margenObjetivoPct = pct;
+                if (input) input.value = String(pct);
+                refreshCompraIdealBody(loteId);
+            });
+        });
     }
 
     function renderTabHistorial(lote, calc) {
@@ -811,6 +1011,8 @@ const LotesView = (() => {
             });
         });
 
+        bindCompraIdealControls();
+
         // Kebab menu
         document.querySelectorAll('[data-kebab-btn]').forEach(el => {
             el.addEventListener('click', e => {
@@ -837,6 +1039,8 @@ const LotesView = (() => {
                 else if (action === 'restock') await restock(id);
                 else if (action === 'status') await changeStatus(id);
                 else if (action === 'del-venta') await removeSale(btn.dataset.lote, btn.dataset.venta);
+                else if (action === 'pick-image') pickProductImage(btn.dataset.productId);
+                else if (action === 'clear-image') await clearProductImage(btn.dataset.productId);
             });
         });
 
@@ -871,6 +1075,105 @@ const LotesView = (() => {
         window.State.save();
         renderContent();
         UI.toast(field === 'precio' ? 'Precio actualizado' : 'Stock actualizado');
+    }
+
+    // ---- Imagen de producto (familia / productId) ----------------------
+    const IMG_MAX_PX = 520;
+    const IMG_QUALITY = 0.72;
+    const IMG_MAX_BYTES = 180_000; // ~180 KB data URL por producto
+
+    function compressImageFile(file) {
+        return new Promise((resolve, reject) => {
+            if (!file || !/^image\/(jpeg|png|webp)$/i.test(file.type)) {
+                reject(new Error('Usa JPG, PNG o WebP'));
+                return;
+            }
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    let { width: w, height: h } = img;
+                    const scale = Math.min(1, IMG_MAX_PX / Math.max(w, h));
+                    w = Math.max(1, Math.round(w * scale));
+                    h = Math.max(1, Math.round(h * scale));
+                    const canvas = document.createElement('canvas');
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#fff';
+                    ctx.fillRect(0, 0, w, h);
+                    ctx.drawImage(img, 0, 0, w, h);
+                    let quality = IMG_QUALITY;
+                    let dataUrl = canvas.toDataURL('image/jpeg', quality);
+                    while (dataUrl.length > IMG_MAX_BYTES && quality > 0.4) {
+                        quality -= 0.08;
+                        dataUrl = canvas.toDataURL('image/jpeg', quality);
+                    }
+                    URL.revokeObjectURL(url);
+                    if (dataUrl.length > IMG_MAX_BYTES * 1.4) {
+                        reject(new Error('La imagen sigue siendo muy grande. Prueba otra más liviana.'));
+                        return;
+                    }
+                    resolve(dataUrl);
+                } catch (err) {
+                    URL.revokeObjectURL(url);
+                    reject(err);
+                }
+            };
+            img.onerror = () => {
+                URL.revokeObjectURL(url);
+                reject(new Error('No se pudo leer la imagen'));
+            };
+            img.src = url;
+        });
+    }
+
+    function pickProductImage(productId) {
+        if (!productId) { UI.toast('Producto sin identificador', 'error'); return; }
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp';
+        input.hidden = true;
+        input.addEventListener('change', async () => {
+            const file = input.files && input.files[0];
+            input.remove();
+            if (!file) return;
+            try {
+                const dataUrl = await compressImageFile(file);
+                Data.setFamilyImage(window.State.lotes, productId, dataUrl);
+                try {
+                    window.State.save();
+                } catch (err) {
+                    Data.setFamilyImage(window.State.lotes, productId, '');
+                    const quota = err && (err.name === 'QuotaExceededError' || /quota/i.test(err.message || ''));
+                    UI.toast(quota
+                        ? 'Almacenamiento lleno. Quita imágenes de otros productos o exporta un respaldo.'
+                        : 'No se pudo guardar la imagen', 'error');
+                    return;
+                }
+                renderContent();
+                UI.toast('Imagen guardada');
+            } catch (err) {
+                UI.toast(err.message || 'Error al procesar imagen', 'error');
+            }
+        });
+        document.body.appendChild(input);
+        input.click();
+    }
+
+    async function clearProductImage(productId) {
+        if (!productId) return;
+        const ok = await UI.confirm({
+            title: 'Quitar imagen',
+            message: 'Se eliminará la foto de este producto (compartida por todas las variantes / colores).',
+            primaryLabel: 'Quitar',
+            danger: true,
+        });
+        if (!ok) return;
+        Data.setFamilyImage(window.State.lotes, productId, '');
+        window.State.save();
+        renderContent();
+        UI.toast('Imagen eliminada');
     }
 
     // ---- Atajos teclado ------------------------------------------------
