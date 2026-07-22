@@ -1,6 +1,6 @@
 /* ==========================================================================
-   Dashboard / Inicio — briefing matutino del negocio.
-   Visual: hero teatral, dinero tipográfico, hoy con peso, capital atrapado.
+   Dashboard / Inicio — briefing editorial del negocio.
+   Craft visual: hero de marca, dinero tipográfico, hoy con peso.
    ========================================================================== */
 
 const DashboardView = (() => {
@@ -29,7 +29,7 @@ const DashboardView = (() => {
         const agg = Calc.aggregate(lotes, window.State.settings);
         const { alerts } = InsightsView.analyze();
         const high = alerts.filter(a => a.severity === 'high');
-        const focusAll = alerts;
+        const focusAll = uniqueAlerts(alerts);
         const focus = focusAll.slice(0, 3);
         const moreCount = Math.max(0, focusAll.length - 3);
 
@@ -67,20 +67,23 @@ const DashboardView = (() => {
 
         const insightsLink = high.length
             ? `${high.length} urgente${high.length === 1 ? '' : 's'}`
-            : 'Insights';
+            : 'Ver insights';
 
         root.innerHTML = `
             <section class="dash-hero dash-anim">
+                <div class="dash-hero-glow" aria-hidden="true"></div>
                 <div class="dash-hero-top">
                     <div class="dash-hero-brand">Ventas Meli</div>
                     <p class="dash-hero-date">${esc(dateLbl)}</p>
                 </div>
-                <p class="dash-hero-label">Ganancia realizada</p>
-                <div class="dash-hero-value ${ganTone}">${Calc.fmtMXN(agg.gananciaRealizada)}</div>
-                <p class="dash-hero-sub">
-                    Cash in ${Calc.fmtMXN(agg.cashIn)} · ${agg.totalVendidas} uds ·
-                    margen ${Calc.fmtPct(agg.margenPonderado)}
-                </p>
+                <div class="dash-hero-stage">
+                    <p class="dash-hero-label">Ganancia realizada</p>
+                    <div class="dash-hero-value ${ganTone}">${Calc.fmtMXN(agg.gananciaRealizada)}</div>
+                    <p class="dash-hero-sub">
+                        Cash in ${Calc.fmtMXN(agg.cashIn)} · ${agg.totalVendidas} uds ·
+                        margen ${Calc.fmtPct(agg.margenPonderado)}
+                    </p>
+                </div>
                 <div class="dash-hero-actions">
                     <button type="button" class="btn primary" data-dash-go="lotes">Ver productos</button>
                     <button type="button" class="dash-text-link" data-dash-go="insights">${esc(insightsLink)}</button>
@@ -92,39 +95,42 @@ const DashboardView = (() => {
                     <span class="dash-money-label">Capital</span>
                     <span class="dash-money-value">${Calc.fmtMXN(agg.capitalDesplegado)}</span>
                 </div>
+                <span class="dash-money-rule" aria-hidden="true"></span>
                 <div class="dash-money-item dash-money-emph">
                     <span class="dash-money-label">Inventario</span>
                     <span class="dash-money-value">${Calc.fmtMXN(agg.valorInventario)}</span>
                 </div>
+                <span class="dash-money-rule" aria-hidden="true"></span>
                 <div class="dash-money-item">
                     <span class="dash-money-label">Cash in</span>
                     <span class="dash-money-value">${Calc.fmtMXN(agg.cashIn)}</span>
                 </div>
+                <span class="dash-money-rule" aria-hidden="true"></span>
                 <div class="dash-money-item">
                     <span class="dash-money-label">Activos</span>
-                    <span class="dash-money-value">${activeLots}</span>
-                    <span class="dash-money-hint">${escN}↑ ${liqN}↓</span>
+                    <span class="dash-money-value">${activeLots} <span class="dash-money-hint">${escN}↑ ${liqN}↓</span></span>
                 </div>
             </section>
 
             <section class="dash-today dash-anim-delay">
-                <div class="dash-section-head dash-section-head-row">
+                <div class="dash-section-head">
+                    <span class="dash-kicker">01</span>
                     <div>
                         <h3>Qué hacer hoy</h3>
                         <p class="muted small">${
                             focus.length
-                                ? 'Tres decisiones que mueven capital · toca el lote'
+                                ? 'Decisiones que liberan o protegen capital'
                                 : 'Sin alertas urgentes'
                         }</p>
                     </div>
                 </div>
                 ${focus.length ? `
                     <ul class="dash-actions">
-                        ${focus.map(a => actionRow(a)).join('')}
+                        ${focus.map((a, i) => actionRow(a, i)).join('')}
                     </ul>
                     ${moreCount ? `
                         <button type="button" class="dash-more-link" data-dash-go="insights">
-                            Ver ${moreCount} más
+                            Ver ${moreCount} más en Insights
                         </button>
                     ` : ''}
                 ` : `
@@ -138,7 +144,10 @@ const DashboardView = (() => {
 
             <section class="dash-pulse">
                 <div class="dash-section-head dash-section-head-inline">
-                    <h3>Portafolio</h3>
+                    <div class="dash-section-head">
+                        <span class="dash-kicker">02</span>
+                        <h3>Portafolio</h3>
+                    </div>
                     <div class="dash-pulse-legend">
                         ${leg('esc', 'Escalar', escN)}
                         ${leg('man', 'Mantener', manN)}
@@ -156,11 +165,15 @@ const DashboardView = (() => {
 
             <section class="dash-trapped">
                 <div class="dash-section-head">
-                    <h3>Capital atrapado</h3>
-                    <p class="muted small">
-                        ${Calc.fmtMXN(trappedTotal)} en rotación lenta
-                        ${agg.valorInventario > 0 ? ` · <strong>${trappedPct}%</strong> del inventario` : ''}
-                    </p>
+                    <span class="dash-kicker">03</span>
+                    <div>
+                        <h3>Capital atrapado</h3>
+                        <p class="muted small">
+                            <span class="dash-trapped-sum">${Calc.fmtMXN(trappedTotal)}</span>
+                            en rotación lenta
+                            ${agg.valorInventario > 0 ? ` · <strong>${trappedPct}%</strong> del inventario` : ''}
+                        </p>
+                    </div>
                 </div>
                 <ul class="dash-rot">
                     ${trapped.length ? trapped.map(({ lote, calc }) => {
@@ -183,23 +196,40 @@ const DashboardView = (() => {
             </section>
 
             ${top.length ? `
-            <section class="dash-tops">
+            <footer class="dash-tops">
                 <span class="dash-tops-label">Mejores</span>
                 <div class="dash-tops-line">
                     ${top.map(({ lote, calc }, i) => `
                         <button type="button" class="dash-tops-chip" data-dash-lote="${esc(lote.id)}">
                             <span class="dash-tops-n">${i + 1}</span>
-                            ${esc(lote.producto)}
+                            ${esc(shortName(lote.producto))}
                             <span class="dash-tops-val">${Calc.fmtMXN(calc.utilidad)}</span>
                         </button>
                     `).join('<span class="dash-tops-sep">·</span>')}
                 </div>
-            </section>
+            </footer>
             ` : ''}
         `;
 
         bind(root);
         requestAnimationFrame(() => root.classList.add('dash-ready'));
+    }
+
+    function uniqueAlerts(alerts) {
+        const seen = new Set();
+        const out = [];
+        for (const a of alerts) {
+            const key = a.lote?.productId || a.lote?.producto || a.lote?.id || a.title;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(a);
+        }
+        return out;
+    }
+
+    function shortName(name, n = 28) {
+        const s = String(name || '');
+        return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s;
     }
 
     function gananciaTone(n) {
@@ -210,19 +240,23 @@ const DashboardView = (() => {
     function emptyOnboarding() {
         return `
             <section class="dash-hero dash-hero-empty dash-anim">
+                <div class="dash-hero-glow" aria-hidden="true"></div>
                 <div class="dash-hero-brand">Ventas Meli</div>
-                <p class="dash-hero-label">Tu cockpit de lotes</p>
-                <div class="dash-hero-value flat">Empieza aquí</div>
-                <p class="dash-hero-sub">
-                    Registra tu primer lote o importa un Excel para ver ganancia,
-                    capital atrapado y qué hacer hoy.
-                </p>
+                <div class="dash-hero-stage">
+                    <p class="dash-hero-label">Tu cockpit de lotes</p>
+                    <div class="dash-hero-value flat">Empieza aquí</div>
+                    <p class="dash-hero-sub">
+                        Registra tu primer lote o importa un Excel para ver ganancia,
+                        capital atrapado y qué hacer hoy.
+                    </p>
+                </div>
                 <div class="dash-hero-actions">
                     <button type="button" class="btn primary" data-dash-new>+ Nuevo lote</button>
                     <button type="button" class="dash-text-link" data-dash-import>Importar Excel</button>
                 </div>
             </section>
             <section class="dash-onboard">
+                <span class="dash-kicker">Guía</span>
                 <h3>Qué verás en Inicio</h3>
                 <ul class="dash-onboard-list">
                     <li><strong>Ganancia realizada</strong> — si el negocio va bien o mal</li>
@@ -234,13 +268,19 @@ const DashboardView = (() => {
         `;
     }
 
-    function actionRow(a) {
+    function actionRow(a, i) {
         const cue = ACTION_CUE[a.kind] || 'Revisar';
         const short = shortActionText(a);
+        let title = a.title || '';
+        if (a.lote?.producto) {
+            title = shortName(a.lote.producto, 40)
+                + (a.lote.variante ? ` · ${a.lote.variante}` : '');
+        }
         return `
             <li class="dash-action sev-${a.severity}" data-dash-lote="${esc(a.lote?.id || '')}">
+                <span class="dash-action-idx">${String(i + 1).padStart(2, '0')}</span>
                 <div class="dash-action-body">
-                    <div class="dash-action-title">${esc(a.title)}</div>
+                    <div class="dash-action-title">${esc(title)}</div>
                     <div class="dash-action-text">${esc(short)}</div>
                     <div class="dash-action-cue">${esc(cue)} →</div>
                 </div>
@@ -249,8 +289,8 @@ const DashboardView = (() => {
 
     function shortActionText(a) {
         const plain = stripHtmlPlain(a.text);
-        if (plain.length <= 96) return plain;
-        return plain.slice(0, 93).trimEnd() + '…';
+        if (plain.length <= 90) return plain;
+        return plain.slice(0, 87).trimEnd() + '…';
     }
 
     function stripHtmlPlain(html) {
