@@ -247,6 +247,7 @@ const App = (() => {
                 cancelLabel: 'Después',
             });
             if (ok) exportJSON();
+            else markBackupDone(); // posponer nag; no bloquear el panel
         }
     }
 
