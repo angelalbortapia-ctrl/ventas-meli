@@ -1,7 +1,6 @@
 /* ==========================================================================
-   Dashboard / Inicio — carta de presentación del negocio.
-   Jerarquía: resultado → exposición → acción de hoy → pulso → capital
-   atrapado → tops (secundario). Sin tablas densas.
+   Dashboard / Inicio — briefing matutino del negocio.
+   Visual: hero teatral, dinero tipográfico, hoy con peso, capital atrapado.
    ========================================================================== */
 
 const DashboardView = (() => {
@@ -30,7 +29,9 @@ const DashboardView = (() => {
         const agg = Calc.aggregate(lotes, window.State.settings);
         const { alerts } = InsightsView.analyze();
         const high = alerts.filter(a => a.severity === 'high');
-        const focus = alerts.slice(0, 5);
+        const focusAll = alerts;
+        const focus = focusAll.slice(0, 3);
+        const moreCount = Math.max(0, focusAll.length - 3);
 
         const escN = agg.strategyCount.ESCALAR || 0;
         const manN = agg.strategyCount.MANTENER || 0;
@@ -43,7 +44,6 @@ const DashboardView = (() => {
         const trapped = [...agg.rows]
             .filter(r => r.calc.inventarioRestante > 0)
             .sort((a, b) => {
-                // Primero poca rotación; desempate por $ atrapado
                 const rot = a.calc.rotacion - b.calc.rotacion;
                 if (Math.abs(rot) > 0.001) return rot;
                 return b.calc.valorInventario - a.calc.valorInventario;
@@ -51,101 +51,116 @@ const DashboardView = (() => {
             .slice(0, 5);
 
         const trappedTotal = trapped.reduce((s, r) => s + r.calc.valorInventario, 0);
+        const trappedPct = agg.valorInventario > 0
+            ? Math.round((trappedTotal / agg.valorInventario) * 100)
+            : 0;
 
         const top = [...agg.rows]
             .filter(r => r.calc.utilidad > 0)
             .sort((a, b) => b.calc.utilidad - a.calc.utilidad)
             .slice(0, 3);
 
-        const ganTone = agg.gananciaRealizada >= 0 ? 'pos' : 'neg';
+        const ganTone = gananciaTone(agg.gananciaRealizada);
         const dateLbl = new Intl.DateTimeFormat('es-MX', {
             weekday: 'long', day: 'numeric', month: 'long',
         }).format(new Date());
 
+        const insightsLink = high.length
+            ? `${high.length} urgente${high.length === 1 ? '' : 's'}`
+            : 'Insights';
+
         root.innerHTML = `
-            <section class="dash-hero">
-                <div class="dash-hero-brand">Ventas Meli</div>
-                <p class="dash-hero-date">${esc(dateLbl)}</p>
+            <section class="dash-hero dash-anim">
+                <div class="dash-hero-top">
+                    <div class="dash-hero-brand">Ventas Meli</div>
+                    <p class="dash-hero-date">${esc(dateLbl)}</p>
+                </div>
                 <p class="dash-hero-label">Ganancia realizada</p>
                 <div class="dash-hero-value ${ganTone}">${Calc.fmtMXN(agg.gananciaRealizada)}</div>
                 <p class="dash-hero-sub">
-                    Cash in ${Calc.fmtMXN(agg.cashIn)} · ${agg.totalVendidas} uds vendidas ·
-                    margen lista ${Calc.fmtPct(agg.margenPonderado)}
+                    Cash in ${Calc.fmtMXN(agg.cashIn)} · ${agg.totalVendidas} uds ·
+                    margen ${Calc.fmtPct(agg.margenPonderado)}
                 </p>
                 <div class="dash-hero-actions">
                     <button type="button" class="btn primary" data-dash-go="lotes">Ver productos</button>
-                    <button type="button" class="btn" data-dash-new>+ Nuevo lote</button>
-                    ${high.length ? `
-                        <button type="button" class="btn" data-dash-go="insights">
-                            ${high.length} urgentes
-                        </button>
-                    ` : `
-                        <button type="button" class="btn" data-dash-go="insights">Insights</button>
-                    `}
+                    <button type="button" class="dash-text-link" data-dash-go="insights">${esc(insightsLink)}</button>
                 </div>
             </section>
 
-            <section class="dash-strip" aria-label="Dinero en juego">
-                ${stat('Capital desplegado', Calc.fmtMXN(agg.capitalDesplegado), `${agg.rows.length} lotes · ${agg.totalUds} uds`)}
-                ${stat('Inventario', Calc.fmtMXN(agg.valorInventario), 'capital en stock')}
-                ${stat('Cash in', Calc.fmtMXN(agg.cashIn), 'ventas cobradas')}
-                ${stat('Activos', String(activeLots), `${escN} escalar · ${liqN} liquidar`)}
+            <section class="dash-money" aria-label="Dinero en juego">
+                <div class="dash-money-item dash-money-emph">
+                    <span class="dash-money-label">Capital</span>
+                    <span class="dash-money-value">${Calc.fmtMXN(agg.capitalDesplegado)}</span>
+                </div>
+                <div class="dash-money-item dash-money-emph">
+                    <span class="dash-money-label">Inventario</span>
+                    <span class="dash-money-value">${Calc.fmtMXN(agg.valorInventario)}</span>
+                </div>
+                <div class="dash-money-item">
+                    <span class="dash-money-label">Cash in</span>
+                    <span class="dash-money-value">${Calc.fmtMXN(agg.cashIn)}</span>
+                </div>
+                <div class="dash-money-item">
+                    <span class="dash-money-label">Activos</span>
+                    <span class="dash-money-value">${activeLots}</span>
+                    <span class="dash-money-hint">${escN}↑ ${liqN}↓</span>
+                </div>
             </section>
 
-            <section class="dash-panel dash-today">
+            <section class="dash-today dash-anim-delay">
                 <div class="dash-section-head dash-section-head-row">
                     <div>
                         <h3>Qué hacer hoy</h3>
                         <p class="muted small">${
                             focus.length
-                                ? `${focus.length} prioridad${focus.length === 1 ? '' : 'es'} · toca para abrir el lote`
+                                ? 'Tres decisiones que mueven capital · toca el lote'
                                 : 'Sin alertas urgentes'
                         }</p>
                     </div>
-                    ${alerts.length > 5 ? `
-                        <button type="button" class="btn btn-sm" data-dash-go="insights">Ver todas</button>
-                    ` : ''}
                 </div>
                 ${focus.length ? `
                     <ul class="dash-actions">
                         ${focus.map(a => actionRow(a)).join('')}
                     </ul>
+                    ${moreCount ? `
+                        <button type="button" class="dash-more-link" data-dash-go="insights">
+                            Ver ${moreCount} más
+                        </button>
+                    ` : ''}
                 ` : `
                     <div class="dash-empty dash-empty-ok">
                         <p><strong>Todo en orden por ahora.</strong></p>
-                        <p class="muted small">Registra una venta o revisa rotación abajo para liberar capital.</p>
-                        <div class="dash-empty-actions">
-                            <button type="button" class="btn primary btn-sm" data-dash-go="lotes">Ir a productos</button>
-                        </div>
+                        <p class="muted small">Revisa capital atrapado abajo o registra una venta.</p>
+                        <button type="button" class="dash-text-link dash-text-link-dark" data-dash-go="lotes">Ir a productos</button>
                     </div>
                 `}
             </section>
 
             <section class="dash-pulse">
-                <div class="dash-section-head">
-                    <h3>Pulso de estrategia</h3>
-                    <p class="muted small">Cómo está tu portafolio</p>
+                <div class="dash-section-head dash-section-head-inline">
+                    <h3>Portafolio</h3>
+                    <div class="dash-pulse-legend">
+                        ${leg('esc', 'Escalar', escN)}
+                        ${leg('man', 'Mantener', manN)}
+                        ${leg('liq', 'Liquidar', liqN)}
+                        ${leg('ago', 'Agotado', agoN)}
+                    </div>
                 </div>
-                <div class="dash-pulse-track" role="img" aria-label="Distribución de estrategia">
+                <div class="dash-pulse-track" role="img" aria-label="Distribución de portafolio">
                     ${pulseSeg('esc', escN, agg.rows.length)}
                     ${pulseSeg('man', manN, agg.rows.length)}
                     ${pulseSeg('liq', liqN, agg.rows.length)}
                     ${pulseSeg('ago', agoN, agg.rows.length)}
                 </div>
-                <div class="dash-pulse-legend">
-                    ${leg('esc', 'Escalar', escN)}
-                    ${leg('man', 'Mantener', manN)}
-                    ${leg('liq', 'Liquidar', liqN)}
-                    ${leg('ago', 'Agotado', agoN)}
-                </div>
             </section>
 
-            <section class="dash-panel dash-trapped">
-                <div class="dash-section-head dash-section-head-row">
-                    <div>
-                        <h3>Capital atrapado</h3>
-                        <p class="muted small">Stock que menos rota · ${Calc.fmtMXN(trappedTotal)} en estos SKUs</p>
-                    </div>
+            <section class="dash-trapped">
+                <div class="dash-section-head">
+                    <h3>Capital atrapado</h3>
+                    <p class="muted small">
+                        ${Calc.fmtMXN(trappedTotal)} en rotación lenta
+                        ${agg.valorInventario > 0 ? ` · <strong>${trappedPct}%</strong> del inventario` : ''}
+                    </p>
                 </div>
                 <ul class="dash-rot">
                     ${trapped.length ? trapped.map(({ lote, calc }) => {
@@ -162,59 +177,53 @@ const DashboardView = (() => {
                             </div>
                         </li>`;
                     }).join('') : `
-                        <li class="dash-empty">Sin inventario pendiente — todo vendido o sin stock.</li>
+                        <li class="dash-empty">Sin inventario pendiente.</li>
                     `}
                 </ul>
             </section>
 
             ${top.length ? `
-            <section class="dash-panel dash-tops">
-                <div class="dash-section-head">
-                    <h3>Más rentables</h3>
-                    <p class="muted small">Utilidad neta por unidad · top 3</p>
-                </div>
-                <ul class="dash-rank">
+            <section class="dash-tops">
+                <span class="dash-tops-label">Mejores</span>
+                <div class="dash-tops-line">
                     ${top.map(({ lote, calc }, i) => `
-                        <li class="dash-rank-row" data-dash-lote="${esc(lote.id)}">
-                            <span class="dash-rank-n">${i + 1}</span>
-                            <div class="dash-rank-body">
-                                <div class="dash-rank-name">${esc(lote.producto)}</div>
-                                <div class="dash-rank-meta">${esc(lote.variante || lote.sku || '—')}</div>
-                            </div>
-                            <div class="dash-rank-nums">
-                                <div class="pos">${Calc.fmtMXN(calc.utilidad)}</div>
-                                <div class="muted small">${Calc.fmtPct(calc.margen)}</div>
-                            </div>
-                        </li>
-                    `).join('')}
-                </ul>
+                        <button type="button" class="dash-tops-chip" data-dash-lote="${esc(lote.id)}">
+                            <span class="dash-tops-n">${i + 1}</span>
+                            ${esc(lote.producto)}
+                            <span class="dash-tops-val">${Calc.fmtMXN(calc.utilidad)}</span>
+                        </button>
+                    `).join('<span class="dash-tops-sep">·</span>')}
+                </div>
             </section>
             ` : ''}
         `;
 
         bind(root);
+        requestAnimationFrame(() => root.classList.add('dash-ready'));
+    }
+
+    function gananciaTone(n) {
+        if (!Number.isFinite(n) || Math.abs(n) < 1) return 'flat';
+        return n > 0 ? 'pos' : 'neg';
     }
 
     function emptyOnboarding() {
         return `
-            <section class="dash-hero dash-hero-empty">
+            <section class="dash-hero dash-hero-empty dash-anim">
                 <div class="dash-hero-brand">Ventas Meli</div>
                 <p class="dash-hero-label">Tu cockpit de lotes</p>
-                <div class="dash-hero-value">Empieza aquí</div>
+                <div class="dash-hero-value flat">Empieza aquí</div>
                 <p class="dash-hero-sub">
                     Registra tu primer lote o importa un Excel para ver ganancia,
                     capital atrapado y qué hacer hoy.
                 </p>
                 <div class="dash-hero-actions">
                     <button type="button" class="btn primary" data-dash-new>+ Nuevo lote</button>
-                    <button type="button" class="btn" data-dash-import>Importar Excel</button>
+                    <button type="button" class="dash-text-link" data-dash-import>Importar Excel</button>
                 </div>
             </section>
-            <section class="dash-panel">
-                <div class="dash-section-head">
-                    <h3>Qué verás en Inicio</h3>
-                    <p class="muted small">Cuando tengas datos, esta pestaña responde en 10 segundos</p>
-                </div>
+            <section class="dash-onboard">
+                <h3>Qué verás en Inicio</h3>
                 <ul class="dash-onboard-list">
                     <li><strong>Ganancia realizada</strong> — si el negocio va bien o mal</li>
                     <li><strong>Dinero en juego</strong> — capital, inventario y cash in</li>
@@ -227,11 +236,9 @@ const DashboardView = (() => {
 
     function actionRow(a) {
         const cue = ACTION_CUE[a.kind] || 'Revisar';
-        const sevLbl = a.severity === 'high' ? 'Alta' : a.severity === 'medium' ? 'Media' : 'Idea';
         const short = shortActionText(a);
         return `
             <li class="dash-action sev-${a.severity}" data-dash-lote="${esc(a.lote?.id || '')}">
-                <span class="dash-action-sev">${sevLbl}</span>
                 <div class="dash-action-body">
                     <div class="dash-action-title">${esc(a.title)}</div>
                     <div class="dash-action-text">${esc(short)}</div>
@@ -242,23 +249,14 @@ const DashboardView = (() => {
 
     function shortActionText(a) {
         const plain = stripHtmlPlain(a.text);
-        if (plain.length <= 110) return plain;
-        return plain.slice(0, 107).trimEnd() + '…';
+        if (plain.length <= 96) return plain;
+        return plain.slice(0, 93).trimEnd() + '…';
     }
 
     function stripHtmlPlain(html) {
         const d = document.createElement('div');
         d.innerHTML = html || '';
         return (d.textContent || '').replace(/\s+/g, ' ').trim();
-    }
-
-    function stat(label, value, sub) {
-        return `
-            <div class="dash-stat">
-                <div class="dash-stat-label">${label}</div>
-                <div class="dash-stat-value">${value}</div>
-                <div class="dash-stat-sub">${sub}</div>
-            </div>`;
     }
 
     function pulseSeg(cls, n, total) {
@@ -290,6 +288,7 @@ const DashboardView = (() => {
     }
 
     function bind(root) {
+        root.classList.remove('dash-ready');
         root.querySelectorAll('[data-dash-go]').forEach(btn => {
             btn.addEventListener('click', e => {
                 e.stopPropagation();
