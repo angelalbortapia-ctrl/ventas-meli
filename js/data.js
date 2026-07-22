@@ -493,7 +493,7 @@ window.State = {
     lotes: [],
     settings: {},
     ui: {},
-    view: 'lotes',
+    view: 'dashboard',
     subscribers: new Set(),
     subscribe(fn) { this.subscribers.add(fn); return () => this.subscribers.delete(fn); },
     notify() { this.subscribers.forEach(fn => fn()); },

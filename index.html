@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=21">
+    <link rel="stylesheet" href="css/styles.css?v=23">
 </head>
 <body>
 
@@ -31,14 +31,14 @@
     <div class="sb-section">
         <h5>Vistas</h5>
         <nav class="sb-nav" role="tablist">
-            <button class="sb-item active" data-tab="lotes" role="tab" aria-selected="true">
+            <button class="sb-item active" data-tab="dashboard" role="tab" aria-selected="true">
+                <span class="sb-icon">📊</span>
+                <span>Dashboard</span>
+            </button>
+            <button class="sb-item" data-tab="lotes" role="tab" aria-selected="false">
                 <span class="sb-icon">📦</span>
                 <span>Productos</span>
                 <span class="badge-count" id="sb-count-lotes">0</span>
-            </button>
-            <button class="sb-item" data-tab="dashboard" role="tab" aria-selected="false">
-                <span class="sb-icon">📊</span>
-                <span>Dashboard</span>
             </button>
             <button class="sb-item" data-tab="insights" role="tab" aria-selected="false">
                 <span class="sb-icon">💡</span>
@@ -93,7 +93,7 @@
             <div class="tb-crumb">
                 <span class="tb-crumb-root">Ventas Meli</span>
                 <span class="tb-sep">›</span>
-                <span class="curr" id="tb-current">Productos</span>
+                <span class="curr" id="tb-current">Inicio</span>
             </div>
         </div>
         <div class="topbar-right">
@@ -109,64 +109,14 @@
     <!-- Content -->
     <div class="content">
 
-        <!-- ============ LOTES ============ -->
-        <section class="view" id="view-lotes" aria-labelledby="tab-lotes">
-            <div id="lotes-canvas"></div>
+        <!-- ============ DASHBOARD (primera vista) ============ -->
+        <section class="view" id="view-dashboard" aria-labelledby="tab-dashboard">
+            <div id="dashboard-canvas"></div>
         </section>
 
-        <!-- ============ DASHBOARD ============ -->
-        <section class="view" id="view-dashboard" hidden>
-            <div class="view-head">
-                <div>
-                    <h2>Dashboard</h2>
-                    <p class="muted">Vista consolidada del negocio en tiempo real.</p>
-                </div>
-            </div>
-
-            <div class="kpi-grid" id="kpi-grid"></div>
-
-            <div class="dashboard-grid">
-                <div class="card">
-                    <h3>Rotación por SKU</h3>
-                    <table class="mini-table" id="rotacion-table">
-                        <thead>
-                            <tr>
-                                <th>SKU</th>
-                                <th>Producto</th>
-                                <th class="num">Compradas</th>
-                                <th class="num">Vendidas</th>
-                                <th>Rotación</th>
-                                <th>Diagnóstico</th>
-                            </tr>
-                        </thead>
-                        <tbody id="rotacion-tbody"></tbody>
-                    </table>
-                </div>
-
-                <div class="stack">
-                    <div class="card">
-                        <h3>Distribución de estrategia</h3>
-                        <div id="strategy-chart" class="strategy-chart"></div>
-                    </div>
-                    <div class="card">
-                        <h3>Top rentabilidad</h3>
-                        <table class="mini-table" id="top-table">
-                            <thead>
-                                <tr>
-                                    <th>Producto</th>
-                                    <th class="num">Utilidad</th>
-                                    <th class="num">Margen</th>
-                                </tr>
-                            </thead>
-                            <tbody id="top-tbody"></tbody>
-                        </table>
-                    </div>
-                    <div class="card">
-                        <h3>Alertas activas</h3>
-                        <div id="alerts-summary"></div>
-                    </div>
-                </div>
-            </div>
+        <!-- ============ LOTES ============ -->
+        <section class="view" id="view-lotes" hidden aria-labelledby="tab-lotes">
+            <div id="lotes-canvas"></div>
         </section>
 
         <!-- ============ INSIGHTS ============ -->
@@ -257,14 +207,14 @@
 
 <!-- Bottom tabs (iPhone) -->
 <nav class="mobile-tabbar" id="mobile-tabbar" aria-label="Navegación principal">
-    <button type="button" class="mobile-tab active" data-tab="lotes">
+    <button type="button" class="mobile-tab active" data-tab="dashboard">
+        <span class="mobile-tab-icon">📊</span>
+        <span>Inicio</span>
+    </button>
+    <button type="button" class="mobile-tab" data-tab="lotes">
         <span class="mobile-tab-icon">📦</span>
         <span>Productos</span>
         <span class="mobile-tab-badge" id="m-tab-lotes" hidden>0</span>
-    </button>
-    <button type="button" class="mobile-tab" data-tab="dashboard">
-        <span class="mobile-tab-icon">📊</span>
-        <span>Dashboard</span>
     </button>
     <button type="button" class="mobile-tab" data-tab="insights">
         <span class="mobile-tab-icon">💡</span>
@@ -367,16 +317,16 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/calc.js?v=7"></script>
-<script src="js/data.js?v=7"></script>
+<script src="js/data.js?v=8"></script>
 <script src="js/excel.js?v=3"></script>
 <script src="js/ui.js?v=3"></script>
-<script src="js/palette.js?v=3"></script>
+<script src="js/palette.js?v=4"></script>
 <script src="js/insights.js?v=3"></script>
 <script src="js/lotes.js?v=16"></script>
-<script src="js/dashboard.js?v=5"></script>
+<script src="js/dashboard.js?v=7"></script>
 <script src="js/sync.js?v=4"></script>
 <script src="js/settings.js?v=7"></script>
-<script src="js/app.js?v=12"></script>
+<script src="js/app.js?v=13"></script>
 
 </body>
 </html>

@@ -15,7 +15,7 @@ const Palette = (() => {
     function baseActions(App) {
         return [
             { section: 'Navegación', icon: '📦', title: 'Ir a Productos', keys: 'Lotes', run: () => App.switchTab('lotes') },
-            { section: 'Navegación', icon: '📊', title: 'Ir a Dashboard', keys: 'KPIs métricas', run: () => App.switchTab('dashboard') },
+            { section: 'Navegación', icon: '📊', title: 'Ir a Inicio', keys: 'Dashboard KPIs métricas', run: () => App.switchTab('dashboard') },
             { section: 'Navegación', icon: '💡', title: 'Ir a Insights', keys: 'Alertas recomendaciones', run: () => App.switchTab('insights') },
             { section: 'Navegación', icon: '⚙️', title: 'Ir a Ajustes', keys: 'Comisiones IVA umbral', run: () => App.switchTab('settings') },
 

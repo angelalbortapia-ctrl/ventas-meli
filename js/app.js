@@ -11,8 +11,8 @@
 const App = (() => {
 
     const TAB_LABELS = {
+        dashboard: 'Inicio',
         lotes: 'Productos',
-        dashboard: 'Dashboard',
         insights: 'Insights',
         settings: 'Ajustes',
     };
@@ -374,7 +374,7 @@ const App = (() => {
         // Más tarde: da tiempo a Sync.init() a restaurar sesión Supabase
         setTimeout(() => maybeRemindBackup(), 2200);
 
-        switchTab('lotes');
+        switchTab('dashboard');
     }
 
     if (document.readyState === 'loading') {
