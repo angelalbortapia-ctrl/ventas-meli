@@ -173,7 +173,18 @@ const App = (() => {
         UI.toast('Excel exportado');
     }
 
+    /** Con Supabase logueado, el respaldo en la nube sustituye al nag de JSON. */
+    function cloudBackupActive() {
+        const st = window.Sync?.getStatus?.()?.state;
+        return st === 'synced' || st === 'syncing' || st === 'signed_in';
+    }
+
     function markBackupNeeded() {
+        if (cloudBackupActive()) {
+            // La nube recibe el push; no marcar dirty ni molestar
+            refreshBackupHint();
+            return;
+        }
         window.State.ui = { ...window.State.ui, backupDirty: true };
         window.State.saveUI();
         refreshBackupHint();
@@ -211,6 +222,13 @@ const App = (() => {
     }
 
     async function maybeRemindBackup() {
+        // Esperar un momento a que Sync termine de bootear sesión
+        await new Promise(r => setTimeout(r, 400));
+        if (cloudBackupActive()) {
+            // Limpiar flag viejo para que no reaparezca
+            if (window.State.ui?.backupDirty) markBackupDone();
+            return;
+        }
         const ui = window.State.ui || {};
         const last = ui.lastBackupAt ? new Date(ui.lastBackupAt) : null;
         const days = last ? Math.floor((Date.now() - last.getTime()) / 86400000) : 999;
@@ -348,7 +366,8 @@ const App = (() => {
         }
 
         refreshBackupHint();
-        setTimeout(() => maybeRemindBackup(), 1200);
+        // Más tarde: da tiempo a Sync.init() a restaurar sesión Supabase
+        setTimeout(() => maybeRemindBackup(), 2200);
 
         switchTab('lotes');
     }
