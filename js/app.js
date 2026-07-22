@@ -36,9 +36,31 @@ const App = (() => {
         else if (tab === 'lotes') LotesView.render();
     }
 
+    function closeMobileNav() {
+        document.body.classList.remove('nav-open');
+        const menu = document.getElementById('tb-menu');
+        if (menu) menu.setAttribute('aria-expanded', 'false');
+        const overlay = document.getElementById('nav-overlay');
+        if (overlay) overlay.hidden = true;
+    }
+
+    function openMobileNav() {
+        document.body.classList.add('nav-open');
+        const menu = document.getElementById('tb-menu');
+        if (menu) menu.setAttribute('aria-expanded', 'true');
+        const overlay = document.getElementById('nav-overlay');
+        if (overlay) overlay.hidden = false;
+    }
+
     function initSidebar() {
         document.querySelectorAll('.sb-item[data-tab]').forEach(el => {
-            el.addEventListener('click', () => switchTab(el.dataset.tab));
+            el.addEventListener('click', () => {
+                switchTab(el.dataset.tab);
+                closeMobileNav();
+            });
+        });
+        ['btn-import', 'btn-export', 'btn-backup'].forEach(id => {
+            document.getElementById(id)?.addEventListener('click', () => closeMobileNav());
         });
     }
 
@@ -56,6 +78,16 @@ const App = (() => {
         if (bell) bell.addEventListener('click', () => switchTab('insights'));
         refreshAlertBadge();
         window.State.subscribe(refreshAlertBadge);
+
+        const menu = document.getElementById('tb-menu');
+        const overlay = document.getElementById('nav-overlay');
+        if (menu) {
+            menu.addEventListener('click', () => {
+                if (document.body.classList.contains('nav-open')) closeMobileNav();
+                else openMobileNav();
+            });
+        }
+        if (overlay) overlay.addEventListener('click', closeMobileNav);
     }
 
     function refreshAlertBadge() {

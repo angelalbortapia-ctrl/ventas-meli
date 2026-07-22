@@ -16,7 +16,12 @@ const LotesView = (() => {
         sort: { key: 'utilidad', dir: 'desc' },
         detailTab: 'renta',
         margenObjetivoPct: 25,   // % editable en Sugerencias → compra ideal
+        mobileDetail: false,     // iPhone: lista ↔ detalle a pantalla completa
     };
+
+    function isMobile() {
+        return window.matchMedia('(max-width: 768px)').matches;
+    }
 
     let editing = null;
     let shellMounted = false;
@@ -246,15 +251,24 @@ const LotesView = (() => {
         const nVar = window.State.lotes.length;
         const subEl = document.getElementById('lotes-header-sub');
         if (subEl) {
-            subEl.textContent = nProd === nTotal
-                ? `${nProd} producto${nProd === 1 ? '' : 's'} · ${nVar} variante${nVar === 1 ? '' : 's'} · Arrastra la línea vertical para redimensionar`
-                : `${nProd} de ${nTotal} productos · ${nVar} variantes · Arrastra la línea vertical para redimensionar`;
+            subEl.textContent = isMobile()
+                ? (nProd === nTotal
+                    ? `${nProd} producto${nProd === 1 ? '' : 's'} · ${nVar} variante${nVar === 1 ? '' : 's'}`
+                    : `${nProd} de ${nTotal} productos`)
+                : (nProd === nTotal
+                    ? `${nProd} producto${nProd === 1 ? '' : 's'} · ${nVar} variante${nVar === 1 ? '' : 's'} · Arrastra la línea vertical para redimensionar`
+                    : `${nProd} de ${nTotal} productos · ${nVar} variantes · Arrastra la línea vertical para redimensionar`);
         }
 
         document.getElementById('lotes-stats').innerHTML = renderStats();
         document.getElementById('lotes-chips').innerHTML = renderChips();
         document.getElementById('lotes-list').innerHTML = renderList(list);
         document.getElementById('lotes-detail').innerHTML = renderDetail(family, variantRow);
+
+        const split = document.getElementById('lotes-split');
+        if (split) {
+            split.classList.toggle('mobile-detail-open', isMobile() && !!local.mobileDetail && !!family);
+        }
 
         bindDynamicEvents();
 
@@ -466,6 +480,7 @@ const LotesView = (() => {
 
         return `
             <div class="lotes-detail-head">
+                <button type="button" class="btn ghost btn-sm mobile-back" data-action="mobile-back" aria-label="Volver a la lista">← Productos</button>
                 <div class="lotes-detail-topline">
                     <div class="lotes-detail-meta">
                         <code>${esc(lote.sku)}</code>
@@ -972,12 +987,22 @@ const LotesView = (() => {
                 local.selected = row.dataset.select;
                 const fam = families().find(f => f.key === local.selected);
                 local.selectedVariant = fam ? fam.variants[0].lote.id : null;
+                if (isMobile()) local.mobileDetail = true;
                 renderContent();
             });
             row.addEventListener('dblclick', () => {
+                if (isMobile()) return;
                 const fam = families().find(f => f.key === row.dataset.select);
                 const id = fam?.variants[0]?.lote.id || local.selectedVariant;
                 if (id) openModal(id);
+            });
+        });
+
+        document.querySelectorAll('[data-action="mobile-back"]').forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                local.mobileDetail = false;
+                renderContent();
             });
         });
 
