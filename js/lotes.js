@@ -532,24 +532,10 @@ const LotesView = (() => {
                     <div class="kpi-mini-label">Stock</div>
                     <div class="kpi-mini-value editable-stock" data-edit-field="stock" data-id="${lote.id}" title="Click para editar unidades del lote">${calc.inventarioRestante}<small style="opacity:0.5">/${lote.unidades}</small></div>
                 </div>
-                ${(() => {
-                    const r = Calc.rangoCompraIdeal(lote, window.State.settings);
-                    if (!r) return `
-                        <div class="kpi-mini kpi-ideal">
-                            <div class="kpi-mini-label">Compra ideal</div>
-                            <div class="kpi-mini-value">—</div>
-                        </div>`;
-                    const verdictCls = r.verdict === 'excelente' ? 'pos' : r.verdict === 'caro' ? 'neg' : '';
-                    const verdictTxt = r.verdict === 'excelente' ? '≥30% OK'
-                        : r.verdict === 'sano' ? '20–30% OK'
-                        : r.verdict === 'caro' ? 'arriba del tope' : '';
-                    return `
-                        <div class="kpi-mini kpi-ideal" title="Costo máx. para margen 30% → 20% al precio de venta actual (ya descontando comisión, envío y SAT)">
-                            <div class="kpi-mini-label">Compra ideal</div>
-                            <div class="kpi-mini-value ${verdictCls}">${Calc.fmtMXN(r.min)}–${Calc.fmtMXN(r.max)}</div>
-                            <div class="kpi-mini-hint">para 30%–20% · hoy ${Calc.fmtMXN(r.actual)} ${verdictTxt}</div>
-                        </div>`;
-                })()}
+                <div class="kpi-mini">
+                    <div class="kpi-mini-label">ROI</div>
+                    <div class="kpi-mini-value">${Calc.fmtPct(calc.roi)}</div>
+                </div>
             </div>
 
             <nav class="detail-tabs" role="tablist">
