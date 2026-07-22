@@ -152,12 +152,13 @@ const UI = (() => {
                         <ul>${sampleHTML}</ul>
                     </div>
                 ` : ''}
-                <p class="dlg-msg muted small">Elige cómo integrarlos. <strong>Fusionar por SKU</strong> actualiza los existentes sin duplicar ni borrar ventas.</p>
+                <p class="dlg-msg muted small"><strong>Catálogo</strong> actualiza precios/datos sin pisar stock ni costo. <strong>Completo</strong> también trae unidades/costo del Excel. Las ventas de la hoja Ventas se importan si existen.</p>
             `,
             actions: [
                 { label: 'Cancelar', variant: 'ghost', value: null },
-                { label: 'Fusionar por SKU', variant: '', value: 'merge' },
-                { label: 'Reemplazar todo', variant: 'primary', value: 'replace' },
+                { label: 'Fusionar catálogo', variant: 'primary', value: 'merge' },
+                { label: 'Fusionar completo', variant: '', value: 'merge-full' },
+                { label: 'Reemplazar todo', variant: 'danger', value: 'replace' },
             ],
         });
     }

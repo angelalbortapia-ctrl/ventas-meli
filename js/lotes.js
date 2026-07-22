@@ -573,6 +573,18 @@ const LotesView = (() => {
     }
 
     function renderTabRentabilidad(lote, calc) {
+        const adsCls = calc.adsStatus === 'over' ? 'neg'
+            : calc.adsStatus === 'near' ? 'warn'
+            : calc.adsStatus === 'ok' ? 'pos' : '';
+        const adsMsg = {
+            ok: 'Dentro del tope CPA',
+            near: 'Cerca del tope CPA',
+            over: 'Por arriba del tope CPA',
+            sin_ventas: 'Hay Ads sin ventas aún',
+            sin_tope: 'Sin tope (no Escalar/Mantener)',
+            na: 'Sin gasto Ads registrado',
+        }[calc.adsStatus] || '';
+
         return `
             <h4>Desglose por unidad</h4>
             <div class="breakdown">
@@ -588,6 +600,21 @@ const LotesView = (() => {
                     <span class="val ${calc.utilidad>=0?'pos':'neg'}">${Calc.fmtMXN(calc.utilidad)}</span>
                 </div>
             </div>
+
+            <h4 style="margin-top:18px">Ads vs tope CPA</h4>
+            <div class="breakdown ads-panel">
+                <div class="breakdown-row">
+                    <span class="label">Gasto Ads acumulado</span>
+                    <span class="val editable-ads" data-edit-field="gastoAds" data-id="${lote.id}" title="Click para editar">${Calc.fmtMXN(calc.gastoAds)}</span>
+                </div>
+                <div class="breakdown-row"><span class="label">Tope CPA / venta</span><span class="val">${calc.topeCPA ? Calc.fmtMXN(calc.topeCPA) : '—'}</span></div>
+                <div class="breakdown-row"><span class="label">Ads / venta realizada</span><span class="val ${adsCls}">${calc.vendidas > 0 ? Calc.fmtMXN(calc.adsPorVenta) : '—'}</span></div>
+                <div class="breakdown-row total">
+                    <span class="label">Diagnóstico Ads</span>
+                    <span class="val ${adsCls}">${adsMsg}</span>
+                </div>
+            </div>
+            <p class="muted small">Tope = utilidad × % CPA de Ajustes. Registra el gasto real de Product Ads de este SKU.</p>
         `;
     }
 
@@ -1069,8 +1096,8 @@ const LotesView = (() => {
             });
         });
 
-        // Inline edit (price, stock)
-        document.querySelectorAll('.editable-price, .editable-stock').forEach(el => {
+        // Inline edit (price, stock, ads)
+        document.querySelectorAll('.editable-price, .editable-stock, .editable-ads').forEach(el => {
             el.addEventListener('click', async () => {
                 const id = el.dataset.id;
                 const field = el.dataset.editField;
@@ -1086,6 +1113,7 @@ const LotesView = (() => {
         const opts = {
             precio: { title: 'Nuevo precio de venta', message: `Actual: ${Calc.fmtMXN(lote.precio)}`, defaultValue: String(lote.precio) },
             stock:  { title: 'Nuevas unidades totales del lote', message: `Actual: ${lote.unidades} (${lote.vendidas || 0} vendidas)`, defaultValue: String(lote.unidades) },
+            gastoAds: { title: 'Gasto Ads acumulado (MXN)', message: `Actual: ${Calc.fmtMXN(lote.gastoAds || 0)}`, defaultValue: String(lote.gastoAds || 0) },
         }[field];
         if (!opts) return;
         const raw = await UI.prompt(opts);
@@ -1095,11 +1123,15 @@ const LotesView = (() => {
 
         if (field === 'precio') lote.precio = n;
         else if (field === 'stock') lote.unidades = Math.round(n);
+        else if (field === 'gastoAds') lote.gastoAds = Math.round(n * 100) / 100;
 
         window.State.lotes = Data.upsertLote(window.State.lotes, lote);
         window.State.save();
         renderContent();
-        UI.toast(field === 'precio' ? 'Precio actualizado' : 'Stock actualizado');
+        const msg = field === 'precio' ? 'Precio actualizado'
+            : field === 'stock' ? 'Stock actualizado'
+            : 'Gasto Ads actualizado';
+        UI.toast(msg);
     }
 
     // ---- Imagen de producto (familia / productId) ----------------------
@@ -1549,7 +1581,7 @@ const LotesView = (() => {
         ['f-tipo','tipo'], ['f-fecha','fecha'], ['f-categoria','categoria'],
         ['f-costo','costo'], ['f-unidades','unidades'],
         ['f-precio-comp','precioCompetencia'], ['f-precio','precio'],
-        ['f-envio','envio'], ['f-estatus','estatus'],
+        ['f-envio','envio'], ['f-gasto-ads','gastoAds'], ['f-estatus','estatus'],
     ];
 
     function openModal(id = null) {
@@ -1602,7 +1634,7 @@ const LotesView = (() => {
             fecha: new Date().toISOString().slice(0, 10),
             categoria: '', notas: '',
             costo: 0, unidades: 1, precioCompetencia: null,
-            precio: 0, envio: 0, vendidas: 0, estatus: '✅ Activa / En Venta',
+            precio: 0, envio: 0, gastoAds: 0, vendidas: 0, estatus: '✅ Activa / En Venta',
             ventas: [], historial: [],
         };
     }
@@ -1632,8 +1664,10 @@ const LotesView = (() => {
             precioCompetencia: parseFloat(document.getElementById('f-precio-comp').value) || null,
             precio: parseFloat(document.getElementById('f-precio').value) || 0,
             envio: parseFloat(document.getElementById('f-envio').value) || 0,
+            gastoAds: parseFloat(document.getElementById('f-gasto-ads')?.value) || 0,
             ventas: prev?.ventas || [],
             historial: prev?.historial || [],
+            imagen: prev?.imagen || '',
             estatus: document.getElementById('f-estatus').value,
             notas: prev?.notas || '',
         };

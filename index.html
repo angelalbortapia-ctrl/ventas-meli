@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=20">
+    <link rel="stylesheet" href="css/styles.css?v=21">
 </head>
 <body>
 
@@ -223,15 +223,20 @@
                     <h3>Comisiones Mercado Libre</h3>
                     <label><span>Comisión Clásica (%)</span><input type="number" step="0.01" id="set-com-clasica"></label>
                     <label><span>Comisión Premium (%)</span><input type="number" step="0.01" id="set-com-premium"></label>
-                    <label><span>Cargo fijo si Precio &lt; $299 (MXN)</span><input type="number" step="0.01" id="set-cargo-fijo"></label>
+                    <label><span>Cargo fijo si Precio &lt; umbral (MXN)</span><input type="number" step="0.01" id="set-cargo-fijo"></label>
                     <label><span>Precio umbral para cargo fijo (MXN)</span><input type="number" step="1" id="set-umbral-cargo"></label>
+                    <p class="muted small">Default cargo fijo ≈ $35 (ajusta al valor vigente de tu tipo de publicación en ML).</p>
                 </div>
 
                 <div class="card">
                     <h3>Retenciones SAT</h3>
+                    <label class="check-row">
+                        <input type="checkbox" id="set-resico">
+                        <span>Estoy en RESICO (ISR 1% en lugar de 2.5%)</span>
+                    </label>
                     <label><span>Retención IVA (%)</span><input type="number" step="0.01" id="set-iva"></label>
                     <label><span>Retención ISR (%)</span><input type="number" step="0.01" id="set-isr"></label>
-                    <p class="muted small">Se calculan sobre el precio sin IVA (precio ÷ 1.16). ISR sin RFC = 2.5%; con RFC en RESICO = 1%.</p>
+                    <p class="muted small">Se calculan sobre el precio sin IVA (precio ÷ 1.16). Con RESICO activo el ISR se fija en 1% automáticamente.</p>
                 </div>
 
                 <div class="card">
@@ -329,7 +334,9 @@
                     <label><span>Precio de venta (MXN)</span><input type="number" step="0.01" id="f-precio"></label>
                     <label><span>Precio competencia (MXN)</span><input type="number" step="0.01" id="f-precio-comp" placeholder="Opcional"></label>
                     <label><span>Envío al cliente (MXN)</span><input type="number" step="0.01" id="f-envio"></label>
+                    <label><span>Gasto Ads acumulado (MXN)</span><input type="number" step="0.01" id="f-gasto-ads" min="0" placeholder="0"></label>
                 </div>
+                <p class="muted small" style="margin-top:8px">El gasto Ads se compara vs el tope CPA por venta (en Rentabilidad).</p>
                 <div class="calc-preview" id="calc-preview"></div>
             </div>
 
@@ -359,17 +366,17 @@
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/calc.js?v=6"></script>
-<script src="js/data.js?v=6"></script>
-<script src="js/excel.js?v=2"></script>
-<script src="js/ui.js?v=2"></script>
+<script src="js/calc.js?v=7"></script>
+<script src="js/data.js?v=7"></script>
+<script src="js/excel.js?v=3"></script>
+<script src="js/ui.js?v=3"></script>
 <script src="js/palette.js?v=3"></script>
-<script src="js/insights.js?v=2"></script>
-<script src="js/lotes.js?v=14"></script>
+<script src="js/insights.js?v=3"></script>
+<script src="js/lotes.js?v=15"></script>
 <script src="js/dashboard.js?v=5"></script>
-<script src="js/sync.js?v=3"></script>
-<script src="js/settings.js?v=6"></script>
-<script src="js/app.js?v=11"></script>
+<script src="js/sync.js?v=4"></script>
+<script src="js/settings.js?v=7"></script>
+<script src="js/app.js?v=12"></script>
 
 </body>
 </html>

@@ -19,14 +19,23 @@ const Calc = (() => {
     const DEFAULT_SETTINGS = {
         comisionClasica: 0.15,
         comisionPremium: 0.20,
-        cargoFijo: 0,
+        // Cargo fijo aprox. ML MX (publicaciones bajo umbral). Ajusta en Ajustes.
+        cargoFijo: 35,
         umbralCargoFijo: 299,
         retencionIVA: 0.08,
-        retencionISR: 0.025,
+        retencionISR: 0.025,      // sin RFC
+        resico: false,            // true → ISR 1% (RESICO con RFC)
         umbralLiquidar: 50,
         umbralEscalar: 80,
         topeCPA: 0.40,
     };
+
+    function effectiveSettings(settings = {}) {
+        const s = { ...DEFAULT_SETTINGS, ...settings };
+        // RESICO manda sobre el slider ISR si está activo
+        if (s.resico) s.retencionISR = 0.01;
+        return s;
+    }
 
     function comisionPct(tipo, s = DEFAULT_SETTINGS) {
         const t = String(tipo || '').toLowerCase();
@@ -36,7 +45,7 @@ const Calc = (() => {
 
     /** Costo máximo de adquisición para lograr un margen objetivo al precio de lista. */
     function costoIdeal(lote, margenObjetivo = 0.25, settings = DEFAULT_SETTINGS) {
-        const s = { ...DEFAULT_SETTINGS, ...settings };
+        const s = effectiveSettings(settings);
         const precio = Number(lote.precio) || 0;
         if (precio <= 0) return null;
         const pctComision = comisionPct(lote.tipo, s);
@@ -58,7 +67,7 @@ const Calc = (() => {
      * Partiendo del precio de venta, descuenta fees (comisión, cargo fijo, envío, SAT).
      */
     function analisisCostoIdeal(lote, margenObjetivo = 0.25, settings = DEFAULT_SETTINGS) {
-        const s = { ...DEFAULT_SETTINGS, ...settings };
+        const s = effectiveSettings(settings);
         const precio = Number(lote.precio) || 0;
         if (precio <= 0) return null;
         const ideal = costoIdeal(lote, margenObjetivo, s);
@@ -115,7 +124,7 @@ const Calc = (() => {
 
     /** Utilidad neta por unidad a un precio de venta dado (fees ML + SAT). */
     function utilidadAtPrice(lote, precioVenta, settings = DEFAULT_SETTINGS) {
-        const s = { ...DEFAULT_SETTINGS, ...settings };
+        const s = effectiveSettings(settings);
         const costo = Number(lote.costo) || 0;
         const precio = Number(precioVenta) || 0;
         const envio = Number(lote.envio) || 0;
@@ -145,13 +154,14 @@ const Calc = (() => {
     }
 
     function computeLote(lote, settings = DEFAULT_SETTINGS) {
-        const s = { ...DEFAULT_SETTINGS, ...settings };
+        const s = effectiveSettings(settings);
 
         const costo = Number(lote.costo) || 0;
         const precio = Number(lote.precio) || 0;
         const unidades = Number(lote.unidades) || 0;
         const envio = Number(lote.envio) || 0;
         const vendidas = syncVendidas(lote);
+        const gastoAds = Math.max(0, Number(lote.gastoAds) || 0);
 
         const unit = utilidadAtPrice(lote, precio, s);
         const { utilidad, margen, pctComision, comisionVariable, cargoFijo, retIVA, retISR } = unit;
@@ -189,7 +199,21 @@ const Calc = (() => {
         else if (utilidad >= s.umbralEscalar) estrategia = 'ESCALAR';
         else estrategia = 'MANTENER';
 
-        const topeCPA = estrategia === 'ESCALAR' ? utilidad * s.topeCPA : 0;
+        const topeCPA = (estrategia === 'ESCALAR' || estrategia === 'MANTENER')
+            ? utilidad * s.topeCPA
+            : 0;
+        // Ads: gasto total del SKU vs tope por unidad × ventas realizadas
+        const adsPorVenta = vendidas > 0 ? gastoAds / vendidas : (gastoAds > 0 ? gastoAds : 0);
+        const topeAdsAcumulado = topeCPA * Math.max(vendidas, 0);
+        let adsStatus = 'na'; // sin tope o sin gasto
+        if (topeCPA > 0 && (gastoAds > 0 || vendidas > 0)) {
+            if (vendidas === 0 && gastoAds > 0) adsStatus = 'sin_ventas';
+            else if (adsPorVenta > topeCPA * 1.05) adsStatus = 'over';
+            else if (adsPorVenta > topeCPA * 0.85) adsStatus = 'near';
+            else adsStatus = 'ok';
+        } else if (gastoAds > 0 && topeCPA <= 0) {
+            adsStatus = 'sin_tope';
+        }
 
         return {
             pctComision,
@@ -208,6 +232,10 @@ const Calc = (() => {
             valorInventario,
             estrategia,
             topeCPA,
+            gastoAds,
+            adsPorVenta,
+            topeAdsAcumulado,
+            adsStatus,
             vendidas,
             estatusKey: est,
         };
@@ -384,6 +412,7 @@ const Calc = (() => {
 
     return {
         DEFAULT_SETTINGS,
+        effectiveSettings,
         computeLote,
         utilidadAtPrice,
         costoIdeal,

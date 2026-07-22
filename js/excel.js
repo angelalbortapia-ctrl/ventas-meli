@@ -13,7 +13,7 @@ const ExcelIO = (() => {
         'Envío al Cliente', 'Retención IVA SAT (8%)', 'Retención ISR SAT (2.5%)',
         'Utilidad Neta Real', 'Margen Neto %', 'ROI Unitario %',
         'Inventario Restante', 'Unidades Vendidas', 'Estatus Publicación',
-        'Estrategia', 'Tope Máximo CPA (Ads)',
+        'Estrategia', 'Tope Máximo CPA (Ads)', 'Gasto Ads (MXN)',
     ];
 
     function importFile(file) {
@@ -22,14 +22,18 @@ const ExcelIO = (() => {
             reader.onload = e => {
                 try {
                     const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
-                    const sheetName = pickSheet(wb.SheetNames);
+                    const sheetName = pickSheet(wb.SheetNames, 'lote');
                     if (!sheetName) return reject(new Error('No se encontró la pestaña Lotes_Operaciones'));
                     const ws = wb.Sheets[sheetName];
                     const rows = XLSX.utils.sheet_to_json(ws, { defval: null });
-                    const lotes = rows
+                    let lotes = rows
                         .filter(r => r['SKU'] || r['Producto'])
                         .map(rowToLote);
-                    resolve(lotes);
+                    const ventas = readVentasSheet(wb);
+                    if (ventas.length) {
+                        lotes = Data.attachVentasBySku(lotes, ventas);
+                    }
+                    resolve({ lotes, ventasCount: ventas.length });
                 } catch (err) {
                     reject(err);
                 }
@@ -39,9 +43,34 @@ const ExcelIO = (() => {
         });
     }
 
-    function pickSheet(names) {
-        const target = names.find(n => n.toLowerCase().includes('lote'));
-        return target || names[0];
+    function pickSheet(names, needle) {
+        const target = names.find(n => n.toLowerCase().includes(needle));
+        return target || (needle === 'lote' ? names[0] : null);
+    }
+
+    function readVentasSheet(wb) {
+        const name = pickSheet(wb.SheetNames, 'venta');
+        if (!name) return [];
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: null });
+        return rows.map(r => {
+            const sku = (r['SKU'] || r['Sku'] || '').toString().trim();
+            if (!sku) return null;
+            const fechaRaw = r['Fecha'] || r['fecha'];
+            let fecha = '';
+            if (fechaRaw instanceof Date) fecha = fechaRaw.toISOString().slice(0, 10);
+            else if (typeof fechaRaw === 'string') fecha = fechaRaw.slice(0, 10);
+            else fecha = new Date().toISOString().slice(0, 10);
+            const unidades = Number(r['Unidades'] ?? r['uds'] ?? 1) || 1;
+            const precio = Number(r['Precio'] ?? r['precio'] ?? 0) || 0;
+            return {
+                id: Data.newId(),
+                sku,
+                fecha,
+                unidades,
+                precio,
+                notas: (r['Notas'] || r['notas'] || '').toString(),
+            };
+        }).filter(Boolean);
     }
 
     function rowToLote(r) {
@@ -69,6 +98,7 @@ const ExcelIO = (() => {
             precioCompetencia: num('Precio Competencia'),
             precio: num('Precio de Venta (MXN)') ?? 0,
             envio: num('Envío al Cliente') ?? 0,
+            gastoAds: num('Gasto Ads (MXN)') ?? 0,
             vendidas: num('Unidades Vendidas') ?? 0,
             estatus: (r['Estatus Publicación'] || '✅ Activa / En Venta').toString().trim(),
         };
@@ -77,7 +107,6 @@ const ExcelIO = (() => {
     function exportFile(lotes, settings, filename = 'Negocio.xlsx') {
         const wb = XLSX.utils.book_new();
 
-        // Hoja Lotes_Operaciones
         const rows = [HEADERS];
         lotes.forEach(l => {
             const c = Calc.computeLote(l, settings);
@@ -107,13 +136,13 @@ const ExcelIO = (() => {
                 l.estatus,
                 strategyLabel(c.estrategia),
                 c.topeCPA,
+                Number(l.gastoAds) || 0,
             ]);
         });
         const ws1 = XLSX.utils.aoa_to_sheet(rows);
         ws1['!cols'] = HEADERS.map(h => ({ wch: Math.max(12, Math.min(28, h.length + 2)) }));
         XLSX.utils.book_append_sheet(wb, ws1, 'Lotes_Operaciones');
 
-        // Hoja Resumen_General
         const agg = Calc.aggregate(lotes, settings);
         const resumenRows = [
             ['Capital Total Desplegado:', 'Retorno de Capital (Cash In):', 'Ganancia Neta Realizada:', 'Valor del Inventario en Bodega:', 'Margen Ponderado'],
@@ -134,7 +163,6 @@ const ExcelIO = (() => {
         const ws2 = XLSX.utils.aoa_to_sheet(resumenRows);
         XLSX.utils.book_append_sheet(wb, ws2, 'Resumen_General');
 
-        // Hoja Ventas (nueva) — solo si algún lote tiene ventas registradas
         const ventasFlat = [];
         lotes.forEach(l => {
             (l.ventas || []).forEach(v => {
@@ -158,7 +186,9 @@ const ExcelIO = (() => {
             ESCALAR: '🟢 ESCALAR',
             MANTENER: '🟡 MANTENER',
             LIQUIDAR: '🔴 LIQUIDAR',
-            AGOTADO: '🔵 AGOTADO'
+            AGOTADO: '🔵 AGOTADO',
+            PAUSADA: '⏸️ PAUSADA',
+            FINALIZADA: '❌ FINALIZADA',
         }[s] || s;
     }
 

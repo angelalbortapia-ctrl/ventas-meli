@@ -22,6 +22,10 @@ const SettingsView = (() => {
             const el = document.getElementById(id);
             if (el) el.value = toDisplay(s[key]);
         });
+        const resico = document.getElementById('set-resico');
+        if (resico) resico.checked = !!s.resico;
+        const isr = document.getElementById('set-isr');
+        if (isr) isr.disabled = !!s.resico;
         loadSyncForm();
     }
 
@@ -34,6 +38,28 @@ const SettingsView = (() => {
         window.State.settings[key] = fromDisplay(v);
         window.State.saveSettings();
         UI.toast('Ajustes guardados');
+    }
+
+    function onResicoChange() {
+        const resico = document.getElementById('set-resico');
+        const on = !!resico?.checked;
+        window.State.settings.resico = on;
+        if (on) {
+            window.State.settings.retencionISR = 0.01;
+            const isr = document.getElementById('set-isr');
+            if (isr) { isr.value = '1.00'; isr.disabled = true; }
+        } else {
+            const isr = document.getElementById('set-isr');
+            if (isr) {
+                isr.disabled = false;
+                if (parseFloat(isr.value) === 1) {
+                    isr.value = '2.50';
+                    window.State.settings.retencionISR = 0.025;
+                }
+            }
+        }
+        window.State.saveSettings();
+        UI.toast(on ? 'RESICO ON · ISR 1%' : 'RESICO OFF');
     }
 
     function syncApi() {
@@ -152,6 +178,7 @@ const SettingsView = (() => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('change', onChange);
         });
+        document.getElementById('set-resico')?.addEventListener('change', onResicoChange);
         document.getElementById('btn-reset-settings')?.addEventListener('click', () => window.App && window.App.resetSettings());
         loadIntoForm();
         initSyncUi();

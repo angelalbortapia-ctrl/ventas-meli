@@ -88,6 +88,7 @@ const Data = (() => {
             precioCompetencia: l.precioCompetencia != null && l.precioCompetencia !== '' ? Number(l.precioCompetencia) : null,
             precio: Number(l.precio) || 0,
             envio: Number(l.envio) || 0,
+            gastoAds: Math.max(0, Number(l.gastoAds) || 0),
             estatus: l.estatus || '✅ Activa / En Venta',
             imagen: typeof l.imagen === 'string' ? l.imagen : '',
             ventas,
@@ -350,11 +351,13 @@ const Data = (() => {
     }
 
     /**
-     * Merge por SKU: actualiza campos de catálogo/precio del existente;
-     * conserva id, productId, ventas e historial. SKUs nuevos se agregan.
-     * Returns { lotes, updated, added }.
+     * Merge por SKU.
+     * mode:
+     *  - 'catalog' (default): actualiza precios/catálogo; NO pisa unidades/costo/stock operativo
+     *  - 'full': también actualiza costo y unidades desde Excel
+     * Conserva id, productId, ventas, historial, imagen, gastoAds.
      */
-    function mergeBySku(existing, incoming) {
+    function mergeBySku(existing, incoming, { mode = 'catalog' } = {}) {
         const result = existing.map(l => ({ ...l }));
         let updated = 0;
         let added = 0;
@@ -363,7 +366,6 @@ const Data = (() => {
             const inc = normalize(raw, result);
             const skuKey = String(inc.sku || '').trim().toLowerCase();
             if (!skuKey) {
-                // Sin SKU: agregar como nuevo
                 result.push(normalize({ ...inc, id: newId(), ventas: [], historial: [] }, result));
                 added++;
                 return;
@@ -371,38 +373,43 @@ const Data = (() => {
             const idx = result.findIndex(x => String(x.sku || '').trim().toLowerCase() === skuKey);
             if (idx >= 0) {
                 const prev = result[idx];
-                const merged = normalize({
+                const base = {
                     ...prev,
-                    // Campos que vienen del Excel (catálogo)
                     producto: inc.producto || prev.producto,
                     variante: inc.variante || prev.variante,
                     categoria: inc.categoria || prev.categoria,
                     tipo: inc.tipo || prev.tipo,
                     fecha: inc.fecha || prev.fecha,
-                    costo: inc.costo,
-                    unidades: inc.unidades,
                     precioCompetencia: inc.precioCompetencia,
                     precio: inc.precio,
                     envio: inc.envio,
                     estatus: inc.estatus || prev.estatus,
-                    // Conservar identidad y eventos
                     id: prev.id,
                     productId: prev.productId,
                     imagen: prev.imagen || '',
+                    gastoAds: prev.gastoAds || 0,
                     ventas: prev.ventas,
                     historial: prev.historial,
-                    // vendidas se recalcula desde ventas
-                }, result);
-                result[idx] = merged;
+                };
+                if (mode === 'full') {
+                    base.costo = inc.costo;
+                    base.unidades = inc.unidades;
+                }
+                // Si incoming trae ventas (p.ej. hoja Ventas), fusionar por id
+                if (Array.isArray(inc.ventas) && inc.ventas.length) {
+                    const ids = new Set((prev.ventas || []).map(v => v.id));
+                    const extra = inc.ventas.filter(v => v.id && !ids.has(v.id));
+                    base.ventas = [...(prev.ventas || []), ...extra];
+                }
+                result[idx] = normalize(base, result);
                 updated++;
             } else {
-                // Nuevo SKU: heredar productId si el nombre ya existe
                 const sameName = result.find(s => productNameKey(s.producto) === productNameKey(inc.producto));
                 result.push(normalize({
                     ...inc,
                     id: newId(),
                     productId: sameName ? sameName.productId : inc.productId,
-                    ventas: [],
+                    ventas: Array.isArray(inc.ventas) ? inc.ventas : [],
                     historial: [],
                     vendidas: 0,
                 }, result));
@@ -411,6 +418,41 @@ const Data = (() => {
         });
 
         return { lotes: result, updated, added };
+    }
+
+    /** Adjunta ventas importadas (por SKU) a lotes existentes/nuevos. */
+    function attachVentasBySku(lotes, ventasRows = []) {
+        if (!ventasRows.length) return lotes;
+        const bySku = new Map();
+        ventasRows.forEach(v => {
+            const key = String(v.sku || '').trim().toLowerCase();
+            if (!key) return;
+            if (!bySku.has(key)) bySku.set(key, []);
+            bySku.get(key).push(v);
+        });
+        return lotes.map(l => {
+            const key = String(l.sku || '').trim().toLowerCase();
+            const rows = bySku.get(key);
+            if (!rows || !rows.length) return l;
+            const existingIds = new Set((l.ventas || []).map(x => x.id));
+            const existingSig = new Set((l.ventas || []).map(x => `${x.fecha}|${x.unidades}|${x.precio}`));
+            const add = [];
+            rows.forEach(r => {
+                const sig = `${r.fecha}|${r.unidades}|${r.precio}`;
+                if (r.id && existingIds.has(r.id)) return;
+                if (existingSig.has(sig)) return;
+                add.push({
+                    id: r.id || newId(),
+                    fecha: r.fecha || new Date().toISOString().slice(0, 10),
+                    unidades: Number(r.unidades) || 1,
+                    precio: Number(r.precio) || 0,
+                    notas: r.notas || '',
+                });
+            });
+            if (!add.length) return l;
+            const next = normalize({ ...l, ventas: [...(l.ventas || []), ...add] }, lotes);
+            return next;
+        });
     }
 
     function categorias(lotes) {
@@ -441,6 +483,7 @@ const Data = (() => {
         removeVenta,
         restockLote,
         mergeBySku,
+        attachVentasBySku,
         productNameKey,
         categorias,
     };

@@ -127,7 +127,9 @@ const App = (() => {
             const file = e.target.files[0];
             if (!file) return;
             try {
-                const lotes = await ExcelIO.importFile(file);
+                const imported = await ExcelIO.importFile(file);
+                const lotes = Array.isArray(imported) ? imported : (imported.lotes || []);
+                const ventasCount = imported.ventasCount || 0;
                 if (!lotes.length) {
                     UI.toast('El Excel no contiene lotes válidos', 'error');
                     return;
@@ -148,13 +150,16 @@ const App = (() => {
                     window.State.lotes = lotes.map(l => Data.normalize(l, []));
                     window.State.save();
                     markBackupNeeded();
-                    UI.toast(`Reemplazado: ${lotes.length} lote(s)`);
-                } else if (choice === 'merge') {
-                    const { lotes: merged, updated, added } = Data.mergeBySku(window.State.lotes, lotes);
-                    window.State.lotes = merged;
+                    UI.toast(`Reemplazado: ${lotes.length} lote(s)${ventasCount ? ` · ${ventasCount} venta(s)` : ''}`);
+                } else if (choice === 'merge' || choice === 'merge-full') {
+                    const mode = choice === 'merge-full' ? 'full' : 'catalog';
+                    const { lotes: merged, updated, added } = Data.mergeBySku(window.State.lotes, lotes, { mode });
+                    window.State.lotes = Data.attachVentasBySku(merged, lotes.flatMap(l =>
+                        (l.ventas || []).map(v => ({ ...v, sku: l.sku }))
+                    ));
                     window.State.save();
                     markBackupNeeded();
-                    UI.toast(`Merge por SKU: ${updated} actualizado(s), ${added} nuevo(s)`);
+                    UI.toast(`Merge (${mode === 'catalog' ? 'catálogo' : 'completo'}): ${updated} act. · ${added} nuevos${ventasCount ? ` · ${ventasCount} ventas` : ''}`);
                 }
             } catch (err) {
                 console.error(err);

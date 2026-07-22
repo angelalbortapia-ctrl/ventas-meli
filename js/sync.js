@@ -13,8 +13,14 @@ const Sync = (() => {
     let pushing = false;
     let applyingRemote = false;
     let lastRemoteAt = null;
+    let localDirtyAt = 0;       // Date.now() de último save local pendiente de confirmar en nube
+    let conflictBusy = false;   // evita diálogos apilados
     let status = { state: 'off', detail: 'Sin configurar', email: '' };
     const listeners = new Set();
+
+    function markLocalDirty() {
+        localDirtyAt = Date.now();
+    }
 
     function loadConfig() {
         try {
@@ -247,15 +253,76 @@ const Sync = (() => {
         if (applyingRemote) return;
         if (!client) return;
         if (status.state !== 'signed_in' && status.state !== 'synced' && status.state !== 'syncing') return;
+        markLocalDirty();
         clearTimeout(pushTimer);
         pushTimer = setTimeout(() => { pushNow().catch(console.warn); }, 600);
     }
 
-    async function pushNow() {
+    async function resolveConflict(row) {
+        if (!window.UI || conflictBusy) return 'remote';
+        conflictBusy = true;
+        try {
+            const choice = await UI.dialog({
+                title: 'Conflicto de sincronización',
+                body: `<p class="dlg-msg">Hay cambios en <strong>este dispositivo</strong> y también en la <strong>nube</strong> (otro dispositivo). ¿Qué quieres conservar?</p>
+                       <p class="dlg-msg muted small">Tip: usa la Mac como fuente principal; evita editar el mismo lote en ambos a la vez.</p>`,
+                actions: [
+                    { label: 'Quedarme con este dispositivo', variant: 'primary', value: 'local' },
+                    { label: 'Usar la nube (descartar local)', variant: 'danger', value: 'remote' },
+                ],
+            });
+            return choice === 'local' ? 'local' : 'remote';
+        } finally {
+            conflictBusy = false;
+        }
+    }
+
+    async function handleIncomingRemote(row, { fromRealtime = false } = {}) {
+        if (!row || pushing || applyingRemote) return;
+        if (row.updated_at && lastRemoteAt && row.updated_at === lastRemoteAt) return;
+
+        const remoteTs = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+        const knownTs = lastRemoteAt ? new Date(lastRemoteAt).getTime() : 0;
+        // Cambios locales sin confirmar en nube (o más recientes que lo último aplicado)
+        const hasLocalEdits = localDirtyAt > 0 && localDirtyAt >= knownTs - 500;
+
+        if (hasLocalEdits && remoteTs > knownTs) {
+            const choice = await resolveConflict(row);
+            if (choice === 'local') {
+                await pushNow({ force: true });
+                return;
+            }
+        }
+        applyRemote(row, { silent: fromRealtime });
+        localDirtyAt = 0;
+        if (fromRealtime && window.UI) UI.toast('☁️ Actualizado desde otro dispositivo');
+    }
+
+    async function pushNow({ force = false } = {}) {
         const c = ensureClient();
         if (!c || applyingRemote) return;
         const { data: { user } } = await c.auth.getUser();
         if (!user) return;
+
+        // Antes de pisar: si la nube avanzó y nosotros también, preguntar
+        if (!force) {
+            const { data: remote } = await c.from(TABLE).select('updated_at').eq('user_id', user.id).maybeSingle();
+            if (remote?.updated_at && lastRemoteAt && remote.updated_at !== lastRemoteAt) {
+                const remoteTs = new Date(remote.updated_at).getTime();
+                const knownTs = new Date(lastRemoteAt).getTime();
+                if (remoteTs > knownTs && localDirtyAt >= knownTs - 500) {
+                    const { data: full } = await c.from(TABLE).select('lotes, settings, updated_at').eq('user_id', user.id).maybeSingle();
+                    if (full) {
+                        const choice = await resolveConflict(full);
+                        if (choice === 'remote') {
+                            applyRemote(full, { silent: false });
+                            localDirtyAt = 0;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
 
         pushing = true;
         setStatus({ state: 'syncing', detail: 'Subiendo…' });
@@ -275,6 +342,7 @@ const Sync = (() => {
             return;
         }
         lastRemoteAt = updated_at;
+        localDirtyAt = 0;
         setStatus({ state: 'synced', detail: 'Guardado en la nube', email: user.email || status.email });
         if (window.App?.markBackupDone) {
             window.__skipBackupDirty = true;
@@ -317,9 +385,7 @@ const Sync = (() => {
                     if (pushing) return;
                     const row = payload.new;
                     if (!row) return;
-                    if (row.updated_at && lastRemoteAt && row.updated_at === lastRemoteAt) return;
-                    applyRemote(row, { silent: true });
-                    if (window.UI) UI.toast('☁️ Actualizado desde otro dispositivo');
+                    handleIncomingRemote(row, { fromRealtime: true }).catch(console.warn);
                 }
             )
             .subscribe((s) => {
@@ -376,7 +442,10 @@ const Sync = (() => {
         // Hook saves
         const wrap = (orig) => function (...args) {
             const r = orig.apply(this, args);
-            if (!window.__skipSync) schedulePush();
+            if (!window.__skipSync) {
+                markLocalDirty();
+                schedulePush();
+            }
             return r;
         };
         if (!window.State.__syncWrapped) {

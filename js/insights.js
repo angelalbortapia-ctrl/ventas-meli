@@ -77,6 +77,18 @@ const InsightsView = (() => {
             };
         },
 
+        // 5b. Ads por arriba del tope CPA
+        ({ lote, calc }) => {
+            if (calc.adsStatus !== 'over' && calc.adsStatus !== 'near') return null;
+            const sev = calc.adsStatus === 'over' ? 'high' : 'medium';
+            return {
+                severity: sev, kind: 'ads',
+                title: `Ads ${calc.adsStatus === 'over' ? 'por arriba' : 'cerca'} del tope: ${lote.producto}`,
+                text: `Gastaste <strong>${Calc.fmtMXN(calc.adsPorVenta)}</strong>/venta vs tope <strong>${Calc.fmtMXN(calc.topeCPA)}</strong> (total Ads ${Calc.fmtMXN(calc.gastoAds)}). Baja puja o pausa campaña.`,
+                lote,
+            };
+        },
+
         // 6. Agotado (posible recompra)
         ({ lote, calc }) => {
             if (calc.estrategia !== 'AGOTADO') return null;
