@@ -428,3 +428,4 @@ const Calc = (() => {
         comisionPct,
     };
 })();
+window.Calc = Calc;

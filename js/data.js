@@ -171,8 +171,17 @@ const Data = (() => {
     }
 
     function loadUI() {
-        try { return JSON.parse(localStorage.getItem(UI_KEY) || '{}'); }
-        catch { return {}; }
+        try {
+            const ui = JSON.parse(localStorage.getItem(UI_KEY) || '{}') || {};
+            // Preferencias de layouts viejos (tabs Dashboard/Insights) ya no aplican
+            delete ui.insightLayout;
+            delete ui.insightLayoutId;
+            delete ui.dashLayout;
+            delete ui.dashLayoutId;
+            return ui;
+        } catch {
+            return {};
+        }
     }
     function saveUI(ui) {
         localStorage.setItem(UI_KEY, JSON.stringify(ui));
@@ -488,6 +497,7 @@ const Data = (() => {
         categorias,
     };
 })();
+window.Data = Data;
 
 window.State = {
     lotes: [],

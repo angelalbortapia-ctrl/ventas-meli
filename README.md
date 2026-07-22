@@ -10,15 +10,14 @@ Espeja y automatiza tu Excel `Negocio.xlsx` (pestañas `Lotes_Operaciones` + `Re
 - **Tope máximo de CPA** (Ads) calculado como % de la utilidad para productos "Escalar".
 - **Registro de ventas individuales** con precio real por evento (no solo un contador).
 - **Historial (audit log)** de cambios y ventas por lote.
-- **Insights automáticos**: reglas de negocio que detectan stock crítico, precios altos vs competencia, productos estancados, oportunidades premium.
+- **Insights**: Matriz (margen×rotación), Comprar / no comprar, Estancados y Precios vs competencia. Badge de alertas en campana.
 - **Command palette** (⌘K / Ctrl+K) para navegar y ejecutar acciones al vuelo.
-- **Vista principal** tipo Inbox + Split con **detalle organizado en tabs** (Rentabilidad · Inventario · Recomendación · Historial).
+- **Productos** tipo Inbox + Split con detalle en tabs (Rentabilidad · Inventario · Recomendación · Historial).
 - **Split redimensionable** con drag persistente en localStorage.
 - **Edición inline** de precio y stock (click en el número).
-- **Dashboard consolidado**: Capital Desplegado, Cash In, Ganancia Realizada, Valor Inventario, rotación por SKU con barras.
+- **Dashboard**: Progreso mensual/anual, P&G, Caja, Portafolio y Ranking.
 - **Import / Export a Excel** (respeta formato original, exporta ventas también).
-- **Respaldo JSON** local.
-- **Dark mode** con toggle.
+- **Respaldo JSON** local + sync opcional con Supabase (Mac ↔ iPhone).
 - **Modales propios** en vez de `confirm()` nativos.
 
 ## Cómo usar
@@ -59,7 +58,7 @@ También puedes **instalarla como PWA** (Chrome: menú → Instalar Ventas Meli)
 | Concepto | Fórmula |
 |---|---|
 | Comisión Meli | Precio × % (Clásica 15%, Premium 20%) |
-| Cargo fijo | Aplica si Precio < $299 (default $0) |
+| Cargo fijo | Aplica si Precio < $299 (default ≈ $35; ajustable) |
 | Retención IVA | (Precio ÷ 1.16) × 8% |
 | Retención ISR | (Precio ÷ 1.16) × 2.5% (sin RFC) o 1% (RESICO con RFC) |
 | Utilidad neta | Precio − Costo − Comisión − Cargo fijo − Envío − IVA − ISR |

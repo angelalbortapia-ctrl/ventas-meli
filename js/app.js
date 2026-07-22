@@ -19,6 +19,8 @@ const App = (() => {
 
     function switchTab(tab) {
         if (!TAB_LABELS[tab]) return;
+        const view = document.getElementById('view-' + tab);
+        if (!view) return;
         window.State.view = tab;
         document.querySelectorAll('.sb-item[data-tab]').forEach(el => {
             const active = el.dataset.tab === tab;
@@ -28,8 +30,8 @@ const App = (() => {
         document.querySelectorAll('.mobile-tab[data-tab]').forEach(el => {
             el.classList.toggle('active', el.dataset.tab === tab);
         });
-        document.querySelectorAll('.view').forEach(v => v.hidden = true);
-        document.getElementById('view-' + tab).hidden = false;
+        document.querySelectorAll('.view').forEach(v => { v.hidden = true; });
+        view.hidden = false;
 
         const crumb = document.getElementById('tb-current');
         if (crumb) crumb.textContent = TAB_LABELS[tab];
@@ -37,6 +39,7 @@ const App = (() => {
         if (tab === 'dashboard') DashboardView.render();
         else if (tab === 'insights') InsightsView.render();
         else if (tab === 'lotes') LotesView.render();
+        refreshNavCounts();
     }
 
     function closeMobileNav() {
@@ -79,8 +82,8 @@ const App = (() => {
         // Alerts bell
         const bell = document.getElementById('tb-bell');
         if (bell) bell.addEventListener('click', () => switchTab('insights'));
-        refreshAlertBadge();
-        window.State.subscribe(refreshAlertBadge);
+        refreshNavCounts();
+        window.State.subscribe(refreshNavCounts);
 
         const menu = document.getElementById('tb-menu');
         const overlay = document.getElementById('nav-overlay');
@@ -105,16 +108,35 @@ const App = (() => {
         });
     }
 
-    function refreshAlertBadge() {
-        const badge = document.getElementById('tb-bell-count');
-        if (!badge || !window.InsightsView) return;
-        const c = InsightsView.alertCount();
-        badge.textContent = c;
-        badge.hidden = c === 0;
-        const mBadge = document.getElementById('m-tab-insights');
-        if (mBadge) {
-            mBadge.textContent = c;
-            mBadge.hidden = c === 0;
+    /** Badges sidebar + móvil + campana (productos y alertas). */
+    function refreshNavCounts() {
+        const lotes = window.State.lotes || [];
+        const nProd = new Set(lotes.map(l => l.productId || l.id)).size;
+
+        const sbLotes = document.getElementById('sb-count-lotes');
+        if (sbLotes) sbLotes.textContent = nProd;
+        const mLotes = document.getElementById('m-tab-lotes');
+        if (mLotes) {
+            mLotes.textContent = nProd;
+            mLotes.hidden = nProd === 0;
+        }
+
+        const alerts = window.InsightsView ? InsightsView.alertCount() : 0;
+        const bell = document.getElementById('tb-bell-count');
+        if (bell) {
+            bell.textContent = alerts;
+            bell.hidden = alerts === 0;
+        }
+        const sbIns = document.getElementById('sb-count-insights');
+        if (sbIns) {
+            sbIns.textContent = alerts;
+            sbIns.hidden = alerts === 0;
+            sbIns.classList.toggle('badge-alert', alerts > 0);
+        }
+        const mIns = document.getElementById('m-tab-insights');
+        if (mIns) {
+            mIns.textContent = alerts;
+            mIns.hidden = alerts === 0;
         }
     }
 
@@ -392,5 +414,6 @@ const App = (() => {
         markBackupDone,
         markBackupNeeded,
         refreshBackupHint,
+        refreshNavCounts,
     };
 })();

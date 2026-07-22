@@ -1,7 +1,6 @@
-/* Service worker minimalista: cache-first para assets estáticos.
-   Deja pasar las peticiones al CDN de SheetJS y Google Fonts como network-first. */
+/* Service worker: cache-first local, network-first CDN. */
 
-const VERSION = 'vm-v24';
+const VERSION = 'vm-v32';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -38,35 +37,35 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
     const req = event.request;
-    const url = new URL(req.url);
-
     if (req.method !== 'GET') return;
 
-    // Assets locales: cache-first
+    const url = new URL(req.url);
+
     if (url.origin === self.location.origin) {
-        event.respondWith(
-            caches.match(req).then(cached => {
-                if (cached) return cached;
-                return fetch(req).then(res => {
-                    if (res.ok) {
-                        const clone = res.clone();
-                        caches.open(VERSION).then(c => c.put(req, clone)).catch(() => {});
-                    }
-                    return res;
-                }).catch(() => cached);
-            })
-        );
+        event.respondWith((async () => {
+            // ignoreSearch: sirve cache instalado aunque el HTML pida ?v=N
+            const cached = await caches.match(req, { ignoreSearch: true });
+            try {
+                const res = await fetch(req);
+                if (res && res.ok) {
+                    const cache = await caches.open(VERSION);
+                    await cache.put(new Request(url.origin + url.pathname), res.clone());
+                }
+                return res;
+            } catch {
+                return cached || Response.error();
+            }
+        })());
         return;
     }
 
-    // Externos (CDN): network-first, cache como respaldo
     event.respondWith(
         fetch(req).then(res => {
-            if (res.ok) {
+            if (res && res.ok) {
                 const clone = res.clone();
                 caches.open(VERSION).then(c => c.put(req, clone)).catch(() => {});
             }
             return res;
-        }).catch(() => caches.match(req))
+        }).catch(() => caches.match(req).then(c => c || Response.error()))
     );
 });

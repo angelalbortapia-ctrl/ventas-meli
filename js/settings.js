@@ -186,3 +186,4 @@ const SettingsView = (() => {
 
     return { init, loadIntoForm };
 })();
+window.SettingsView = SettingsView;

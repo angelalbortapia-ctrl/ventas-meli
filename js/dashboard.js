@@ -1,76 +1,288 @@
 /* ==========================================================================
-   Dashboard — 4 layouts de DATA: P&G · Caja · Portafolio · Ranking
-   Navegación: tabs / ← → / teclado. Preferencia en State.ui.dashLayoutId.
+   Dashboard — vista única: P&G + Caja + Portafolio + Ranking
    ========================================================================== */
 
 const DashboardView = (() => {
-
-    const LAYOUTS = [
-        { id: 'pyg',        name: 'P&G',        blurb: 'Ingresos, costos y fees' },
-        { id: 'caja',       name: 'Caja',       blurb: 'Capital, cash in e inventario' },
-        { id: 'portafolio', name: 'Portafolio', blurb: 'Estrategia y distribución' },
-        { id: 'ranking',    name: 'Ranking',    blurb: 'Utilidad, margen y ROI' },
-    ];
-
-    function currentLayout() {
-        const ui = window.State.ui || {};
-        if (ui.dashLayoutId) {
-            const byId = LAYOUTS.findIndex(l => l.id === ui.dashLayoutId);
-            if (byId >= 0) return byId;
-        }
-        const n = Number(ui.dashLayout);
-        if (Number.isInteger(n) && n >= 0 && n < LAYOUTS.length) return n;
-        return 0;
-    }
-
-    function setLayout(i) {
-        const next = ((i % LAYOUTS.length) + LAYOUTS.length) % LAYOUTS.length;
-        window.State.ui = {
-            ...window.State.ui,
-            dashLayout: next,
-            dashLayoutId: LAYOUTS[next].id,
-        };
-        window.State.saveUI();
-        render();
-    }
 
     function render() {
         const root = document.getElementById('dashboard-canvas');
         if (!root) return;
 
         const lotes = window.State.lotes || [];
-        const idx = currentLayout();
-        const layout = LAYOUTS[idx];
+        if (!lotes.length) {
+            root.innerHTML = `
+                <div class="dash-shell">
+                    <div class="dash-body">
+                        <div class="dash-empty-full">
+                            <h2>Sin datos todavía</h2>
+                            <p class="muted">Importa un Excel o crea un lote para ver el panel financiero.</p>
+                            <button type="button" class="btn primary" data-dash-new>+ Nuevo lote</button>
+                        </div>
+                    </div>
+                </div>`;
+            bind(root);
+            return;
+        }
+
         const agg = Calc.aggregate(lotes, window.State.settings);
         const ctx = buildContext(agg);
+        const chartPeriod = window.State.ui?.dashChartPeriod === 'years' ? 'years' : 'months';
+        const chartStyle = window.State.ui?.dashChartStyle === 'line' ? 'line' : 'bars';
 
         root.innerHTML = `
             <div class="dash-shell">
-                <header class="dash-nav">
-                    <div class="dash-nav-left">
-                        <button type="button" class="btn btn-sm" data-dash-prev aria-label="Anterior">←</button>
-                        <button type="button" class="btn btn-sm" data-dash-next aria-label="Siguiente">→</button>
-                        <div class="dash-nav-title">
-                            <strong>${idx + 1}/${LAYOUTS.length} · ${esc(layout.name)}</strong>
-                            <span class="muted small">${esc(layout.blurb)}</span>
+                <div class="dash-body dash-body-combined">
+                    <section class="dash-section">
+                        <div class="dash-section-head">
+                            <h2 class="dash-section-title">Progreso</h2>
+                            <div class="dash-chart-toggles">
+                                <div class="dash-seg" role="group" aria-label="Periodo">
+                                    <button type="button" class="dash-seg-btn${chartPeriod === 'months' ? ' active' : ''}" data-dash-period="months">Meses</button>
+                                    <button type="button" class="dash-seg-btn${chartPeriod === 'years' ? ' active' : ''}" data-dash-period="years">Años</button>
+                                </div>
+                                <div class="dash-seg" role="group" aria-label="Tipo de gráfica">
+                                    <button type="button" class="dash-seg-btn${chartStyle === 'bars' ? ' active' : ''}" data-dash-style="bars">Barras</button>
+                                    <button type="button" class="dash-seg-btn${chartStyle === 'line' ? ' active' : ''}" data-dash-style="line">Líneas</button>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                    <div class="dash-nav-tabs" role="tablist" aria-label="Vistas del dashboard">
-                        ${LAYOUTS.map((L, i) => `
-                            <button type="button" role="tab"
-                                class="dash-tab ${i === idx ? 'active' : ''}"
-                                data-dash-layout="${i}"
-                                aria-selected="${i === idx}"
-                                title="${esc(L.blurb)}">${i + 1}. ${esc(L.name)}</button>
-                        `).join('')}
-                    </div>
-                </header>
-                <div class="dash-body" data-layout="${esc(layout.id)}">
-                    ${lotes.length ? renderLayout(layout.id, ctx) : emptyState()}
+                        ${layProgreso(lotes, chartPeriod, chartStyle)}
+                    </section>
+                    <section class="dash-section">
+                        <h2 class="dash-section-title">P&amp;G</h2>
+                        ${layPyG(ctx)}
+                    </section>
+                    <section class="dash-section">
+                        <h2 class="dash-section-title">Caja</h2>
+                        ${layCaja(ctx)}
+                    </section>
+                    <section class="dash-section">
+                        <h2 class="dash-section-title">Portafolio</h2>
+                        ${layPortafolio(ctx)}
+                    </section>
+                    <section class="dash-section">
+                        <h2 class="dash-section-title">Ranking</h2>
+                        ${layRanking(ctx)}
+                    </section>
                 </div>
             </div>
         `;
         bind(root);
+    }
+
+    function layProgreso(lotes, period, style) {
+        const series = buildTimeSeries(lotes, window.State.settings, period);
+        const totalCash = series.reduce((s, p) => s + p.cashIn, 0);
+        const totalGain = series.reduce((s, p) => s + p.ganancia, 0);
+        const totalUds = series.reduce((s, p) => s + p.unidades, 0);
+        const hasData = totalUds > 0 || totalCash > 0;
+
+        return `
+            <div class="dash-panel dash-progreso">
+                <div class="dash-grid-kpi dash-grid-kpi-3">
+                    <div class="dash-kpi">
+                        <div class="dash-kpi-label">Cash in · periodo</div>
+                        <div class="dash-kpi-value">${Calc.fmtMXN(totalCash)}</div>
+                    </div>
+                    <div class="dash-kpi">
+                        <div class="dash-kpi-label">Ganancia · periodo</div>
+                        <div class="dash-kpi-value ${tone(totalGain)}">${Calc.fmtMXN(totalGain)}</div>
+                    </div>
+                    <div class="dash-kpi">
+                        <div class="dash-kpi-label">Unidades vendidas</div>
+                        <div class="dash-kpi-value">${totalUds}</div>
+                    </div>
+                </div>
+                ${hasData
+                    ? timeChart(series, style)
+                    : `<p class="dash-chart-empty muted">Aún no hay ventas con fecha. Registra ventas en un lote para ver el progreso.</p>`}
+                <ul class="dash-chart-legend">
+                    <li><i class="cash"></i>Cash in</li>
+                    <li><i class="gain"></i>Ganancia realizada</li>
+                </ul>
+            </div>`;
+    }
+
+    /** Agrupa ventas por mes (últimos 12) o por año. */
+    function buildTimeSeries(lotes, settings, period) {
+        const map = new Map();
+        const bump = (key, cash, gain, uds) => {
+            const cur = map.get(key) || { cashIn: 0, ganancia: 0, unidades: 0 };
+            cur.cashIn += cash;
+            cur.ganancia += gain;
+            cur.unidades += uds;
+            map.set(key, cur);
+        };
+
+        lotes.forEach(lote => {
+            const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
+            if (ventas.length) {
+                ventas.forEach(v => {
+                    const d = parseDate(v.fecha);
+                    if (!d) return;
+                    const key = period === 'years'
+                        ? String(d.getFullYear())
+                        : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                    const uds = Number(v.unidades) || 0;
+                    const p = Number(v.precio) || 0;
+                    bump(key, p * uds, Calc.utilidadAtPrice(lote, p, settings).utilidad * uds, uds);
+                });
+            } else {
+                const vendidas = Number(lote.vendidas) || 0;
+                if (vendidas <= 0) return;
+                const d = parseDate(lote.fecha);
+                if (!d) return;
+                const key = period === 'years'
+                    ? String(d.getFullYear())
+                    : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                const precio = Number(lote.precio) || 0;
+                bump(key, precio * vendidas, Calc.utilidadAtPrice(lote, precio, settings).utilidad * vendidas, vendidas);
+            }
+        });
+
+        if (period === 'months') {
+            const keys = lastNMonthKeys(12);
+            return keys.map(key => ({
+                key,
+                label: monthLabel(key),
+                cashIn: map.get(key)?.cashIn || 0,
+                ganancia: map.get(key)?.ganancia || 0,
+                unidades: map.get(key)?.unidades || 0,
+            }));
+        }
+
+        const years = [...map.keys()].map(Number).filter(n => !Number.isNaN(n)).sort((a, b) => a - b);
+        const nowY = new Date().getFullYear();
+        if (!years.length) years.push(nowY);
+        const minY = Math.min(years[0], nowY - 2);
+        const maxY = Math.max(years[years.length - 1], nowY);
+        const out = [];
+        for (let y = minY; y <= maxY; y++) {
+            const key = String(y);
+            out.push({
+                key,
+                label: key,
+                cashIn: map.get(key)?.cashIn || 0,
+                ganancia: map.get(key)?.ganancia || 0,
+                unidades: map.get(key)?.unidades || 0,
+            });
+        }
+        return out;
+    }
+
+    /** Parse local (evita desfase UTC con fechas YYYY-MM-DD). */
+    function parseDate(raw) {
+        if (!raw) return null;
+        const s = String(raw);
+        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        const d = new Date(s);
+        return Number.isNaN(d.getTime()) ? null : d;
+    }
+
+    function lastNMonthKeys(n) {
+        const keys = [];
+        const d = new Date();
+        d.setDate(1);
+        for (let i = n - 1; i >= 0; i--) {
+            const x = new Date(d.getFullYear(), d.getMonth() - i, 1);
+            keys.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`);
+        }
+        return keys;
+    }
+
+    function monthLabel(key) {
+        const [y, m] = key.split('-').map(Number);
+        const names = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+        return `${names[(m || 1) - 1]} ${String(y).slice(2)}`;
+    }
+
+    function timeChart(series, style) {
+        const W = 720, H = 220;
+        const pad = { t: 16, r: 12, b: 36, l: 52 };
+        const iw = W - pad.l - pad.r;
+        const ih = H - pad.t - pad.b;
+        const maxVal = Math.max(
+            1,
+            ...series.map(p => Math.max(p.cashIn, p.ganancia, 0)),
+            ...series.map(p => Math.abs(Math.min(0, p.ganancia)))
+        );
+        const n = series.length || 1;
+        const slot = iw / n;
+        const yScale = v => pad.t + ih - (v / maxVal) * ih;
+
+        const grid = [0.25, 0.5, 0.75, 1].map(f => {
+            const y = yScale(maxVal * f);
+            return `<line x1="${pad.l}" y1="${y}" x2="${W - pad.r}" y2="${y}" class="dash-chart-grid"/>
+                <text x="${pad.l - 6}" y="${y + 4}" text-anchor="end" class="dash-chart-axis">${shortMoney(maxVal * f)}</text>`;
+        }).join('');
+
+        const labels = series.map((p, i) => {
+            const x = pad.l + slot * i + slot / 2;
+            return `<text x="${x}" y="${H - 12}" text-anchor="middle" class="dash-chart-axis">${esc(p.label)}</text>`;
+        }).join('');
+
+        let plot = '';
+        if (style === 'line') {
+            const pathCash = series.map((p, i) => {
+                const x = pad.l + slot * i + slot / 2;
+                const y = yScale(Math.max(0, p.cashIn));
+                return `${i ? 'L' : 'M'}${x},${y}`;
+            }).join(' ');
+            const pathGain = series.map((p, i) => {
+                const x = pad.l + slot * i + slot / 2;
+                const y = yScale(Math.max(0, p.ganancia));
+                return `${i ? 'L' : 'M'}${x},${y}`;
+            }).join(' ');
+            const dotsCash = series.map((p, i) => {
+                const x = pad.l + slot * i + slot / 2;
+                const y = yScale(Math.max(0, p.cashIn));
+                return `<circle cx="${x}" cy="${y}" r="3.5" class="dash-chart-dot cash" title="${esc(p.label)}: ${Calc.fmtMXN(p.cashIn)}"/>`;
+            }).join('');
+            const dotsGain = series.map((p, i) => {
+                const x = pad.l + slot * i + slot / 2;
+                const y = yScale(Math.max(0, p.ganancia));
+                return `<circle cx="${x}" cy="${y}" r="3.5" class="dash-chart-dot gain" title="${esc(p.label)}: ${Calc.fmtMXN(p.ganancia)}"/>`;
+            }).join('');
+            plot = `
+                <path d="${pathCash}" class="dash-chart-line cash" fill="none"/>
+                <path d="${pathGain}" class="dash-chart-line gain" fill="none"/>
+                ${dotsCash}${dotsGain}`;
+        } else {
+            const barW = Math.min(22, slot * 0.32);
+            const gap = 3;
+            plot = series.map((p, i) => {
+                const cx = pad.l + slot * i + slot / 2;
+                const hCash = (Math.max(0, p.cashIn) / maxVal) * ih;
+                const hGain = (Math.max(0, p.ganancia) / maxVal) * ih;
+                const xCash = cx - barW - gap / 2;
+                const xGain = cx + gap / 2;
+                return `
+                    <rect x="${xCash}" y="${pad.t + ih - hCash}" width="${barW}" height="${hCash}" rx="3" class="dash-chart-bar cash">
+                        <title>${esc(p.label)} · Cash in: ${Calc.fmtMXN(p.cashIn)}</title>
+                    </rect>
+                    <rect x="${xGain}" y="${pad.t + ih - hGain}" width="${barW}" height="${hGain}" rx="3" class="dash-chart-bar gain">
+                        <title>${esc(p.label)} · Ganancia: ${Calc.fmtMXN(p.ganancia)}</title>
+                    </rect>`;
+            }).join('');
+        }
+
+        return `
+            <div class="dash-chart-wrap">
+                <svg class="dash-time-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Progreso de ventas">
+                    <line x1="${pad.l}" y1="${pad.t + ih}" x2="${W - pad.r}" y2="${pad.t + ih}" class="dash-chart-baseline"/>
+                    ${grid}
+                    ${plot}
+                    ${labels}
+                </svg>
+            </div>`;
+    }
+
+    function shortMoney(n) {
+        const v = Math.abs(n);
+        if (v >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+        if (v >= 1e3) return `$${(n / 1e3).toFixed(v >= 1e4 ? 0 : 1)}k`;
+        return `$${Math.round(n)}`;
     }
 
     function buildContext(agg) {
@@ -87,17 +299,6 @@ const DashboardView = (() => {
         return { agg, rows, fees, costoVendido, gastoAds };
     }
 
-    function renderLayout(id, ctx) {
-        switch (id) {
-            case 'pyg': return layPyG(ctx);
-            case 'caja': return layCaja(ctx);
-            case 'portafolio': return layPortafolio(ctx);
-            case 'ranking': return layRanking(ctx);
-            default: return layPyG(ctx);
-        }
-    }
-
-    /* ---------- P&G ---------- */
     function layPyG({ agg, fees, costoVendido, gastoAds }) {
         const bruto = agg.cashIn - costoVendido;
         const neto = agg.gananciaRealizada;
@@ -145,7 +346,6 @@ const DashboardView = (() => {
         `;
     }
 
-    /* ---------- Caja ---------- */
     function layCaja({ agg, rows }) {
         const trapped = rows
             .filter(r => r.calc.inventarioRestante > 0)
@@ -160,26 +360,26 @@ const DashboardView = (() => {
                 ${kpi('En inventario', Calc.fmtMXN(agg.valorInventario), '', `${Calc.fmtPct(agg.capitalDesplegado ? agg.valorInventario / agg.capitalDesplegado : 0)} del capital`)}
                 ${kpi('A liquidar (stock)', Calc.fmtMXN(liberable), liberable > 0 ? 'neg' : '', 'Capital en estrategia LIQUIDAR')}
             </div>
-            <div class="dash-panel">
-                <h3>Flujo: dónde está el dinero</h3>
-                ${stackBars([
-                    { label: 'Ya cobrado (cash in)', value: agg.cashIn, cls: 'c-gain' },
-                    { label: 'Atrapado en stock', value: trapped, cls: 'c-cost' },
-                    { label: 'Ganancia realizada', value: Math.max(0, agg.gananciaRealizada), cls: 'c-fee' },
-                ], Math.max(agg.cashIn + trapped, 1))}
-            </div>
-            <div class="dash-panel">
-                <h3>Capital por lote (top 12)</h3>
-                ${barChart(rows.map(r => ({
-                    label: short(r.lote.producto, 20),
-                    value: r.calc.inversion,
-                    meta: `${r.calc.inventarioRestante} en stock`,
-                })).sort((a, b) => b.value - a.value).slice(0, 12), 'MXN')}
+            <div class="dash-split-2">
+                <div class="dash-panel">
+                    <h3>Flujo: dónde está el dinero</h3>
+                    ${stackBars([
+                        { label: 'Ya cobrado (cash in)', value: agg.cashIn, cls: 'c-gain' },
+                        { label: 'Atrapado en stock', value: trapped, cls: 'c-cost' },
+                        { label: 'Ganancia realizada', value: Math.max(0, agg.gananciaRealizada), cls: 'c-fee' },
+                    ], Math.max(agg.cashIn + trapped, 1))}
+                </div>
+                <div class="dash-panel">
+                    <h3>Capital por lote (top 10)</h3>
+                    ${barChart(rows.map(r => ({
+                        label: short(r.lote.producto, 20),
+                        value: r.calc.inversion,
+                    })).sort((a, b) => b.value - a.value).slice(0, 10), 'MXN')}
+                </div>
             </div>
         `;
     }
 
-    /* ---------- Portafolio ---------- */
     function layPortafolio({ agg, rows }) {
         const keys = ['ESCALAR', 'MANTENER', 'LIQUIDAR', 'AGOTADO', 'PAUSADA', 'FINALIZADA'];
         const counts = keys.map(k => ({ key: k, n: agg.strategyCount[k] || 0 }));
@@ -200,7 +400,7 @@ const DashboardView = (() => {
                     <h3>Lotes por estrategia</h3>
                     <div class="dash-strategy-cols">
                         ${['ESCALAR', 'MANTENER', 'LIQUIDAR'].map(st => {
-                            const list = rows.filter(r => r.calc.estrategia === st).slice(0, 8);
+                            const list = rows.filter(r => r.calc.estrategia === st).slice(0, 6);
                             return `
                                 <div class="dash-strategy-col">
                                     <h4>${esc(st)} <span class="muted">${agg.strategyCount[st] || 0}</span></h4>
@@ -219,7 +419,6 @@ const DashboardView = (() => {
         `;
     }
 
-    /* ---------- Ranking ---------- */
     function layRanking({ rows }) {
         const byUtil = [...rows].sort((a, b) => b.calc.utilidad - a.calc.utilidad);
         const byMargen = [...rows].sort((a, b) => b.calc.margen - a.calc.margen);
@@ -238,7 +437,7 @@ const DashboardView = (() => {
             <div class="dash-panel">
                 <h3>${esc(title)}</h3>
                 <ol class="dash-rank-ol">
-                    ${list.slice(0, 12).map((r, i) => `
+                    ${list.slice(0, 8).map((r, i) => `
                         <li data-dash-lote="${esc(r.lote.id)}">
                             <span class="n">${i + 1}</span>
                             <span class="name">${esc(short(r.lote.producto, 28))}</span>
@@ -250,7 +449,6 @@ const DashboardView = (() => {
         `;
     }
 
-    /* ---------- atoms ---------- */
     function kpi(label, value, t, sub) {
         return `
             <div class="dash-kpi">
@@ -314,19 +512,10 @@ const DashboardView = (() => {
         }).join('');
         return `
             <div class="dash-donut">
-                <svg viewBox="0 0 140 140" width="160" height="160" aria-hidden="true">${segs}
+                <svg viewBox="0 0 140 140" width="140" height="140" aria-hidden="true">${segs}
                     <circle r="38" cx="70" cy="70" fill="var(--surface)"></circle>
                     <text x="70" y="74" text-anchor="middle" font-size="18" font-weight="700" fill="var(--text)">${total}</text>
                 </svg>
-            </div>`;
-    }
-
-    function emptyState() {
-        return `
-            <div class="dash-empty-full">
-                <h2>Sin datos todavía</h2>
-                <p class="muted">Importa un Excel o crea un lote para ver P&amp;G, caja, portafolio y ranking.</p>
-                <button type="button" class="btn primary" data-dash-new>+ Nuevo lote</button>
             </div>`;
     }
 
@@ -347,11 +536,6 @@ const DashboardView = (() => {
     }
 
     function bind(root) {
-        root.querySelector('[data-dash-prev]')?.addEventListener('click', () => setLayout(currentLayout() - 1));
-        root.querySelector('[data-dash-next]')?.addEventListener('click', () => setLayout(currentLayout() + 1));
-        root.querySelectorAll('[data-dash-layout]').forEach(btn => {
-            btn.addEventListener('click', () => setLayout(Number(btn.dataset.dashLayout)));
-        });
         root.querySelectorAll('[data-dash-new]').forEach(btn => {
             btn.addEventListener('click', () => {
                 window.App?.switchTab('lotes');
@@ -364,39 +548,34 @@ const DashboardView = (() => {
                 if (id && window.LotesView?.selectAndGo) LotesView.selectAndGo(id);
             });
         });
-
-        if (!window.__dashKeysBound) {
-            window.__dashKeysBound = true;
-            document.addEventListener('keydown', e => {
-                if (window.State.view !== 'dashboard') return;
-                if (e.target.matches('input, textarea, select, [contenteditable]')) return;
-                if (e.key === 'ArrowLeft') { e.preventDefault(); setLayout(currentLayout() - 1); }
-                if (e.key === 'ArrowRight') { e.preventDefault(); setLayout(currentLayout() + 1); }
+        root.querySelectorAll('[data-dash-period]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const period = btn.dataset.dashPeriod;
+                const cur = window.State.ui?.dashChartPeriod === 'years' ? 'years' : 'months';
+                if (!period || period === cur) return;
+                window.State.ui = { ...window.State.ui, dashChartPeriod: period };
+                window.State.saveUI();
+                render();
             });
-        }
+        });
+        root.querySelectorAll('[data-dash-style]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const style = btn.dataset.dashStyle;
+                const cur = window.State.ui?.dashChartStyle === 'line' ? 'line' : 'bars';
+                if (!style || style === cur) return;
+                window.State.ui = { ...window.State.ui, dashChartStyle: style };
+                window.State.saveUI();
+                render();
+            });
+        });
     }
 
     function init() {
-        // Migrar índice viejo (0–9) → id de los 4 layouts actuales
-        const ui = window.State.ui || {};
-        if (!ui.dashLayoutId) {
-            const legacyMap = {
-                1: 'pyg', 2: 'caja', 3: 'portafolio', 6: 'ranking',
-            };
-            const mapped = legacyMap[ui.dashLayout];
-            if (mapped) {
-                window.State.ui = { ...ui, dashLayoutId: mapped, dashLayout: LAYOUTS.findIndex(l => l.id === mapped) };
-                window.State.saveUI();
-            } else if (ui.dashLayout != null) {
-                window.State.ui = { ...ui, dashLayoutId: 'pyg', dashLayout: 0 };
-                window.State.saveUI();
-            }
-        }
-
         window.State.subscribe(() => {
             if (window.State.view === 'dashboard') render();
         });
     }
 
-    return { init, render, LAYOUTS };
+    return { init, render };
 })();
+window.DashboardView = DashboardView;

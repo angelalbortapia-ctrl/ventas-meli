@@ -272,14 +272,7 @@ const LotesView = (() => {
 
         bindDynamicEvents();
 
-        const sbCount = document.getElementById('sb-count-lotes');
-        if (sbCount) sbCount.textContent = nTotal;
-        const alertBadge = document.getElementById('sb-count-insights');
-        if (alertBadge && window.InsightsView) {
-            const c = InsightsView.alertCount();
-            alertBadge.textContent = c;
-            alertBadge.classList.toggle('badge-alert', c > 0);
-        }
+        window.App?.refreshNavCounts?.();
     }
 
     // ---- Stats strip ---------------------------------------------------
@@ -1736,3 +1729,4 @@ const LotesView = (() => {
 
     return { init, render, openModal, selectAndGo };
 })();
+window.LotesView = LotesView;

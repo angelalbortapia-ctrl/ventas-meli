@@ -206,3 +206,4 @@ const UI = (() => {
         escapeHTML,
     };
 })();
+window.UI = UI;

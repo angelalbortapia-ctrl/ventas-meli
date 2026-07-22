@@ -194,3 +194,4 @@ const ExcelIO = (() => {
 
     return { HEADERS, importFile, exportFile };
 })();
+window.ExcelIO = ExcelIO;
