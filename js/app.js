@@ -25,6 +25,9 @@ const App = (() => {
             el.classList.toggle('active', active);
             el.setAttribute('aria-selected', active ? 'true' : 'false');
         });
+        document.querySelectorAll('.mobile-tab[data-tab]').forEach(el => {
+            el.classList.toggle('active', el.dataset.tab === tab);
+        });
         document.querySelectorAll('.view').forEach(v => v.hidden = true);
         document.getElementById('view-' + tab).hidden = false;
 
@@ -88,6 +91,18 @@ const App = (() => {
             });
         }
         if (overlay) overlay.addEventListener('click', closeMobileNav);
+
+        // Bottom tab bar (iPhone)
+        document.querySelectorAll('.mobile-tab[data-tab]').forEach(el => {
+            el.addEventListener('click', () => {
+                switchTab(el.dataset.tab);
+                closeMobileNav();
+            });
+        });
+        document.getElementById('m-tab-more')?.addEventListener('click', () => {
+            if (document.body.classList.contains('nav-open')) closeMobileNav();
+            else openMobileNav();
+        });
     }
 
     function refreshAlertBadge() {
@@ -96,6 +111,11 @@ const App = (() => {
         const c = InsightsView.alertCount();
         badge.textContent = c;
         badge.hidden = c === 0;
+        const mBadge = document.getElementById('m-tab-insights');
+        if (mBadge) {
+            mBadge.textContent = c;
+            mBadge.hidden = c === 0;
+        }
     }
 
     // ---- Excel ---------------------------------------------------------

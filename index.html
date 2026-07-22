@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=19">
+    <link rel="stylesheet" href="css/styles.css?v=20">
 </head>
 <body>
 
@@ -88,6 +88,7 @@
         <div class="topbar-left">
             <button type="button" class="tb-menu" id="tb-menu" aria-label="Abrir menú" aria-expanded="false">
                 <span aria-hidden="true">☰</span>
+                <span class="tb-menu-label">Menú</span>
             </button>
             <div class="tb-crumb">
                 <span class="tb-crumb-root">Ventas Meli</span>
@@ -249,6 +250,32 @@
     <button class="fab" id="fab-new" aria-label="Nuevo lote" title="Nuevo lote (N)">+</button>
 </div>
 
+<!-- Bottom tabs (iPhone) -->
+<nav class="mobile-tabbar" id="mobile-tabbar" aria-label="Navegación principal">
+    <button type="button" class="mobile-tab active" data-tab="lotes">
+        <span class="mobile-tab-icon">📦</span>
+        <span>Productos</span>
+        <span class="mobile-tab-badge" id="m-tab-lotes" hidden>0</span>
+    </button>
+    <button type="button" class="mobile-tab" data-tab="dashboard">
+        <span class="mobile-tab-icon">📊</span>
+        <span>Dashboard</span>
+    </button>
+    <button type="button" class="mobile-tab" data-tab="insights">
+        <span class="mobile-tab-icon">💡</span>
+        <span>Insights</span>
+        <span class="mobile-tab-badge" id="m-tab-insights" hidden>0</span>
+    </button>
+    <button type="button" class="mobile-tab" data-tab="settings">
+        <span class="mobile-tab-icon">⚙️</span>
+        <span>Ajustes</span>
+    </button>
+    <button type="button" class="mobile-tab" id="m-tab-more" aria-label="Más opciones">
+        <span class="mobile-tab-icon">☰</span>
+        <span>Más</span>
+    </button>
+</nav>
+
 <!-- ==================== MODAL EDICIÓN LOTE (con tabs) ==================== -->
 <div class="modal" id="modal-lote" hidden aria-hidden="true">
     <div class="modal-backdrop" data-close></div>
@@ -342,7 +369,7 @@
 <script src="js/dashboard.js?v=5"></script>
 <script src="js/sync.js?v=3"></script>
 <script src="js/settings.js?v=6"></script>
-<script src="js/app.js?v=9"></script>
+<script src="js/app.js?v=10"></script>
 
 </body>
 </html>
