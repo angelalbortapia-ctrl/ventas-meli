@@ -190,3 +190,4 @@ const Palette = (() => {
 
     return { init, open: openPalette, close };
 })();
+window.Palette = Palette;

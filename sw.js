@@ -1,9 +1,10 @@
 /* Service worker: cache-first local, network-first CDN. */
 
-const VERSION = 'vm-v32';
+const VERSION = 'vm-v37';
 const STATIC_ASSETS = [
     './',
     './index.html',
+    './reset.html',
     './manifest.json',
     './css/styles.css',
     './js/calc.js',

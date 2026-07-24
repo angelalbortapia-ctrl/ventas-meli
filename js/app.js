@@ -360,6 +360,84 @@ const App = (() => {
         }
     }
 
+    /** Borra ventas, restaura piezas del seed y sube a Sync si hay sesión. */
+    async function clearVentasRestore({ confirm = true } = {}) {
+        if (confirm) {
+            const ok = await UI.confirm({
+                title: 'Borrar ventas y restaurar piezas',
+                message: 'Se eliminarán <strong>todas las ventas registradas</strong> y el stock volverá a las piezas originales. Si Sync está activo, se subirá a Supabase para que no regresen.',
+                primaryLabel: 'Borrar y restaurar',
+                danger: true,
+            });
+            if (!ok) return false;
+        }
+        // Evita que realtime/pull vuelva a meter las ventas viejas
+        Sync?.holdRemote?.(25000);
+
+        let ventasCleared = 0;
+        if (typeof Data.clearVentasRestoreStock === 'function') {
+            const r = Data.clearVentasRestoreStock(window.State.lotes);
+            window.State.lotes = r.lotes;
+            ventasCleared = r.ventasCleared;
+        } else {
+            const bySku = Object.fromEntries(Data.SEED.map(s => [s.sku, s]));
+            window.State.lotes = window.State.lotes.map(l => {
+                const seed = bySku[l.sku];
+                if ((l.ventas || []).length || l.vendidas) ventasCleared++;
+                return Data.normalize({
+                    ...l,
+                    unidades: seed ? seed.unidades : l.unidades,
+                    ventas: [],
+                    vendidas: 0,
+                    estatus: '✅ Activa / En Venta',
+                }, []);
+            });
+        }
+        window.State.save();
+
+        try {
+            if (window.Sync?.pushNow) {
+                // Esperar un momento a que la sesión esté lista
+                for (let i = 0; i < 10; i++) {
+                    const st = Sync.getStatus?.()?.state;
+                    if (st === 'synced' || st === 'signed_in' || st === 'syncing') break;
+                    if (st === 'off' || st === 'ready' || st === 'error') break;
+                    await new Promise(r => setTimeout(r, 200));
+                }
+                const st = Sync.getStatus?.()?.state;
+                if (st === 'synced' || st === 'signed_in' || st === 'syncing') {
+                    await Sync.pushNow({ force: true });
+                }
+            }
+        } catch (err) {
+            console.warn('[app] push after clear ventas', err);
+            UI.toast('Local limpio, pero no se pudo subir a Sync: ' + (err.message || err), 'error');
+            return false;
+        }
+        UI.toast(ventasCleared
+            ? `Listo: ${ventasCleared} venta(s) borrada(s) · stock restaurado`
+            : 'Stock restaurado (no había ventas)');
+        if (window.State.view === 'dashboard') DashboardView.render();
+        else if (window.State.view === 'insights') InsightsView.render();
+        else if (window.State.view === 'lotes') LotesView.render();
+        refreshNavCounts();
+        return true;
+    }
+
+    async function maybeClearVentasFromUrl() {
+        const params = new URLSearchParams(location.search);
+        if (params.get('clearVentas') !== '1' && sessionStorage.getItem('vm:clearVentas') !== '1') return;
+        sessionStorage.setItem('vm:clearVentas', '1');
+        Sync?.holdRemote?.(30000);
+        // Esperar a que Sync termine el pull inicial
+        await new Promise(r => setTimeout(r, 2200));
+        await clearVentasRestore({ confirm: false });
+        sessionStorage.removeItem('vm:clearVentas');
+        params.delete('clearVentas');
+        const q = params.toString();
+        history.replaceState({}, '', location.pathname + (q ? '?' + q : '') + location.hash);
+    }
+
     // ---- Init ----------------------------------------------------------
     function init() {
         window.State.lotes = Data.loadLotes();
@@ -389,15 +467,20 @@ const App = (() => {
         };
 
         // Sync Supabase (después de wrap de dirty, Sync vuelve a envolver save)
-        if (window.Sync) {
-            Sync.init().catch(err => console.warn('[sync] init', err));
-        }
+        const syncReady = window.Sync
+            ? Sync.init().catch(err => console.warn('[sync] init', err))
+            : Promise.resolve();
 
         refreshBackupHint();
         // Más tarde: da tiempo a Sync.init() a restaurar sesión Supabase
         setTimeout(() => maybeRemindBackup(), 2200);
 
         switchTab('dashboard');
+
+        // ?clearVentas=1 → limpia después del pull de Sync
+        syncReady.finally(() => {
+            maybeClearVentasFromUrl().catch(err => console.warn('[clearVentas]', err));
+        });
     }
 
     if (document.readyState === 'loading') {
@@ -411,6 +494,7 @@ const App = (() => {
         exportExcel,
         openBackup,
         resetSettings,
+        clearVentasRestore,
         markBackupDone,
         markBackupNeeded,
         refreshBackupHint,

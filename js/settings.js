@@ -180,6 +180,12 @@ const SettingsView = (() => {
         });
         document.getElementById('set-resico')?.addEventListener('change', onResicoChange);
         document.getElementById('btn-reset-settings')?.addEventListener('click', () => window.App && window.App.resetSettings());
+        document.getElementById('btn-clear-ventas')?.addEventListener('click', () => {
+            const p = window.App?.clearVentasRestore?.({ confirm: true });
+            if (p && typeof p.catch === 'function') {
+                p.catch(err => UI.toast(err.message || 'Error', 'error'));
+            }
+        });
         loadIntoForm();
         initSyncUi();
     }

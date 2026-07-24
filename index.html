@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=36">
+    <link rel="stylesheet" href="css/styles.css?v=37">
 </head>
 <body>
 
@@ -169,6 +169,19 @@
                     <div id="sync-status" class="sync-status" style="margin-top:12px">⚪ Sin configurar</div>
                 </div>
 
+                <div class="card wide-card">
+                    <h3>Inventario</h3>
+                    <p class="muted small" style="margin-bottom:12px">
+                        Si probaste con ventas simuladas, esto borra <strong>todas las ventas</strong>,
+                        restaura las piezas originales del catálogo y, si Sync está activo, sube el cambio a la nube
+                        (para que no vuelvan a aparecer desde otro dispositivo).
+                    </p>
+                    <div class="sync-actions" style="display:flex;flex-wrap:wrap;gap:8px">
+                        <button class="btn danger btn-sm" type="button" id="btn-clear-ventas">Borrar ventas y restaurar piezas</button>
+                        <a class="btn ghost btn-sm" href="reset.html">Página de restauración</a>
+                    </div>
+                </div>
+
                 <div class="card">
                     <h3>Comisiones Mercado Libre</h3>
                     <label><span>Comisión Clásica (%)</span><input type="number" step="0.01" id="set-com-clasica"></label>
@@ -317,16 +330,16 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/calc.js?v=9"></script>
-<script src="js/data.js?v=10"></script>
+<script src="js/data.js?v=12"></script>
 <script src="js/excel.js?v=4"></script>
 <script src="js/ui.js?v=4"></script>
-<script src="js/palette.js?v=4"></script>
+<script src="js/palette.js?v=5"></script>
 <script src="js/insights.js?v=8"></script>
 <script src="js/lotes.js?v=18"></script>
 <script src="js/dashboard.js?v=16"></script>
-<script src="js/sync.js?v=5"></script>
-<script src="js/settings.js?v=8"></script>
-<script src="js/app.js?v=17"></script>
+<script src="js/sync.js?v=6"></script>
+<script src="js/settings.js?v=11"></script>
+<script src="js/app.js?v=19"></script>
 
 </body>
 </html>

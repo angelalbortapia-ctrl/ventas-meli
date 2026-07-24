@@ -15,6 +15,7 @@ const Sync = (() => {
     let lastRemoteAt = null;
     let localDirtyAt = 0;       // Date.now() de último save local pendiente de confirmar en nube
     let conflictBusy = false;   // evita diálogos apilados
+    let holdRemoteUntil = 0;    // tras reset local forzado, ignora pull/realtime un rato
     let status = { state: 'off', detail: 'Sin configurar', email: '' };
     const listeners = new Set();
 
@@ -277,8 +278,18 @@ const Sync = (() => {
         }
     }
 
+    /** Bloquea aplicar nube (p. ej. justo después de restaurar inventario). */
+    function holdRemote(ms = 15000) {
+        holdRemoteUntil = Date.now() + ms;
+    }
+
     async function handleIncomingRemote(row, { fromRealtime = false } = {}) {
         if (!row || pushing || applyingRemote) return;
+        if (Date.now() < holdRemoteUntil) {
+            // Preferir local: re-subir en vez de reaplicar ventas viejas
+            await pushNow({ force: true }).catch(() => {});
+            return;
+        }
         if (row.updated_at && lastRemoteAt && row.updated_at === lastRemoteAt) return;
 
         const remoteTs = row.updated_at ? new Date(row.updated_at).getTime() : 0;
@@ -303,6 +314,7 @@ const Sync = (() => {
         if (!c || applyingRemote) return;
         const { data: { user } } = await c.auth.getUser();
         if (!user) return;
+        if (force) holdRemote(20000);
 
         // Antes de pisar: si la nube avanzó y nosotros también, preguntar
         if (!force) {
@@ -358,7 +370,7 @@ const Sync = (() => {
         if (!user) return;
 
         const { data: row, error } = await c.from(TABLE).select('lotes, settings, updated_at').eq('user_id', user.id).maybeSingle();
-        if (!error && row) {
+        if (!error && row && Date.now() >= holdRemoteUntil) {
             // Solo aplicar si remoto es más nuevo o aún no tenemos marca
             const remoteTs = row.updated_at ? new Date(row.updated_at).getTime() : 0;
             const localTs = lastRemoteAt ? new Date(lastRemoteAt).getTime() : 0;
@@ -464,6 +476,7 @@ const Sync = (() => {
         signOut,
         pushNow,
         schedulePush,
+        holdRemote,
         getStatus,
         onStatus,
         bootSession,

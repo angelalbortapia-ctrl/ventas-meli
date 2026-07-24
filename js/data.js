@@ -192,6 +192,33 @@ const Data = (() => {
         localStorage.removeItem(SETTINGS_KEY);
     }
 
+    /**
+     * Borra todas las ventas y restaura unidades al seed original (por SKU).
+     * Productos nuevos (no seed) solo pierden ventas; mantienen sus unidades.
+     */
+    function clearVentasRestoreStock(lotes) {
+        const bySku = Object.fromEntries(SEED.map(s => [s.sku, s]));
+        let ventasCleared = 0;
+        const next = (lotes || []).map(l => {
+            const seed = bySku[l.sku];
+            const hadVentas = (Array.isArray(l.ventas) && l.ventas.length) || (Number(l.vendidas) || 0) > 0;
+            if (hadVentas) ventasCleared += Array.isArray(l.ventas) ? l.ventas.length : 1;
+            const estatus = seed
+                ? (seed.estatus || '✅ Activa / En Venta')
+                : (String(l.estatus || '').toLowerCase().includes('sin stock')
+                    ? '✅ Activa / En Venta'
+                    : l.estatus);
+            return normalize({
+                ...l,
+                unidades: seed ? seed.unidades : (Number(l.unidades) || 0),
+                ventas: [],
+                vendidas: 0,
+                estatus,
+            }, []);
+        });
+        return { lotes: next, ventasCleared };
+    }
+
     function autoSku(producto, variante, existentes) {
         const clean = s => String(s || '')
             .toUpperCase()
@@ -479,6 +506,7 @@ const Data = (() => {
         loadUI,
         saveUI,
         resetAll,
+        clearVentasRestoreStock,
         newId,
         autoSku,
         normalize,
