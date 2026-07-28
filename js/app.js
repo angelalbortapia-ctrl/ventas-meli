@@ -24,6 +24,16 @@ const App = (() => {
         if (tab === 'envios' && window.EnviosView && !EnviosView.isEnabled()) {
             tab = 'settings';
         }
+        // General es solo resumen: al ir a catálogo/ajustes, vuelve al último MP real
+        if (['lotes', 'envios', 'insights', 'settings'].includes(tab)
+            && window.State.ui?.mpView === 'general') {
+            const real = Data.normalizeMarketplace(window.State.marketplace);
+            window.State.ui = { ...window.State.ui, mpView: real };
+            window.State.saveUI();
+            refreshMarketplaceChrome();
+            const label = real === 'amazon' ? 'Amazon' : 'Mercado Libre';
+            UI.toast(`Catálogo ${label} (General es solo resumen)`);
+        }
         const view = document.getElementById('view-' + tab);
         if (!view) return;
         window.State.view = tab;
@@ -214,10 +224,10 @@ const App = (() => {
         UI.toast('Excel exportado');
     }
 
-    /** Con Supabase logueado, el respaldo en la nube sustituye al nag de JSON. */
+    /** Solo con Sync activo (push/pull), no basta con “signed_in”. */
     function cloudBackupActive() {
         const st = window.Sync?.getStatus?.()?.state;
-        return st === 'synced' || st === 'syncing' || st === 'signed_in';
+        return st === 'synced' || st === 'syncing';
     }
 
     function markBackupNeeded() {
@@ -263,28 +273,24 @@ const App = (() => {
     }
 
     async function maybeRemindBackup() {
-        // Esperar un momento a que Sync termine de bootear sesión
         await new Promise(r => setTimeout(r, 400));
         if (cloudBackupActive()) {
-            // Limpiar flag viejo para que no reaparezca
             if (window.State.ui?.backupDirty) markBackupDone();
             return;
         }
+        // No bloquear la UI con un modal a pantalla completa
+        if (sessionStorage.getItem('vm-backup-nag') === '1') return;
         const ui = window.State.ui || {};
         const last = ui.lastBackupAt ? new Date(ui.lastBackupAt) : null;
         const days = last ? Math.floor((Date.now() - last.getTime()) / 86400000) : 999;
-        if (ui.backupDirty || days >= 7) {
-            const ok = await UI.confirm({
-                title: 'Respaldo recomendado',
-                message: ui.backupDirty
-                    ? 'Hay cambios recientes guardados solo en este navegador. ¿Exportar un JSON de respaldo ahora?'
-                    : `Han pasado <strong>${days} días</strong> desde el último respaldo. Los datos viven en localStorage: un wipe del navegador los borra. ¿Exportar ahora?`,
-                primaryLabel: 'Exportar JSON',
-                cancelLabel: 'Después',
-            });
-            if (ok) exportJSON();
-            else markBackupDone(); // posponer nag; no bloquear el panel
-        }
+        if (!(ui.backupDirty || days >= 7)) return;
+        sessionStorage.setItem('vm-backup-nag', '1');
+        const msg = ui.backupDirty
+            ? 'Hay cambios sin respaldo JSON. En Meli/Amazon → Datos → Respaldo.'
+            : (last
+                ? `Llevas ${days}d sin respaldo. En Meli/Amazon → Datos → Respaldo.`
+                : 'Aún no hay respaldo JSON. En Meli/Amazon → Datos → Respaldo.');
+        UI.toast?.(msg, 'info', 4200);
     }
 
     // ---- Backup --------------------------------------------------------
@@ -309,13 +315,13 @@ const App = (() => {
                 if (data.stores?.meli || data.stores?.amazon) {
                     const m = data.stores.meli || { lotes: [], settings: {} };
                     const a = data.stores.amazon || { lotes: [], settings: {} };
-                    Data.saveLotes((m.lotes || []).map(l => Data.normalize(l, [])), 'meli');
+                    Data.saveLotes((m.lotes || []).map(l => Data.normalize(l, [], 'meli')), 'meli');
                     Data.saveSettings({ ...Calc.defaultsFor('meli'), ...(m.settings || {}), marketplace: 'meli' }, 'meli');
-                    Data.saveLotes((a.lotes || []).map(l => Data.normalize(l, [])), 'amazon');
+                    Data.saveLotes((a.lotes || []).map(l => Data.normalize(l, [], 'amazon')), 'amazon');
                     Data.saveSettings({ ...Calc.defaultsFor('amazon'), ...(a.settings || {}), marketplace: 'amazon' }, 'amazon');
                     const mp = data.marketplace === 'amazon' ? 'amazon' : 'meli';
                     window.State.marketplace = mp;
-                    window.State.ui = { ...window.State.ui, marketplace: mp };
+                    window.State.ui = { ...window.State.ui, marketplace: mp, mpView: mp };
                     window.State.saveUI();
                     window.State.lotes = Data.loadLotes(mp);
                     window.State.settings = Data.loadSettings(mp);
@@ -476,6 +482,59 @@ const App = (() => {
         return true;
     }
 
+    async function maybeFixCocoliFromUrl() {
+        const params = new URLSearchParams(location.search);
+        if (params.get('fix') !== 'cocoli') return;
+        window.State.switchMarketplace('amazon');
+        let lotes = Data.loadLotes('amazon');
+        // Prasada 2.28 L @ $439 → Calculadora: alm 1.75, varios 0 → $78.00
+        lotes = lotes.map(l => {
+            const name = String(l.producto || '').toLowerCase()
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            const sku = String(l.sku || '').toUpperCase();
+            const isPrasada = name.includes('prasada')
+                || (name.includes('aceite') && name.includes('coco') && name.includes('2.28'))
+                || sku.includes('PRASADA')
+                || (Number(l.precio) === 439 && Number(l.costo) === 295.64);
+            if (!isPrasada) return l;
+            return Data.normalize({
+                ...l,
+                tipo: 'FBA',
+                categoria: 'Alimentación y Gourmet',
+                categoriaAmazon: 'alimentacion',
+                tamanoFba: 'estandar',
+                pesoKg: Number(l.pesoKg) > 0 ? Number(l.pesoKg) : 2.28,
+                almacenamiento: 1.75,
+                varios: 0,
+                envio: 0,
+            }, lotes);
+        });
+        window.State.lotes = lotes;
+        window.State.settings = {
+            ...Data.loadSettings('amazon'),
+            referidoSobreSinIVA: true,
+            usarTablaCategorias: true,
+            usarTablaFba: true,
+        };
+        window.State.saveSettings();
+        window.State.save();
+        refreshMarketplaceChrome();
+        switchTab('lotes');
+        const l = lotes.find(x => {
+            const n = String(x.producto || '').toLowerCase();
+            return n.includes('prasada') || (Number(x.precio) === 439 && Number(x.costo) === 295.64);
+        });
+        if (l && window.LotesView?.selectAndGo) LotesView.selectAndGo(l.id);
+        else LotesView.render();
+        const c = l ? Calc.computeLote(l, window.State.settings) : null;
+        UI.toast(c
+            ? `Prasada alineado · utilidad ${Calc.fmtMXN(c.utilidad)}`
+            : 'No encontré Prasada Aceite de coco');
+        params.delete('fix');
+        const q = params.toString();
+        history.replaceState({}, '', location.pathname + (q ? '?' + q : '') + location.hash);
+    }
+
     async function maybeClearVentasFromUrl() {
         const params = new URLSearchParams(location.search);
         if (params.get('clearVentas') !== '1' && sessionStorage.getItem('vm:clearVentas') !== '1') return;
@@ -492,30 +551,66 @@ const App = (() => {
 
     function refreshMarketplaceChrome() {
         const mp = Data.normalizeMarketplace(window.State.marketplace);
+        const mpView = Data.normalizeMpView(
+            window.State.ui?.mpView === 'general' ? 'general' : (window.State.ui?.mpView || mp)
+        );
         const meta = Data.mpMeta(mp);
         document.querySelectorAll('[data-marketplace]').forEach(el => {
-            el.classList.toggle('active', el.dataset.marketplace === mp);
-            el.setAttribute('aria-selected', el.dataset.marketplace === mp ? 'true' : 'false');
+            const active = el.dataset.marketplace === mpView;
+            el.classList.toggle('active', active);
+            el.setAttribute('aria-selected', active ? 'true' : 'false');
         });
         const brand = document.querySelector('.sb-brand-text .name');
-        if (brand) brand.textContent = mp === 'amazon' ? 'Ventas Amazon' : 'Ventas Meli';
+        if (brand) {
+            brand.textContent = mpView === 'general'
+                ? 'Ventas Meli'
+                : (mp === 'amazon' ? 'Ventas Amazon' : 'Ventas Meli');
+        }
         const sub = document.querySelector('.sb-brand-text .sub');
-        if (sub) sub.textContent = mp === 'amazon' ? 'Amazon México · rentabilidad' : 'Mercado Libre · rentabilidad';
+        if (sub) {
+            sub.textContent = mpView === 'general'
+                ? 'Pulso del negocio · Meli + Amazon'
+                : (mp === 'amazon' ? 'Amazon México · rentabilidad' : 'Mercado Libre · rentabilidad');
+        }
         const root = document.querySelector('.tb-crumb-root');
-        if (root) root.textContent = meta.short;
+        if (root) root.textContent = mpView === 'general' ? 'General' : meta.short;
+        const curr = document.getElementById('tb-current');
+        if (curr && mpView === 'general') curr.textContent = 'Pulso';
         document.body.dataset.marketplace = mp;
+        document.body.dataset.mpView = mpView;
+
+        const themeMeta = document.querySelector('meta[name="theme-color"]');
+        if (themeMeta) {
+            themeMeta.content = mpView === 'general' ? '#1a73e8'
+                : (mpView === 'amazon' ? '#ff9900' : '#3483fa');
+        }
+
+        const isGeneral = mpView === 'general';
+        document.querySelectorAll('[data-hide-on-general]').forEach(el => {
+            el.hidden = isGeneral;
+        });
+        document.querySelectorAll('[data-show-on-general]').forEach(el => {
+            el.hidden = !isGeneral;
+        });
+        const mpHint = document.querySelector('.sb-mp-hint');
+        if (mpHint) {
+            mpHint.textContent = isGeneral
+                ? 'Consolida ambos canales. Agenda, metas y capital del negocio aquí.'
+                : 'General = corazón del negocio. Productos siguen por catálogo.';
+        }
+
         document.querySelectorAll('[data-mp-only]').forEach(el => {
-            el.hidden = el.dataset.mpOnly !== mp;
+            el.hidden = isGeneral || el.dataset.mpOnly !== mp;
         });
         document.querySelectorAll('[data-mp-field]').forEach(el => {
             el.hidden = el.dataset.mpField !== mp;
         });
         // Feature flags (p.ej. menú Envíos)
-        const prepOn = mp === 'amazon' && window.State.settings?.prepEnvioActivo !== false;
+        const prepOn = !isGeneral && mp === 'amazon' && window.State.settings?.prepEnvioActivo !== false;
         document.querySelectorAll('[data-feature="prep-envio"]').forEach(el => {
             el.hidden = !prepOn;
         });
-        if (window.State.view === 'envios' && !prepOn) {
+        if (!isGeneral && window.State.view === 'envios' && !prepOn) {
             switchTab('lotes');
         }
         // Labels del modal
@@ -524,7 +619,7 @@ const App = (() => {
         const envioLabel = document.querySelector('label:has(#f-envio) > span');
         if (envioLabel) {
             envioLabel.textContent = mp === 'amazon'
-                ? 'Fulfillment override (MXN)'
+                ? 'FBA override (MXN · vacío = tabla)'
                 : 'Envío al cliente (MXN)';
         }
         const tipoSel = document.getElementById('f-tipo');
@@ -552,21 +647,91 @@ const App = (() => {
         fillAmzCats(document.getElementById('set-amz-cat-default'), window.State.settings?.categoriaDefault);
     }
 
+    function applyMarketplaceView(mp, { toast = true } = {}) {
+        if (!mp) return;
+        const curView = Data.normalizeMpView(
+            window.State.ui?.mpView === 'general'
+                ? 'general'
+                : (window.State.ui?.mpView || window.State.marketplace)
+        );
+        if (mp === curView) return;
+
+        if (mp === 'general') {
+            window.State.ui = { ...window.State.ui, mpView: 'general' };
+            window.State.saveUI();
+            refreshMarketplaceChrome();
+            switchTab('dashboard');
+            if (toast) UI.toast('Consola General · Meli + Amazon');
+            return;
+        }
+
+        window.State.ui = { ...window.State.ui, mpView: mp };
+        window.State.saveUI();
+        if (mp !== window.State.marketplace) {
+            window.State.switchMarketplace(mp);
+        }
+        refreshMarketplaceChrome();
+        SettingsView.loadIntoForm();
+        if (window.State.view === 'dashboard') DashboardView.render();
+        else if (window.State.view === 'insights') InsightsView.render();
+        else if (window.State.view === 'lotes') LotesView.render();
+        else if (window.State.view === 'envios') EnviosView.render();
+        refreshNavCounts();
+        if (document.body.classList.contains('nav-open')) {
+            document.body.classList.remove('nav-open');
+            const overlay = document.getElementById('nav-overlay');
+            if (overlay) overlay.hidden = true;
+        }
+        if (toast) UI.toast(mp === 'amazon' ? 'Catálogo Amazon' : 'Catálogo Mercado Libre');
+    }
+
+    function scrollGeneralSection(id) {
+        if (!id) return;
+        const key = id.startsWith('gx-') ? id : `gx-${id}`;
+        const el = document.getElementById(key) || document.getElementById(id);
+        if (!el) {
+            UI.toast?.('Sección no disponible en esta vista', 'error');
+            return;
+        }
+        const scroller = el.closest('.dash-body') || el.closest('.content');
+        if (scroller) {
+            const sRect = scroller.getBoundingClientRect();
+            const eRect = el.getBoundingClientRect();
+            const top = scroller.scrollTop + (eRect.top - sRect.top) - 8;
+            scroller.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+        } else {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        document.querySelectorAll('[data-gx-jump]').forEach(b => {
+            b.classList.toggle('active', b.dataset.gxJump === key || b.dataset.gxJump === id);
+        });
+    }
+
     function initMarketplaceSwitch() {
-        document.querySelectorAll('[data-marketplace]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const mp = btn.dataset.marketplace;
-                if (!mp || mp === window.State.marketplace) return;
-                window.State.switchMarketplace(mp);
-                refreshMarketplaceChrome();
-                SettingsView.loadIntoForm();
-                if (window.State.view === 'dashboard') DashboardView.render();
-                else if (window.State.view === 'insights') InsightsView.render();
-                else if (window.State.view === 'lotes') LotesView.render();
-                else if (window.State.view === 'envios') EnviosView.render();
-                refreshNavCounts();
-                UI.toast(mp === 'amazon' ? 'Catálogo Amazon (vacío / propio)' : 'Catálogo Mercado Libre');
-            });
+        // Delegación: sobrevive a re-renders y evita botones “muertos”
+        document.body.addEventListener('click', (e) => {
+            const mpBtn = e.target.closest('.sb-mp [data-marketplace]');
+            if (mpBtn) {
+                e.preventDefault();
+                applyMarketplaceView(mpBtn.dataset.marketplace);
+                return;
+            }
+            const jump = e.target.closest('[data-mp-jump]');
+            if (jump) {
+                e.preventDefault();
+                applyMarketplaceView(jump.dataset.mpJump);
+                return;
+            }
+            const gx = e.target.closest('[data-gx-jump]');
+            if (gx) {
+                e.preventDefault();
+                if (window.State.ui?.mpView !== 'general') {
+                    applyMarketplaceView('general', { toast: false });
+                    setTimeout(() => scrollGeneralSection(gx.dataset.gxJump), 80);
+                } else {
+                    scrollGeneralSection(gx.dataset.gxJump);
+                }
+            }
         });
     }
 
@@ -574,6 +739,12 @@ const App = (() => {
     function init() {
         window.State.ui = Data.loadUI();
         window.State.marketplace = Data.normalizeMarketplace(window.State.ui.marketplace);
+        if (!window.State.ui.mpView) {
+            window.State.ui = {
+                ...window.State.ui,
+                mpView: window.State.marketplace === 'amazon' ? 'amazon' : 'meli',
+            };
+        }
         window.State.lotes = Data.loadLotes(window.State.marketplace);
         window.State.settings = Data.loadSettings(window.State.marketplace);
 
@@ -614,8 +785,10 @@ const App = (() => {
         switchTab('dashboard');
 
         // ?clearVentas=1 → limpia después del pull de Sync
+        // ?fix=cocoli → alinea Aceite de coco con Calculadora Amazon
         syncReady.finally(() => {
             maybeClearVentasFromUrl().catch(err => console.warn('[clearVentas]', err));
+            maybeFixCocoliFromUrl().catch(err => console.warn('[fix-cocoli]', err));
         });
     }
 
@@ -636,5 +809,7 @@ const App = (() => {
         refreshBackupHint,
         refreshNavCounts,
         refreshMarketplaceChrome,
+        applyMarketplaceView,
+        scrollGeneralSection,
     };
 })();

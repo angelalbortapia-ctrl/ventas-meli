@@ -6,13 +6,10 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>Ventas Meli — Gestor de Lotes y Rentabilidad</title>
-    <meta name="theme-color" content="#3b6ea8">
+    <meta name="theme-color" content="#3483fa">
     <link rel="manifest" href="manifest.json">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%233b6ea8'/%3E%3Ctext x='50' y='68' text-anchor='middle' font-size='60' fill='white' font-family='sans-serif' font-weight='bold'%3EM%3C/text%3E%3C/svg%3E">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=67">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23ffe600'/%3E%3Ctext x='50' y='68' text-anchor='middle' font-size='60' fill='%231a1a1a' font-family='Calibri,sans-serif' font-weight='bold'%3EM%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="css/styles.css?v=83">
 </head>
 <body>
 
@@ -33,11 +30,39 @@
         <div class="sb-mp" role="tablist" aria-label="Marketplace">
             <button type="button" class="sb-mp-btn active" data-marketplace="meli" role="tab" aria-selected="true">Mercado Libre</button>
             <button type="button" class="sb-mp-btn" data-marketplace="amazon" role="tab" aria-selected="false">Amazon</button>
+            <button type="button" class="sb-mp-btn" data-marketplace="general" role="tab" aria-selected="false">General</button>
         </div>
-        <p class="sb-mp-hint muted small">Catálogos separados. Amazon empieza vacío.</p>
+        <p class="sb-mp-hint muted small">General = corazón del negocio. Productos siguen por catálogo.</p>
     </div>
 
-    <div class="sb-section">
+    <div class="sb-section sb-general-panel" data-show-on-general hidden>
+        <h5>Navegación</h5>
+        <nav class="sb-gx-nav" aria-label="Secciones General">
+            <button type="button" class="sb-gx-link" data-gx-jump="gx-pulso">Pulso</button>
+            <button type="button" class="sb-gx-link" data-gx-jump="gx-metas">Metas</button>
+            <button type="button" class="sb-gx-link" data-gx-jump="gx-canales">Canales</button>
+            <button type="button" class="sb-gx-link" data-gx-jump="gx-acciones">Acciones</button>
+            <button type="button" class="sb-gx-link" data-gx-jump="gx-capital">Capital</button>
+            <button type="button" class="sb-gx-link" data-gx-jump="gx-progreso">Progreso</button>
+            <button type="button" class="sb-gx-link" data-gx-jump="gx-finanzas">Finanzas</button>
+        </nav>
+        <div class="sb-general-card">
+            <p class="sb-general-kicker">Catálogos</p>
+            <p class="sb-general-copy">General no mezcla inventarios. Entra al canal para editar productos.</p>
+            <div class="sb-general-actions">
+                <button type="button" class="sb-general-cta" data-mp-jump="meli">
+                    <span class="sb-general-dot meli" aria-hidden="true"></span>
+                    Mercado Libre
+                </button>
+                <button type="button" class="sb-general-cta" data-mp-jump="amazon">
+                    <span class="sb-general-dot amz" aria-hidden="true"></span>
+                    Amazon
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="sb-section" data-hide-on-general>
         <h5>Vistas</h5>
         <nav class="sb-nav" role="tablist">
             <button class="sb-item active" data-tab="dashboard" role="tab" aria-selected="true">
@@ -66,7 +91,7 @@
         </nav>
     </div>
 
-    <div class="sb-section">
+    <div class="sb-section" data-hide-on-general>
         <h5>Datos</h5>
         <nav class="sb-nav">
             <button class="sb-item" id="btn-import">
@@ -108,6 +133,10 @@
                 <span class="tb-crumb-root">Ventas Meli</span>
                 <span class="tb-sep">›</span>
                 <span class="curr" id="tb-current">Inicio</span>
+            </div>
+            <div class="tb-gx-status" data-show-on-general hidden>
+                <span class="tb-gx-pill">Consola ejecutiva</span>
+                <span class="tb-gx-live"><span class="tb-gx-live-dot"></span> En vivo</span>
             </div>
         </div>
         <div class="topbar-right">
@@ -375,14 +404,18 @@
                         <span>Almacenamiento FBA (MXN / ud)</span>
                         <input type="number" step="0.01" min="0" id="f-almacenamiento" placeholder="0 · desde Calculadora">
                     </label>
-                    <label><span>Envío al cliente (MXN)</span><input type="number" step="0.01" id="f-envio"></label>
+                    <label data-mp-field="amazon" hidden>
+                        <span>Varios / Otros (MXN / ud)</span>
+                        <input type="number" step="0.01" min="0" id="f-varios" placeholder="0 · p.ej. $1 Calculadora">
+                    </label>
+                    <label><span>Envío al cliente (MXN)</span><input type="number" step="0.01" id="f-envio" placeholder=""></label>
                     <label><span>Gasto Ads acumulado (MXN)</span><input type="number" step="0.01" id="f-gasto-ads" min="0" placeholder="0"></label>
                 </div>
                 <p class="muted small" style="margin-top:8px" data-mp-field="meli">El gasto Ads se compara vs el tope CPA por venta (en Rentabilidad).</p>
                 <p class="muted small" style="margin-top:8px" data-mp-field="amazon" hidden>
-                    Fulfillment: si dejas <strong>Envío/FBA</strong> vacío y es FBA, se calcula con la tabla (tamaño × peso × precio).
+                    Fulfillment FBA: deja el override vacío para usar la tabla (categoría × tamaño × peso × precio).
                     Si pones un monto, se usa como override. En FBM, ese campo es tu costo real de envío.
-                    <strong>Almacenamiento</strong>: copia el monto de la Calculadora de ingresos (p. ej. $1.09).
+                    <strong>Almacenamiento</strong> y <strong>Varios</strong>: copia los montos de la Calculadora de ingresos.
                 </p>
                 <div class="calc-preview" id="calc-preview"></div>
             </div>
@@ -413,18 +446,18 @@
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/calc.js?v=14"></script>
-<script src="js/data.js?v=24"></script>
+<script src="js/calc.js?v=17"></script>
+<script src="js/data.js?v=33"></script>
 <script src="js/excel.js?v=6"></script>
 <script src="js/ui.js?v=5"></script>
 <script src="js/palette.js?v=7"></script>
 <script src="js/insights.js?v=9"></script>
 <script src="js/envios.js?v=6"></script>
-<script src="js/lotes.js?v=43"></script>
-<script src="js/dashboard.js?v=43"></script>
-<script src="js/sync.js?v=8"></script>
+<script src="js/lotes.js?v=46"></script>
+<script src="js/dashboard.js?v=54"></script>
+<script src="js/sync.js?v=9"></script>
 <script src="js/settings.js?v=15"></script>
-<script src="js/app.js?v=22"></script>
+<script src="js/app.js?v=38"></script>
 
 </body>
 </html>

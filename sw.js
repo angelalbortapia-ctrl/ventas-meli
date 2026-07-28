@@ -1,10 +1,11 @@
-/* Service worker: cache-first local, network-first CDN. */
+/* Service worker: network-first local (evita CSS/JS viejos), fallback a cache offline. */
 
-const VERSION = 'vm-v85';
+const VERSION = 'vm-v110';
 const STATIC_ASSETS = [
     './',
     './index.html',
     './reset.html',
+    './clear-cache.html',
     './manifest.json',
     './css/styles.css',
     './js/calc.js',
@@ -29,12 +30,11 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-    event.waitUntil(
-        caches.keys().then(keys => Promise.all(
-            keys.filter(k => k !== VERSION).map(k => caches.delete(k))
-        ))
-    );
-    self.clients.claim();
+    event.waitUntil((async () => {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k)));
+        await self.clients.claim();
+    })());
 });
 
 self.addEventListener('fetch', event => {
@@ -42,32 +42,41 @@ self.addEventListener('fetch', event => {
     if (req.method !== 'GET') return;
 
     const url = new URL(req.url);
-
-    if (url.origin === self.location.origin) {
-        event.respondWith((async () => {
-            // ignoreSearch: sirve cache instalado aunque el HTML pida ?v=N
-            const cached = await caches.match(req, { ignoreSearch: true });
-            try {
-                const res = await fetch(req);
-                if (res && res.ok) {
-                    const cache = await caches.open(VERSION);
-                    await cache.put(new Request(url.origin + url.pathname), res.clone());
-                }
-                return res;
-            } catch {
-                return cached || Response.error();
-            }
-        })());
+    if (url.origin !== self.location.origin) {
+        event.respondWith(
+            fetch(req).catch(() => caches.match(req).then(c => c || Response.error()))
+        );
         return;
     }
 
-    event.respondWith(
-        fetch(req).then(res => {
+    const isNav = req.mode === 'navigate' || req.destination === 'document'
+        || url.pathname.endsWith('/') || url.pathname.endsWith('.html');
+
+    event.respondWith((async () => {
+        // HTML siempre fresco: si no, el ?v= del index se queda pegado
+        if (isNav) {
+            try {
+                const res = await fetch(req, { cache: 'no-store' });
+                if (res && res.ok) {
+                    const cache = await caches.open(VERSION);
+                    await cache.put('./index.html', res.clone()).catch(() => {});
+                }
+                return res;
+            } catch {
+                return (await caches.match('./index.html')) || Response.error();
+            }
+        }
+
+        try {
+            const res = await fetch(req, { cache: 'no-store' });
             if (res && res.ok) {
-                const clone = res.clone();
-                caches.open(VERSION).then(c => c.put(req, clone)).catch(() => {});
+                const cache = await caches.open(VERSION);
+                await cache.put(new Request(url.origin + url.pathname), res.clone());
             }
             return res;
-        }).catch(() => caches.match(req).then(c => c || Response.error()))
-    );
+        } catch {
+            const cached = await caches.match(req, { ignoreSearch: true });
+            return cached || Response.error();
+        }
+    })());
 });

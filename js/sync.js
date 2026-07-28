@@ -522,9 +522,9 @@ const Sync = (() => {
                 amazonSettings = stripSyncMeta(Data.loadSettings('amazon'));
             }
 
-            Data.saveLotes((row.lotes || []).map(l => Data.normalize(l, [])), 'meli');
+            Data.saveLotes((row.lotes || []).map(l => Data.normalize(l, [], 'meli')), 'meli');
             Data.saveSettings({ ...Calc.defaultsFor('meli'), ...meliSettings, marketplace: 'meli' }, 'meli');
-            Data.saveLotes(amazonLotes.map(l => Data.normalize(l, [])), 'amazon');
+            Data.saveLotes(amazonLotes.map(l => Data.normalize(l, [], 'amazon')), 'amazon');
             Data.saveSettings({
                 ...Calc.defaultsFor('amazon'),
                 ...stripSyncMeta(amazonSettings),

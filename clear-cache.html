@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Limpiar caché — Ventas Meli</title>
+  <style>
+    body { font-family: Calibri, Carlito, Candara, 'Segoe UI', Arial, sans-serif; max-width: 420px; margin: 48px auto; padding: 0 16px; color: #1a2332; }
+    h1 { font-size: 1.25rem; }
+    p { color: #5a6a7a; line-height: 1.45; }
+    #log { margin-top: 16px; font-family: Calibri, Carlito, Candara, 'Segoe UI', Arial, sans-serif; font-size: 12px; white-space: pre-wrap; background: #f4f6f8; padding: 12px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Limpiando caché…</h1>
+  <p>Esto borra el Service Worker y recarga la app con CSS/JS frescos.</p>
+  <div id="log">Iniciando…</div>
+  <script>
+    const log = (m) => { document.getElementById('log').textContent += '\n' + m; };
+    (async () => {
+      try {
+        const regs = await navigator.serviceWorker?.getRegistrations?.() || [];
+        for (const r of regs) {
+          await r.unregister();
+          log('SW desregistrado');
+        }
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+        log('Caches borrados: ' + (keys.join(', ') || '(ninguno)'));
+      } catch (e) {
+        log('Error: ' + (e && e.message));
+      }
+      log('Redirigiendo…');
+      setTimeout(() => {
+        location.replace('./?fresh=' + Date.now());
+      }, 400);
+    })();
+  </script>
+</body>
+</html>

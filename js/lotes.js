@@ -49,8 +49,6 @@ const LotesView = (() => {
         { value: 'en_transito', label: 'En tránsito' },
         { value: 'recibido', label: 'Recibido en FBA' },
     ];
-    // alias legacy
-    const ENVIO_ESTADOS_OPTS = ENVIO_ESTADOS_OPTS_FBM;
 
     function isMobile() {
         return window.matchMedia('(max-width: 768px)').matches;
@@ -82,10 +80,6 @@ const LotesView = (() => {
         // Baja total: 0/0 y sin ventas → ocultar
         if (uds <= 0 && rest <= 0 && !(lote.ventas || []).length) return false;
         return true;
-    }
-
-    function pendingShipCount() {
-        return window.EnviosView?.pendingCount?.() || 0;
     }
 
     function prepEnvioOn() {
@@ -686,6 +680,7 @@ const LotesView = (() => {
                 ${!isAmz && calc.cargoFijo ? `<div class="breakdown-row"><span class="label">Cargo fijo publicación</span><span class="val">− ${Calc.fmtMXN(calc.cargoFijo)}</span></div>` : ''}
                 <div class="breakdown-row"><span class="label">${envioLabel}${fbaNote}</span><span class="val">− ${Calc.fmtMXN(envioVal)}</span></div>
                 ${isAmz && (calc.almacenamiento > 0) ? `<div class="breakdown-row"><span class="label">Almacenamiento FBA</span><span class="val">− ${Calc.fmtMXN(calc.almacenamiento)}</span></div>` : ''}
+                ${isAmz && (calc.varios > 0) ? `<div class="breakdown-row"><span class="label">Varios / Otros</span><span class="val">− ${Calc.fmtMXN(calc.varios)}</span></div>` : ''}
                 ${!isAmz ? `
                 <div class="breakdown-row"><span class="label">Retención IVA SAT</span><span class="val">− ${Calc.fmtMXN(calc.retIVA)}</span></div>
                 <div class="breakdown-row"><span class="label">Retención ISR SAT</span><span class="val">− ${Calc.fmtMXN(calc.retISR)}</span></div>
@@ -1025,6 +1020,7 @@ const LotesView = (() => {
                 ${!isAmz && b.cargoFijo ? `<div class="breakdown-row"><span class="label">Cargo fijo</span><span class="val">− ${Calc.fmtMXN(b.cargoFijo)}</span></div>` : ''}
                 <div class="breakdown-row"><span class="label">${isAmz ? 'FBA / envío' : 'Envío'}</span><span class="val">− ${Calc.fmtMXN(b.envio)}</span></div>
                 ${isAmz && b.almacenamiento > 0 ? `<div class="breakdown-row"><span class="label">Almacenamiento FBA</span><span class="val">− ${Calc.fmtMXN(b.almacenamiento)}</span></div>` : ''}
+                ${isAmz && b.varios > 0 ? `<div class="breakdown-row"><span class="label">Varios / Otros</span><span class="val">− ${Calc.fmtMXN(b.varios)}</span></div>` : ''}
                 ${!isAmz ? `
                 <div class="breakdown-row"><span class="label">Retención IVA SAT</span><span class="val">− ${Calc.fmtMXN(b.retIVA)}</span></div>
                 <div class="breakdown-row"><span class="label">Retención ISR SAT</span><span class="val">− ${Calc.fmtMXN(b.retISR)}</span></div>
@@ -1999,6 +1995,7 @@ const LotesView = (() => {
         ['f-precio-comp','precioCompetencia'], ['f-precio','precio'],
         ['f-envio','envio'], ['f-gasto-ads','gastoAds'], ['f-estatus','estatus'],
         ['f-peso-kg','pesoKg'], ['f-tamano-fba','tamanoFba'], ['f-almacenamiento','almacenamiento'],
+        ['f-varios','varios'],
     ];
 
     function openModal(id = null) {
@@ -2061,6 +2058,7 @@ const LotesView = (() => {
             pesoKg: isAmz ? (Number(s.pesoKgDefault) || 0.3) : null,
             tamanoFba: isAmz ? (s.tamanoFbaDefault || 'estandar') : '',
             almacenamiento: 0,
+            varios: 0,
             fbaInboundEstado: '',
             ventas: [], historial: [],
         };
@@ -2107,13 +2105,21 @@ const LotesView = (() => {
             unidades: parseInt(document.getElementById('f-unidades').value) || 0,
             precioCompetencia: parseFloat(document.getElementById('f-precio-comp').value) || null,
             precio: parseFloat(document.getElementById('f-precio').value) || 0,
-            envio: parseFloat(document.getElementById('f-envio').value) || 0,
+            envio: (() => {
+                const raw = document.getElementById('f-envio')?.value;
+                if (raw === '' || raw == null) return 0;
+                const n = parseFloat(raw);
+                return Number.isFinite(n) && n > 0 ? n : 0;
+            })(),
             gastoAds: parseFloat(document.getElementById('f-gasto-ads')?.value) || 0,
             pesoKg: isAmz && pesoEl ? (parseFloat(pesoEl.value) || null) : (prev?.pesoKg ?? null),
             tamanoFba: isAmz && tamanoEl ? (tamanoEl.value || 'estandar') : (prev?.tamanoFba || ''),
             almacenamiento: isAmz
                 ? Math.max(0, parseFloat(document.getElementById('f-almacenamiento')?.value) || 0)
                 : (prev?.almacenamiento || 0),
+            varios: isAmz
+                ? Math.max(0, parseFloat(document.getElementById('f-varios')?.value) || 0)
+                : (prev?.varios || 0),
             fbaInboundEstado: prev?.fbaInboundEstado || '',
             ventas: prev?.ventas || [],
             historial: prev?.historial || [],
@@ -2143,6 +2149,7 @@ const LotesView = (() => {
             ${!isAmz && c.cargoFijo ? `<div class="cp-row"><span>Cargo fijo</span><span>− ${Calc.fmtMXN(c.cargoFijo)}</span></div>` : ''}
             <div class="cp-row"><span>${envioLabel}</span><span>− ${Calc.fmtMXN(envioVal)}</span></div>
             ${isAmz && c.almacenamiento > 0 ? `<div class="cp-row"><span>Almacenamiento FBA</span><span>− ${Calc.fmtMXN(c.almacenamiento)}</span></div>` : ''}
+            ${isAmz && c.varios > 0 ? `<div class="cp-row"><span>Varios / Otros</span><span>− ${Calc.fmtMXN(c.varios)}</span></div>` : ''}
             ${!isAmz ? `
             <div class="cp-row"><span>Retención IVA</span><span>− ${Calc.fmtMXN(c.retIVA)}</span></div>
             <div class="cp-row"><span>Retención ISR</span><span>− ${Calc.fmtMXN(c.retISR)}</span></div>
@@ -2180,14 +2187,17 @@ const LotesView = (() => {
     function selectAndGo(id) {
         window.App && window.App.switchTab('lotes');
         const lote = window.State.lotes.find(l => l.id === id);
-        if (lote) {
-            local.selected = familyKey(lote);
-            local.selectedVariant = lote.id;
-        } else {
+        if (!lote) {
             local.selected = null;
-            local.selectedVariant = id;
+            local.selectedVariant = null;
+            if (shellMounted) renderContent();
+            UI.toast?.('Producto no encontrado en este catálogo', 'error');
+            return false;
         }
+        local.selected = familyKey(lote);
+        local.selectedVariant = lote.id;
         if (shellMounted) renderContent();
+        return true;
     }
 
     // ---- Init ----------------------------------------------------------

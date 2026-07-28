@@ -39,6 +39,7 @@ const Calc = (() => {
      *   Cuadra con la Calculadora de ingresos (ej. $459.99 · 12% → $47.59).
      * FBA = tabla por tamaño × peso × banda de precio (si lote.envio vacío).
      * Almacenamiento = lote.almacenamiento (MXN/ud, opcional; calculadora lo estima aparte).
+     * Varios = lote.varios (MXN/ud, opcional; p.ej. $1 “Otros” de la Calculadora de ingresos).
      */
     const DEFAULT_SETTINGS_AMAZON = {
         marketplace: 'amazon',
@@ -213,6 +214,7 @@ const Calc = (() => {
         const cat = AMZ_CATEGORIES[categoryKey] || AMZ_CATEGORIES.otros;
         const p = Number(precio) || 0;
         if (cat.tier) {
+            if (p <= 0) return cat.tier.low;
             if (p <= cat.tier.upTo) return cat.tier.low;
             // tasa efectiva ponderada para display; el fee se calcula aparte
             return (cat.tier.upTo * cat.tier.low + (p - cat.tier.upTo) * cat.tier.high) / p;
@@ -320,7 +322,8 @@ const Calc = (() => {
         const at = utilidadAtPrice(lote, precio, s);
         const fulfill = at.envio != null ? at.envio : (Number(lote.envio) || 0);
         const alm = at.almacenamiento != null ? at.almacenamiento : (Number(lote.almacenamiento) || 0);
-        const fees = at.comisionVariable + at.cargoFijo + at.retIVA + at.retISR + fulfill + alm;
+        const varios = at.varios != null ? at.varios : Math.max(0, Number(lote.varios) || 0);
+        const fees = at.comisionVariable + at.cargoFijo + at.retIVA + at.retISR + fulfill + alm + varios;
         const costo = precio * (1 - margenObjetivo) - fees;
         return Math.max(0, costo);
     }
@@ -339,7 +342,8 @@ const Calc = (() => {
         const at = utilidadAtPrice(lote, precio, s);
         const envioFee = at.envio != null ? at.envio : (Number(lote.envio) || 0);
         const alm = at.almacenamiento != null ? at.almacenamiento : (Number(lote.almacenamiento) || 0);
-        const fees = at.comisionVariable + at.cargoFijo + envioFee + alm + at.retIVA + at.retISR;
+        const varios = at.varios != null ? at.varios : Math.max(0, Number(lote.varios) || 0);
+        const fees = at.comisionVariable + at.cargoFijo + envioFee + alm + varios + at.retIVA + at.retISR;
         const diff = actual - ideal; // + = compraste más caro que el tope
         let verdict = 'en_objetivo';
         if (diff > 0.5) verdict = 'arriba';
@@ -411,7 +415,8 @@ const Calc = (() => {
                 envio = fbaMeta.fee;
             }
             const almacenamiento = Math.max(0, Number(lote.almacenamiento) || 0);
-            const utilidad = precio - costo - comisionVariable - envio - almacenamiento;
+            const varios = Math.max(0, Number(lote.varios) || 0);
+            const utilidad = precio - costo - comisionVariable - envio - almacenamiento - varios;
             return {
                 utilidad,
                 margen: precio > 0 ? utilidad / precio : 0,
@@ -420,6 +425,7 @@ const Calc = (() => {
                 cargoFijo: 0,
                 envio,
                 almacenamiento,
+                varios,
                 retIVA: 0,
                 retISR: 0,
                 categoriaAmazon: catKey,
@@ -470,6 +476,9 @@ const Calc = (() => {
         const almacenamiento = unit.almacenamiento != null
             ? unit.almacenamiento
             : Math.max(0, Number(lote.almacenamiento) || 0);
+        const varios = unit.varios != null
+            ? unit.varios
+            : Math.max(0, Number(lote.varios) || 0);
         const roi = costo > 0 ? utilidad / costo : 0;
         const categoriaAmazon = unit.categoriaAmazon || null;
         const referidoMinimo = unit.referidoMinimo || null;
@@ -529,6 +538,7 @@ const Calc = (() => {
             cargoFijo,
             envio: envioEfectivo,
             almacenamiento,
+            varios,
             retIVA,
             retISR,
             categoriaAmazon,
@@ -566,10 +576,15 @@ const Calc = (() => {
         const diasSinVender = ultimaVenta ? Math.floor((Date.now() - ultimaVenta.getTime()) / (1000 * 60 * 60 * 24)) : diasEnListado;
 
         if (calc.estrategia === 'FINALIZADA') {
+            const mpLabel = (lote?._mp === 'amazon'
+                || window.State?.marketplace === 'amazon'
+                || String(lote?.tipo || '').toUpperCase() === 'FBA'
+                || String(lote?.tipo || '').toUpperCase() === 'FBM')
+                ? 'Amazon' : 'Mercado Libre';
             recs.push({
                 cls: 'warn', icon: '❌',
                 title: 'Publicación finalizada',
-                text: `No está activa en Mercado Libre. Stock restante: <strong>${stock}</strong>. Reactiva o liquida el inventario físico.`,
+                text: `No está activa en ${mpLabel}. Stock restante: <strong>${stock}</strong>. Reactiva o liquida el inventario físico.`,
             });
             return recs;
         }

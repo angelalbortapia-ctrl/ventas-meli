@@ -8,6 +8,11 @@ const DashboardView = (() => {
         const root = document.getElementById('dashboard-canvas');
         if (!root) return;
 
+        if (window.State.ui?.mpView === 'general') {
+            renderGeneral(root);
+            return;
+        }
+
         const lotes = window.State.lotes || [];
         const mpLabel = window.State.marketplace === 'amazon' ? 'Amazon' : 'Mercado Libre';
         persistAllocMigrations();
@@ -104,6 +109,1210 @@ const DashboardView = (() => {
         bind(root);
     }
 
+    function renderGeneral(root) {
+        persistAllocMigrations();
+        const both = Data.loadBothCatalogs();
+        window.__dashMpSettings = { meli: both.meli.settings, amazon: both.amazon.settings };
+        const aggMeli = Calc.aggregate(both.meli.lotes, both.meli.settings);
+        const aggAmz = Calc.aggregate(both.amazon.lotes, both.amazon.settings);
+        const rows = [
+            ...aggMeli.rows.map(r => ({ ...r, lote: { ...r.lote, _mp: 'meli' } })),
+            ...aggAmz.rows.map(r => ({ ...r, lote: { ...r.lote, _mp: 'amazon' } })),
+        ];
+        const lotesAll = rows.map(r => r.lote);
+        const nMeli = new Set(both.meli.lotes.map(l => l.productId || l.id)).size;
+        const nAmz = new Set(both.amazon.lotes.map(l => l.productId || l.id)).size;
+        const utilPot = rows.reduce((s, r) => {
+            const rest = r.calc.inventarioRestante || 0;
+            return s + (r.calc.utilidad || 0) * rest;
+        }, 0);
+        const aggCombined = {
+            capitalDesplegado: aggMeli.capitalDesplegado + aggAmz.capitalDesplegado,
+            cashIn: aggMeli.cashIn + aggAmz.cashIn,
+            gananciaRealizada: aggMeli.gananciaRealizada + aggAmz.gananciaRealizada,
+            valorInventario: aggMeli.valorInventario + aggAmz.valorInventario,
+            margenPonderado: 0,
+            totalUds: aggMeli.totalUds + aggAmz.totalUds,
+            totalVendidas: aggMeli.totalVendidas + aggAmz.totalVendidas,
+            strategyCount: mergeStrategyCounts(aggMeli.strategyCount, aggAmz.strategyCount),
+            rows,
+        };
+        if (aggCombined.totalUds > 0) {
+            const w = rows.reduce((s, r) => s + r.calc.margen * (Number(r.lote.unidades) || 0), 0);
+            aggCombined.margenPonderado = w / aggCombined.totalUds;
+        }
+        const ctx = buildContext(aggCombined);
+        ctx.isGeneral = true;
+        ctx.isAmazon = null;
+
+        const hardMeli = channelHardMetrics(aggMeli, both.meli.lotes, false);
+        const hardAmz = channelHardMetrics(aggAmz, both.amazon.lotes, true);
+        const monthStats = monthToDateStats(lotesAll);
+        const goals = readGeneralGoals();
+        const split = suggestCapitalSplit(hardMeli, hardAmz);
+        const nextBuy = buildNextBuyLists(rows);
+        const agenda = buildGeneralAgenda(rows, nextBuy, split);
+        const alerts = buildGeneralAlerts(rows);
+        const allocUnified = unifiedAllocState();
+        const exec = {
+            nMeli, nAmz, utilPot, aggCombined, aggMeli, aggAmz,
+            hardMeli, hardAmz, monthStats, goals, split, nextBuy, agenda, alerts, allocUnified,
+        };
+
+        const chartPeriod = ['weeks', 'years'].includes(window.State.ui?.dashChartPeriod)
+            ? window.State.ui.dashChartPeriod
+            : 'months';
+        const chartRange = [3, 6, 12, 24].includes(Number(window.State.ui?.dashChartRange))
+            ? Number(window.State.ui.dashChartRange)
+            : 12;
+        const chartShowEmpty = window.State.ui?.dashChartEmpty === true;
+        const chartType = ['hero', 'bars', 'lines', 'area'].includes(window.State.ui?.dashChartType)
+            ? window.State.ui.dashChartType
+            : 'hero';
+        const fromResolved = resolveChartFrom(window.State.ui);
+
+        if (!lotesAll.length) {
+            root.innerHTML = `
+                <div class="dash-shell">
+                    <div class="dash-body dash-body-combined">
+                        <div class="dash-empty-full">
+                            <h2>Vista ejecutiva vacía</h2>
+                            <p class="muted">Agrega productos en Mercado Libre o Amazon para ver el consolidado.</p>
+                            <div class="dash-empty-actions">
+                                <button type="button" class="btn primary" data-dash-goto-mp="meli">Abrir Mercado Libre</button>
+                                <button type="button" class="btn" data-dash-goto-mp="amazon">Abrir Amazon</button>
+                            </div>
+                        </div>
+                        <section class="dash-section">
+                            <h2 class="dash-section-title">Capital unificado</h2>
+                            ${layCapitalUnificado(allocUnified)}
+                        </section>
+                    </div>
+                </div>`;
+            bind(root);
+            return;
+        }
+
+        root.innerHTML = `
+            <div class="dash-shell dash-shell-general" id="dash-general-root">
+                <div class="dash-body dash-body-combined gx-body">
+                    ${layGeneralExecutive(exec)}
+                    <section class="dash-section gx-block" id="gx-progreso">
+                        <div class="gx-block-head">
+                            <div>
+                                <p class="gx-block-kicker">05</p>
+                                <h2 class="gx-block-title">Progreso</h2>
+                            </div>
+                            <div class="dash-chart-toggles">
+                                <div class="dash-seg" role="group" aria-label="Granularidad">
+                                    <button type="button" class="dash-seg-btn${chartPeriod === 'weeks' ? ' active' : ''}" data-dash-period="weeks">Semanas</button>
+                                    <button type="button" class="dash-seg-btn${chartPeriod === 'months' ? ' active' : ''}" data-dash-period="months">Meses</button>
+                                    <button type="button" class="dash-seg-btn${chartPeriod === 'years' ? ' active' : ''}" data-dash-period="years">Años</button>
+                                </div>
+                                <div class="dash-seg" role="group" aria-label="Tipo de gráfica">
+                                    <button type="button" class="dash-seg-btn${chartType === 'hero' ? ' active' : ''}" data-dash-type="hero">Hero</button>
+                                    <button type="button" class="dash-seg-btn${chartType === 'bars' ? ' active' : ''}" data-dash-type="bars">Barras</button>
+                                    <button type="button" class="dash-seg-btn${chartType === 'lines' ? ' active' : ''}" data-dash-type="lines">Líneas</button>
+                                    <button type="button" class="dash-seg-btn${chartType === 'area' ? ' active' : ''}" data-dash-type="area">Área</button>
+                                </div>
+                            </div>
+                        </div>
+                        ${layProgreso(lotesAll, {
+                            period: chartPeriod,
+                            range: chartRange,
+                            showEmpty: chartShowEmpty,
+                            chartType,
+                            fromDate: fromResolved.iso,
+                            fromPreset: fromResolved.preset,
+                        })}
+                    </section>
+                    <section class="dash-section gx-block" id="gx-finanzas">
+                        <div class="gx-block-head">
+                            <div>
+                                <p class="gx-block-kicker">06</p>
+                                <h2 class="gx-block-title">Finanzas</h2>
+                            </div>
+                            <p class="gx-block-lead">P&amp;G, caja y portafolio consolidado.</p>
+                        </div>
+                        <div class="gx-fin-stack">
+                            <div>
+                                <h3 class="gx-fin-h">P&amp;G</h3>
+                                ${layPyG(ctx)}
+                            </div>
+                            <div>
+                                <h3 class="gx-fin-h">Caja</h3>
+                                ${layCaja(ctx)}
+                            </div>
+                            <div>
+                                <h3 class="gx-fin-h">Portafolio</h3>
+                                ${layPortafolio(ctx)}
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>`;
+        bind(root);
+        bindGeneralExecutive(root, exec);
+    }
+
+    function mergeStrategyCounts(a = {}, b = {}) {
+        const keys = ['ESCALAR', 'MANTENER', 'LIQUIDAR', 'AGOTADO', 'PAUSADA', 'FINALIZADA'];
+        const out = {};
+        keys.forEach(k => { out[k] = (a[k] || 0) + (b[k] || 0); });
+        return out;
+    }
+
+    function settingsForTaggedLote(lote) {
+        const mp = lote?._mp;
+        if (mp === 'amazon' || mp === 'meli') {
+            return window.__dashMpSettings?.[mp] || Data.loadSettings(mp);
+        }
+        return window.State.settings;
+    }
+
+    function channelHardMetrics(agg, lotes, isAmazon) {
+        let fees = 0;
+        let gastoAds = 0;
+        let costoVendido = 0;
+        let stockUds = 0;
+        (agg.rows || []).forEach(({ lote, calc }) => {
+            const v = calc.vendidas || 0;
+            fees += (calc.comisionVariable + calc.cargoFijo + calc.retIVA + calc.retISR) * v;
+            fees += ((Number(calc.envio) || 0)
+                + (Number(calc.almacenamiento) || 0)
+                + (Number(calc.varios) || 0)) * v;
+            costoVendido += (Number(lote.costo) || 0) * v;
+            gastoAds += Number(calc.gastoAds) || 0;
+            stockUds += Number(calc.inventarioRestante) || 0;
+        });
+        const cash = agg.cashIn || 0;
+        const capital = agg.capitalDesplegado || 0;
+        const roiCapital = capital > 0 ? (agg.gananciaRealizada || 0) / capital : 0;
+        const feePct = cash > 0 ? fees / cash : 0;
+        const adsPct = cash > 0 ? gastoAds / cash : 0;
+        const feeAdsPct = cash > 0 ? (fees + gastoAds) / cash : 0;
+        const uds30 = salesUdsLastDays(lotes, 30);
+        const diasInv = uds30 > 0
+            ? stockUds / (uds30 / 30)
+            : (stockUds > 0 ? null : 0);
+        const rotacion = agg.totalUds > 0 ? (agg.totalVendidas || 0) / agg.totalUds : 0;
+        return {
+            fees, gastoAds, costoVendido, feePct, adsPct, feeAdsPct,
+            roiCapital, diasInv, rotacion, stockUds, uds30,
+            cashIn: cash,
+            ganancia: agg.gananciaRealizada || 0,
+            capital,
+            valorInventario: agg.valorInventario || 0,
+            strategyCount: agg.strategyCount || {},
+        };
+    }
+
+    function salesUdsLastDays(lotes, days) {
+        const cut = Date.now() - days * 86400000;
+        let uds = 0;
+        (lotes || []).forEach(lote => {
+            const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
+            ventas.forEach(v => {
+                const d = parseSaleDate(v.fecha);
+                if (!d || d.getTime() < cut) return;
+                uds += Math.max(0, Number(v.unidades) || 0);
+            });
+        });
+        return uds;
+    }
+
+    function monthToDateStats(lotes) {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = now.getMonth();
+        const start = new Date(y, m, 1);
+        const daysInMonth = new Date(y, m + 1, 0).getDate();
+        const daysElapsed = Math.max(1, now.getDate());
+        let cashIn = 0;
+        let ganancia = 0;
+        let unidades = 0;
+        (lotes || []).forEach(lote => {
+            const settings = settingsForTaggedLote(lote);
+            const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
+            if (ventas.length) {
+                ventas.forEach(v => {
+                    const d = parseSaleDate(v.fecha);
+                    if (!d || d < start) return;
+                    const uds = Math.max(0, Number(v.unidades) || 0);
+                    const precio = Number(v.precio) || 0;
+                    cashIn += precio * uds;
+                    ganancia += Calc.utilidadAtPrice(lote, precio, settings).utilidad * uds;
+                    unidades += uds;
+                });
+                return;
+            }
+            // Legacy sin fechas: no cuenta en mes (evita inflar)
+        });
+        const projGain = ganancia / daysElapsed * daysInMonth;
+        const projCash = cashIn / daysElapsed * daysInMonth;
+        const monthLabel = now.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+        return {
+            cashIn, ganancia, unidades, daysElapsed, daysInMonth,
+            projGain, projCash, monthLabel,
+            monthKey: `${y}-${pad2(m + 1)}`,
+        };
+    }
+
+    function readGeneralGoals() {
+        const now = new Date();
+        const monthKey = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
+        const raw = window.State.ui?.generalGoals && typeof window.State.ui.generalGoals === 'object'
+            ? window.State.ui.generalGoals
+            : {};
+        return {
+            monthKey,
+            utilidad: Math.max(0, Number(raw.monthKey === monthKey ? raw.utilidad : raw.utilidad) || 0),
+            cashIn: Math.max(0, Number(raw.monthKey === monthKey ? raw.cashIn : raw.cashIn) || 0),
+        };
+    }
+
+    function saveGeneralGoals(patch) {
+        const cur = readGeneralGoals();
+        const next = {
+            monthKey: cur.monthKey,
+            utilidad: patch.utilidad != null ? Math.max(0, Number(patch.utilidad) || 0) : cur.utilidad,
+            cashIn: patch.cashIn != null ? Math.max(0, Number(patch.cashIn) || 0) : cur.cashIn,
+        };
+        window.State.ui = { ...window.State.ui, generalGoals: next };
+        window.State.saveUI();
+        return next;
+    }
+
+    function suggestCapitalSplit(hardMeli, hardAmz) {
+        const score = (h) => {
+            const roi = Math.max(0, h.roiCapital || 0);
+            const rot = Math.max(0, h.rotacion || 0);
+            const feePenalty = Math.max(0, 1 - (h.feeAdsPct || 0));
+            return roi * 0.55 + rot * 0.35 + feePenalty * 0.1;
+        };
+        const sM = score(hardMeli);
+        const sA = score(hardAmz);
+        const sum = sM + sA;
+        let pctMeli = 50;
+        let pctAmz = 50;
+        if (sum > 0.0001) {
+            pctMeli = Math.round((sM / sum) * 100);
+            pctAmz = 100 - pctMeli;
+        }
+        // Evitar extremos si ambos canales tienen actividad
+        if ((hardMeli.capital > 0 || hardMeli.cashIn > 0) && (hardAmz.capital > 0 || hardAmz.cashIn > 0)) {
+            pctMeli = Math.min(80, Math.max(20, pctMeli));
+            pctAmz = 100 - pctMeli;
+        } else if (hardMeli.capital <= 0 && hardMeli.cashIn <= 0) {
+            pctMeli = 0;
+            pctAmz = 100;
+        } else if (hardAmz.capital <= 0 && hardAmz.cashIn <= 0) {
+            pctMeli = 100;
+            pctAmz = 0;
+        }
+        let winner = 'Empate';
+        let line = 'Ambos canales rinden parecido; reparte según capacidad operativa.';
+        if (pctMeli >= pctAmz + 8) {
+            winner = 'Mercado Libre';
+            line = `Meli rinde mejor por capital/rotación. Sugiere ~${pctMeli}% del próximo peso ahí.`;
+        } else if (pctAmz >= pctMeli + 8) {
+            winner = 'Amazon';
+            line = `Amazon rinde mejor por capital/rotación. Sugiere ~${pctAmz}% del próximo peso ahí.`;
+        }
+        return { pctMeli, pctAmz, winner, line, scoreMeli: sM, scoreAmz: sA };
+    }
+
+    function buildNextBuyLists(rows) {
+        const active = (rows || []).filter(r => isRankable(r));
+        const byProd = groupBestByProduct(active);
+        const escalate = byProd
+            .filter(r => r.calc.estrategia === 'ESCALAR' || r.calc.estrategia === 'AGOTADO')
+            .sort((a, b) => {
+                const score = (r) => (r.calc.roi || 0) * 0.5
+                    + (r.calc.margen || 0) * 0.3
+                    + (r.calc.estrategia === 'AGOTADO' ? 0.2 : 0)
+                    + Math.min(1, (r.calc.rotacion || 0)) * 0.2
+                    - Math.min(0.3, (r.calc.inventarioRestante || 0) / 20);
+                return score(b) - score(a);
+            })
+            .slice(0, 3);
+        const liquidate = byProd
+            .filter(r => r.calc.estrategia === 'LIQUIDAR' && (r.calc.inventarioRestante || 0) > 0)
+            .sort((a, b) => (b.calc.valorInventario || 0) - (a.calc.valorInventario || 0))
+            .slice(0, 3);
+        return { escalate, liquidate };
+    }
+
+    function buildGeneralAlerts(rows) {
+        const nEscLow = rows.filter(r =>
+            r.calc.estrategia === 'ESCALAR' && (r.calc.inventarioRestante || 0) > 0 && (r.calc.inventarioRestante || 0) <= 2
+        ).length;
+        const nLiq = rows.filter(r =>
+            r.calc.estrategia === 'LIQUIDAR' && (r.calc.inventarioRestante || 0) >= 3
+        ).length;
+        const nAgot = rows.filter(r => r.calc.estrategia === 'AGOTADO').length;
+        const nAds = rows.filter(r => r.calc.adsStatus === 'over' || r.calc.adsStatus === 'near').length;
+        const parts = [];
+        if (nEscLow) parts.push(`${nEscLow} SKU${nEscLow === 1 ? '' : 's'} ESCALAR con stock bajo`);
+        if (nLiq) parts.push(`${nLiq} a liquidar`);
+        if (nAgot) parts.push(`${nAgot} agotado${nAgot === 1 ? '' : 's'}`);
+        if (nAds) parts.push(`${nAds} con Ads cerca/sobre tope`);
+        return {
+            nEscLow, nLiq, nAgot, nAds,
+            line: parts.length ? parts.join(' · ') : 'Sin alertas críticas hoy',
+            has: parts.length > 0,
+        };
+    }
+
+    function agendaDayKey() {
+        const d = new Date();
+        return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    }
+
+    function readAgendaDone() {
+        const key = agendaDayKey();
+        const store = window.State.ui?.generalAgendaDone && typeof window.State.ui.generalAgendaDone === 'object'
+            ? window.State.ui.generalAgendaDone
+            : {};
+        const list = Array.isArray(store[key]) ? store[key] : [];
+        return { key, set: new Set(list.map(String)) };
+    }
+
+    function toggleAgendaDone(id, done) {
+        const { key, set } = readAgendaDone();
+        if (done) set.add(String(id));
+        else set.delete(String(id));
+        const prev = window.State.ui?.generalAgendaDone && typeof window.State.ui.generalAgendaDone === 'object'
+            ? { ...window.State.ui.generalAgendaDone }
+            : {};
+        prev[key] = [...set];
+        // Limpia días viejos (queda hoy + ayer)
+        const keys = Object.keys(prev).sort();
+        while (keys.length > 3) {
+            delete prev[keys.shift()];
+        }
+        window.State.ui = { ...window.State.ui, generalAgendaDone: prev };
+        window.State.saveUI();
+    }
+
+    function buildGeneralAgenda(rows, nextBuy, split) {
+        const items = [];
+        (nextBuy.escalate || []).slice(0, 2).forEach(r => {
+            const mp = r.lote._mp || 'meli';
+            const stock = r.calc.inventarioRestante || 0;
+            items.push({
+                id: `restock:${mp}:${r.lote.id}`,
+                kind: 'restock',
+                title: stock <= 2 || r.calc.estrategia === 'AGOTADO'
+                    ? `Reponer · ${short(r.lote.producto, 36)}`
+                    : `Escalar · ${short(r.lote.producto, 36)}`,
+                sub: `${mp === 'amazon' ? 'Amazon' : 'Meli'} · util ${Calc.fmtMXN(r.calc.utilidad)} · stock ${stock}`,
+                mp,
+                loteId: r.lote.id,
+            });
+        });
+        (nextBuy.liquidate || []).slice(0, 2).forEach(r => {
+            const mp = r.lote._mp || 'meli';
+            items.push({
+                id: `liq:${mp}:${r.lote.id}`,
+                kind: 'liquidate',
+                title: `Liquidar · ${short(r.lote.producto, 36)}`,
+                sub: `${mp === 'amazon' ? 'Amazon' : 'Meli'} · atrapado ${Calc.fmtMXN(r.calc.valorInventario)}`,
+                mp,
+                loteId: r.lote.id,
+            });
+        });
+        const feeHeavy = (rows || [])
+            .filter(r => (r.calc.vendidas || 0) > 0 && (r.calc.margen || 0) < 0.12)
+            .sort((a, b) => (a.calc.margen || 0) - (b.calc.margen || 0))[0];
+        if (feeHeavy) {
+            const mp = feeHeavy.lote._mp || 'meli';
+            items.push({
+                id: `fee:${mp}:${feeHeavy.lote.id}`,
+                kind: 'fee',
+                title: `Revisar margen · ${short(feeHeavy.lote.producto, 36)}`,
+                sub: `Margen ${Calc.fmtPct(feeHeavy.calc.margen)} · posible fee/precio`,
+                mp,
+                loteId: feeHeavy.lote.id,
+            });
+        }
+        const reinversion = unifiedAllocState().buckets.reinversion || 0;
+        if (reinversion > 0) {
+            items.push({
+                id: `capital:split`,
+                kind: 'capital',
+                title: `Desplegar reinversión · ${Calc.fmtMXN(reinversion)}`,
+                sub: split.line,
+                mp: split.pctAmz > split.pctMeli ? 'amazon' : 'meli',
+                loteId: '',
+            });
+        }
+        const done = readAgendaDone();
+        return items.slice(0, 6).map(it => ({ ...it, done: done.set.has(it.id) }));
+    }
+
+    function unifiedAllocState() {
+        const meli = readAllocStateFor('meli');
+        const amz = readAllocStateFor('amazon');
+        const buckets = emptyAllocBuckets();
+        ALLOC_BUCKETS.forEach(({ key }) => {
+            buckets[key] = round2((meli.buckets[key] || 0) + (amz.buckets[key] || 0));
+        });
+        const total = round2(ALLOC_BUCKETS.reduce((s, b) => s + (buckets[b.key] || 0), 0));
+        const percents = total > 0
+            ? Object.fromEntries(ALLOC_BUCKETS.map(b => [b.key, round2(((buckets[b.key] || 0) / total) * 100)]))
+            : defaultAllocPercents();
+        return { buckets, percents, total, meli, amz };
+    }
+
+    function fmtDaysInv(d) {
+        if (d == null || !Number.isFinite(d)) return 'Sin rotación 30d';
+        if (d <= 0) return '0 d';
+        if (d > 999) return '>999 d';
+        return `${Math.round(d)} d`;
+    }
+
+    const DEALS_SEED = [
+        {
+            id: 'seed-wm-1',
+            store: 'walmart',
+            title: 'Ofertas Walmart México',
+            note: 'Revisa electrónicos y hogar',
+            tag: 'Walmart',
+            url: 'https://www.walmart.com.mx/contenido/ofertas',
+        },
+        {
+            id: 'seed-wm-2',
+            store: 'walmart',
+            title: 'Walmart · Super precios',
+            note: 'Ideas de recompra / sourcing',
+            tag: 'Promo',
+            url: 'https://www.walmart.com.mx/',
+        },
+        {
+            id: 'seed-costco-1',
+            store: 'costco',
+            title: 'Costco México · ofertas',
+            note: 'Mayoreo y warehouse',
+            tag: 'Costco',
+            url: 'https://www.costco.com.mx/',
+        },
+        {
+            id: 'seed-costco-2',
+            store: 'costco',
+            title: 'Costco · Especiales del mes',
+            note: 'Compara vs tu costo actual',
+            tag: 'Especial',
+            url: 'https://www.costco.com.mx/',
+        },
+    ];
+
+    function normalizeDeal(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        const store = String(raw.store || 'otro').toLowerCase();
+        const title = String(raw.title || '').trim();
+        const url = String(raw.url || '').trim();
+        if (!title || !url) return null;
+        return {
+            id: String(raw.id || (`d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`)),
+            store: ['walmart', 'costco', 'otro'].includes(store) ? store : 'otro',
+            title,
+            note: String(raw.note || '').trim(),
+            tag: String(raw.tag || '').trim() || (store === 'walmart' ? 'Walmart' : store === 'costco' ? 'Costco' : 'Oferta'),
+            url,
+        };
+    }
+
+    function loadDeals() {
+        const raw = window.State.ui?.dealsTicker;
+        if (Array.isArray(raw) && raw.length) {
+            const list = raw.map(normalizeDeal).filter(Boolean);
+            if (list.length) return list;
+        }
+        return DEALS_SEED.map(d => ({ ...d }));
+    }
+
+    function saveDeals(list) {
+        const dealsTicker = (list || []).map(normalizeDeal).filter(Boolean);
+        window.State.ui = { ...window.State.ui, dealsTicker };
+        window.State.saveUI();
+        return dealsTicker;
+    }
+
+    function storeLabel(store) {
+        if (store === 'walmart') return 'Walmart';
+        if (store === 'costco') return 'Costco';
+        return 'Otro';
+    }
+
+    function layDealsTicker() {
+        const deals = loadDeals();
+        const items = deals.length ? deals : DEALS_SEED;
+        // Duplicar pista para loop continuo
+        const track = [...items, ...items].map(d => `
+            <a class="gx-ticker-item store-${esc(d.store)}" href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">
+                <span class="gx-ticker-tag">${esc(d.tag || storeLabel(d.store))}</span>
+                <span class="gx-ticker-title">${esc(d.title)}</span>
+                ${d.note ? `<span class="gx-ticker-note">${esc(d.note)}</span>` : ''}
+            </a>
+        `).join('<span class="gx-ticker-sep" aria-hidden="true">·</span>');
+        return `
+            <div class="gx-ticker" role="region" aria-label="Ofertas Walmart y Costco">
+                <div class="gx-ticker-label">
+                    <span>Ofertas</span>
+                    <button type="button" class="gx-ticker-manage" data-deals-open title="Gestionar ofertas">✎</button>
+                </div>
+                <div class="gx-ticker-viewport">
+                    <div class="gx-ticker-track">${track}</div>
+                </div>
+            </div>
+            <div class="gx-deals-panel" data-deals-panel hidden>
+                <div class="gx-deals-panel-card">
+                    <div class="gx-deals-panel-head">
+                        <div>
+                            <h3>Ofertas del ticker</h3>
+                            <p class="muted small">Cárgalas a mano o importa un JSON. No scrapea Walmart/Costco automáticamente.</p>
+                        </div>
+                        <button type="button" class="icon-btn" data-deals-close aria-label="Cerrar">×</button>
+                    </div>
+                    <form class="gx-deals-form" data-deals-form>
+                        <label class="gx-field"><span>Tienda</span>
+                            <select name="store">
+                                <option value="walmart">Walmart</option>
+                                <option value="costco">Costco</option>
+                                <option value="otro">Otro</option>
+                            </select>
+                        </label>
+                        <label class="gx-field"><span>Título</span>
+                            <input name="title" required placeholder="Ej. TV 55&quot; en oferta" maxlength="80">
+                        </label>
+                        <label class="gx-field"><span>Nota</span>
+                            <input name="note" placeholder="Opcional" maxlength="80">
+                        </label>
+                        <label class="gx-field"><span>Etiqueta</span>
+                            <input name="tag" placeholder="−20% / Promo" maxlength="20">
+                        </label>
+                        <label class="gx-field gx-field-wide"><span>URL</span>
+                            <input name="url" type="url" required placeholder="https://www.walmart.com.mx/...">
+                        </label>
+                        <button type="submit" class="btn primary">Agregar</button>
+                    </form>
+                    <div class="gx-deals-tools">
+                        <button type="button" class="btn" data-deals-import>Importar JSON</button>
+                        <button type="button" class="btn" data-deals-export>Exportar JSON</button>
+                        <button type="button" class="btn" data-deals-seed>Restaurar ejemplos</button>
+                        <input type="file" accept="application/json,.json" data-deals-file hidden>
+                    </div>
+                    <ul class="gx-deals-list" data-deals-list>
+                        ${items.map(d => `
+                            <li>
+                                <div>
+                                    <strong>${esc(d.title)}</strong>
+                                    <span class="muted small">${esc(storeLabel(d.store))} · ${esc(d.tag || '')}</span>
+                                </div>
+                                <button type="button" class="btn" data-deals-del="${esc(d.id)}">Quitar</button>
+                            </li>
+                        `).join('')}
+                    </ul>
+                    <p class="muted small">Formato JSON: <code>[{"store":"walmart","title":"...","url":"https://...","tag":"−15%","note":"..."}]</code></p>
+                </div>
+            </div>
+        `;
+    }
+
+    function bindDealsTicker(root) {
+        const panel = root.querySelector('[data-deals-panel]');
+        const open = () => { if (panel) panel.hidden = false; };
+        const close = () => { if (panel) panel.hidden = true; };
+        root.querySelectorAll('[data-deals-open]').forEach(btn => btn.addEventListener('click', open));
+        root.querySelectorAll('[data-deals-close]').forEach(btn => btn.addEventListener('click', close));
+        panel?.addEventListener('click', (e) => {
+            if (e.target === panel) close();
+        });
+
+        const form = root.querySelector('[data-deals-form]');
+        form?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const fd = new FormData(form);
+            const next = saveDeals([
+                ...loadDeals(),
+                {
+                    store: fd.get('store'),
+                    title: fd.get('title'),
+                    note: fd.get('note'),
+                    tag: fd.get('tag'),
+                    url: fd.get('url'),
+                },
+            ]);
+            UI.toast?.(`Oferta agregada · ${next.length} en ticker`);
+            render();
+        });
+
+        root.querySelectorAll('[data-deals-del]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.dealsDel;
+                saveDeals(loadDeals().filter(d => d.id !== id));
+                UI.toast?.('Oferta quitada');
+                render();
+            });
+        });
+
+        root.querySelectorAll('[data-deals-seed]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                saveDeals(DEALS_SEED.map(d => ({ ...d })));
+                UI.toast?.('Ejemplos restaurados');
+                render();
+            });
+        });
+
+        const fileInput = root.querySelector('[data-deals-file]');
+        root.querySelectorAll('[data-deals-import]').forEach(btn => {
+            btn.addEventListener('click', () => fileInput?.click());
+        });
+        fileInput?.addEventListener('change', async () => {
+            const file = fileInput.files?.[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const parsed = JSON.parse(text);
+                const arr = Array.isArray(parsed) ? parsed : (parsed?.deals || []);
+                const list = arr.map(normalizeDeal).filter(Boolean);
+                if (!list.length) throw new Error('Sin ofertas válidas');
+                saveDeals(list);
+                UI.toast?.(`Importadas ${list.length} ofertas`);
+                render();
+            } catch (err) {
+                UI.toast?.(err.message || 'JSON inválido', 'error');
+            } finally {
+                fileInput.value = '';
+            }
+        });
+
+        root.querySelectorAll('[data-deals-export]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const blob = new Blob([JSON.stringify(loadDeals(), null, 2)], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `ofertas-ticker-${new Date().toISOString().slice(0, 10)}.json`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+                UI.toast?.('JSON exportado');
+            });
+        });
+    }
+
+    function layGeneralExecutive(exec) {
+        const {
+            nMeli, nAmz, utilPot, aggCombined, hardMeli, hardAmz,
+            monthStats, goals, split, nextBuy, agenda, alerts, allocUnified,
+        } = exec;
+        const trapped = aggCombined.valorInventario || 0;
+        const goalUtil = goals.utilidad || 0;
+        const goalCash = goals.cashIn || 0;
+        const pctUtil = goalUtil > 0 ? monthStats.ganancia / goalUtil : null;
+        const pctCash = goalCash > 0 ? monthStats.cashIn / goalCash : null;
+        const healthUtil = goalUtil > 0
+            ? (monthStats.ganancia >= goalUtil ? 'ok' : (monthStats.projGain >= goalUtil ? 'warn' : 'bad'))
+            : (monthStats.ganancia >= 0 ? 'ok' : 'bad');
+        const capital = aggCombined.capitalDesplegado || 0;
+        const roiBiz = capital > 0 ? (aggCombined.gananciaRealizada || 0) / capital : 0;
+        const reinversion = allocUnified.buckets.reinversion || 0;
+        const alertN = alerts.nEscLow + alerts.nLiq + alerts.nAgot + alerts.nAds;
+        const paceLabel = `Día ${monthStats.daysElapsed} de ${monthStats.daysInMonth}`;
+        const monthCap = monthStats.monthLabel
+            ? monthStats.monthLabel.charAt(0).toUpperCase() + monthStats.monthLabel.slice(1)
+            : '';
+        const healthLabel = healthUtil === 'ok' ? 'En ritmo' : (healthUtil === 'warn' ? 'Ajustar ritmo' : 'Fuera de meta');
+
+        return `
+            <div class="gx-ticker-wrap" id="gx-ticker">
+                ${layDealsTicker()}
+            </div>
+            <section class="dash-section dash-exec gx-exec" id="gx-pulso">
+                <div class="gx-hero">
+                    <div class="gx-hero-copy">
+                        <p class="gx-brand">Ventas</p>
+                        <p class="gx-kicker">Consola ejecutiva · Meli + Amazon</p>
+                        <h2 class="gx-title">El pulso de tu capital</h2>
+                        <p class="gx-sub">${esc(monthCap)} · ${esc(paceLabel)} · ${nMeli + nAmz} productos activos</p>
+                        <div class="gx-hero-ctas">
+                            <button type="button" class="btn primary gx-btn-solid" data-general-snapshot>Exportar cierre</button>
+                            <button type="button" class="btn gx-btn-ghost" data-dash-goto-mp="meli">Mercado Libre</button>
+                            <button type="button" class="btn gx-btn-ghost" data-dash-goto-mp="amazon">Amazon</button>
+                        </div>
+                    </div>
+                    <div class="gx-hero-metric tone-${healthUtil}">
+                        <div class="gx-hero-metric-label">Utilidad del mes</div>
+                        <div class="gx-hero-metric-value">${Calc.fmtMXN(monthStats.ganancia)}</div>
+                        <div class="gx-hero-metric-meta">
+                            <span class="gx-chip tone-${healthUtil}">${esc(healthLabel)}</span>
+                            <span>${goalUtil > 0 ? `${fmtGoalPct(pctUtil)} de meta` : 'Sin meta'}</span>
+                        </div>
+                        <div class="gx-hero-metric-foot">Proyección de cierre · ${Calc.fmtMXN(monthStats.projGain)}</div>
+                    </div>
+                </div>
+
+                <div class="gx-scoreboard" id="dash-pulse">
+                    ${layScoreMetric({
+                        label: 'Cash in del mes',
+                        value: Calc.fmtMXN(monthStats.cashIn),
+                        tone: 'neutral',
+                        hint: goalCash > 0 ? `${fmtGoalPct(pctCash)} de meta` : `${monthStats.unidades} uds`,
+                        foot: `Proyección ${Calc.fmtMXN(monthStats.projCash)}`,
+                        progress: goalCash > 0 ? Math.min(1, Math.max(0, pctCash)) : null,
+                    })}
+                    ${layScoreMetric({
+                        label: 'Capital en inventario',
+                        value: Calc.fmtMXN(trapped),
+                        tone: trapped > 0 ? 'warn' : 'ok',
+                        hint: 'Stock al costo',
+                        foot: `Potencial ${Calc.fmtMXN(utilPot)}`,
+                    })}
+                    ${layScoreMetric({
+                        label: 'Disponible para comprar',
+                        value: Calc.fmtMXN(reinversion),
+                        tone: reinversion > 0 ? 'ok' : 'neutral',
+                        hint: 'Reinversión',
+                        foot: `Bolsitas ${Calc.fmtMXN(allocUnified.total)}`,
+                    })}
+                    ${layScoreMetric({
+                        label: 'ROI del capital',
+                        value: Calc.fmtPct(roiBiz),
+                        tone: roiBiz >= 0.15 ? 'ok' : (roiBiz >= 0 ? 'neutral' : 'bad'),
+                        hint: 'Ganancia / capital',
+                        foot: Calc.fmtMXN(capital),
+                    })}
+                    ${layScoreMetric({
+                        label: 'Atención',
+                        value: String(alertN),
+                        tone: alertN > 0 ? 'bad' : 'ok',
+                        hint: alertN > 0 ? 'Requieren acción' : 'Sin críticas',
+                        foot: alerts.line,
+                    })}
+                </div>
+            </section>
+
+            <section class="dash-section gx-block" id="gx-metas">
+                <div class="gx-block-head">
+                    <div>
+                        <p class="gx-block-kicker">01</p>
+                        <h2 class="gx-block-title">Metas del mes</h2>
+                    </div>
+                    <p class="gx-block-lead">Define el objetivo. El pulso y la proyección siguen el ritmo.</p>
+                </div>
+                <div class="gx-goals">
+                    <div class="gx-goals-main">
+                        <div class="gx-goals-fields">
+                            <label class="gx-field">
+                                <span>Meta utilidad (MXN)</span>
+                                <input type="number" min="0" step="100" data-goal-utilidad value="${goalUtil || ''}" placeholder="0">
+                            </label>
+                            <label class="gx-field">
+                                <span>Meta cash in (MXN)</span>
+                                <input type="number" min="0" step="100" data-goal-cash value="${goalCash || ''}" placeholder="0">
+                            </label>
+                            <button type="button" class="btn primary gx-btn-solid" data-goal-save>Guardar metas</button>
+                        </div>
+                    </div>
+                    <div class="gx-goals-pace">
+                        ${layGoalBar('Utilidad', monthStats.ganancia, goalUtil, monthStats.projGain)}
+                        ${layGoalBar('Cash in', monthStats.cashIn, goalCash, monthStats.projCash)}
+                    </div>
+                </div>
+            </section>
+
+            <section class="dash-section gx-block" id="gx-canales">
+                <div class="gx-block-head">
+                    <div>
+                        <p class="gx-block-kicker">02</p>
+                        <h2 class="gx-block-title">Desempeño por canal</h2>
+                    </div>
+                    <p class="gx-block-lead">${esc(split.line)}</p>
+                </div>
+                <div class="gx-channels">
+                    <div class="gx-alloc-suggest" aria-label="Asignación sugerida de capital">
+                        <div class="gx-alloc-copy">
+                            <span class="gx-alloc-title">Próximo peso sugerido</span>
+                            <span class="muted small">Según ROI, rotación y carga de fees</span>
+                        </div>
+                        <div class="gx-alloc-track">
+                            <span class="gx-alloc-meli" style="width:${split.pctMeli}%"></span>
+                            <span class="gx-alloc-amz" style="width:${split.pctAmz}%"></span>
+                        </div>
+                        <div class="gx-alloc-meta">
+                            <span><i class="gx-dot meli"></i> Meli ${split.pctMeli}%</span>
+                            <span><i class="gx-dot amz"></i> Amazon ${split.pctAmz}%</span>
+                        </div>
+                    </div>
+                    ${layChannelMatrix(exec.aggMeli, exec.aggAmz, nMeli, nAmz, hardMeli, hardAmz)}
+                </div>
+            </section>
+
+            <section class="dash-section gx-block" id="gx-acciones">
+                <div class="gx-block-head">
+                    <div>
+                        <p class="gx-block-kicker">03</p>
+                        <h2 class="gx-block-title">Acciones</h2>
+                    </div>
+                    <p class="gx-block-lead">Prioridades de capital y checklist del día.</p>
+                </div>
+                <div class="gx-actions dash-split-2">
+                    <div class="dash-panel gx-panel">
+                        <div class="gx-panel-head">
+                            <h3>Prioridades</h3>
+                            <p class="muted small">Escalar · liquidar</p>
+                        </div>
+                        <div class="dash-next-cols">
+                            <div>
+                                <h4 class="dash-next-h">Escalar / reponer</h4>
+                                ${layNextList(nextBuy.escalate, 'escalar')}
+                            </div>
+                            <div>
+                                <h4 class="dash-next-h">Liquidar</h4>
+                                ${layNextList(nextBuy.liquidate, 'liquidar')}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dash-panel gx-panel">
+                        <div class="gx-panel-head">
+                            <h3>Agenda</h3>
+                            <p class="muted small">Hoy</p>
+                        </div>
+                        <ul class="dash-agenda">
+                            ${agenda.length ? agenda.map(it => `
+                                <li class="dash-agenda-item${it.done ? ' is-done' : ''}" data-agenda-id="${esc(it.id)}">
+                                    <div class="dash-agenda-check">
+                                        <input type="checkbox" data-agenda-toggle ${it.done ? 'checked' : ''} aria-label="Hecho">
+                                        <button type="button" class="dash-agenda-body" data-agenda-open data-mp="${esc(it.mp || '')}" data-lote="${esc(it.loteId || '')}">
+                                            <strong>${esc(it.title)}</strong>
+                                            <span class="muted">${esc(it.sub)}</span>
+                                        </button>
+                                    </div>
+                                </li>
+                            `).join('') : '<li class="muted">Sin pendientes urgentes</li>'}
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <section class="dash-section gx-block" id="gx-capital">
+                <div class="gx-block-head">
+                    <div>
+                        <p class="gx-block-kicker">04</p>
+                        <h2 class="gx-block-title">Capital unificado</h2>
+                    </div>
+                    <p class="gx-block-lead">Bolsitas Meli + Amazon. Edita cada canal en su catálogo.</p>
+                </div>
+                ${layCapitalUnificado(allocUnified)}
+            </section>
+        `;
+    }
+
+    function fmtGoalPct(ratio) {
+        if (ratio == null || !Number.isFinite(ratio)) return '—';
+        return `${Math.round(ratio * 100)}%`;
+    }
+
+    function layScoreMetric({ label, value, tone, hint, foot, progress = null, primary = false }) {
+        const t = tone || 'neutral';
+        const bar = progress == null ? '' : `
+            <div class="gx-metric-bar" aria-hidden="true">
+                <span style="width:${Math.round(progress * 100)}%"></span>
+            </div>`;
+        return `
+            <article class="gx-metric tone-${t}${primary ? ' is-primary' : ''}">
+                <div class="gx-metric-top">
+                    <span class="gx-metric-label">${esc(label)}</span>
+                    <span class="gx-metric-status" aria-hidden="true"></span>
+                </div>
+                <div class="gx-metric-value">${value}</div>
+                ${bar}
+                <div class="gx-metric-hint">${esc(hint || '')}</div>
+                <div class="gx-metric-foot">${esc(foot || '')}</div>
+            </article>`;
+    }
+
+    function layChannelMatrix(aggMeli, aggAmz, nMeli, nAmz, hardMeli, hardAmz) {
+        const rows = [
+            { label: 'SKU activos', m: String(nMeli), a: String(nAmz) },
+            { label: 'ROI del capital', m: Calc.fmtPct(hardMeli.roiCapital), a: Calc.fmtPct(hardAmz.roiCapital), tm: tone(hardMeli.roiCapital), ta: tone(hardAmz.roiCapital) },
+            { label: 'Días de inventario', m: fmtDaysInv(hardMeli.diasInv), a: fmtDaysInv(hardAmz.diasInv) },
+            { label: 'Fees + Ads / venta', m: Calc.fmtPct(hardMeli.feeAdsPct), a: Calc.fmtPct(hardAmz.feeAdsPct) },
+            { label: 'Cash in', m: Calc.fmtMXN(aggMeli.cashIn), a: Calc.fmtMXN(aggAmz.cashIn) },
+            { label: 'Ganancia realizada', m: Calc.fmtMXN(aggMeli.gananciaRealizada), a: Calc.fmtMXN(aggAmz.gananciaRealizada), tm: tone(aggMeli.gananciaRealizada), ta: tone(aggAmz.gananciaRealizada) },
+            { label: 'Capital desplegado', m: Calc.fmtMXN(aggMeli.capitalDesplegado), a: Calc.fmtMXN(aggAmz.capitalDesplegado) },
+            { label: 'Inventario al costo', m: Calc.fmtMXN(aggMeli.valorInventario), a: Calc.fmtMXN(aggAmz.valorInventario) },
+        ];
+        return `
+            <div class="gx-matrix-wrap">
+                <table class="gx-matrix">
+                    <thead>
+                        <tr>
+                            <th scope="col">Indicador</th>
+                            <th scope="col">
+                                <span class="gx-ch-label"><i class="gx-dot meli"></i> Mercado Libre</span>
+                                <button type="button" class="dash-chip-btn" data-dash-goto-mp="meli">Abrir</button>
+                            </th>
+                            <th scope="col">
+                                <span class="gx-ch-label"><i class="gx-dot amz"></i> Amazon</span>
+                                <button type="button" class="dash-chip-btn" data-dash-goto-mp="amazon">Abrir</button>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(r => `
+                            <tr>
+                                <th scope="row">${esc(r.label)}</th>
+                                <td class="num ${r.tm || ''}">${r.m}</td>
+                                <td class="num ${r.ta || ''}">${r.a}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+    }
+
+    function layGoalBar(label, actual, goal, projected) {
+        const hasGoal = goal > 0;
+        const pct = hasGoal ? Math.min(100, Math.round((actual / goal) * 100)) : 0;
+        const pctProj = hasGoal ? Math.min(150, Math.round((projected / goal) * 100)) : 0;
+        return `
+            <div class="dash-goal-bar">
+                <div class="dash-goal-bar-top">
+                    <span>${esc(label)}</span>
+                    <strong class="mono">${Calc.fmtMXN(actual)}${hasGoal ? ` <span class="muted">/</span> ${Calc.fmtMXN(goal)}` : ''}</strong>
+                </div>
+                <div class="dash-goal-track">
+                    ${hasGoal ? `<span class="dash-goal-proj" style="width:${Math.min(100, pctProj)}%"></span>` : ''}
+                    <span class="dash-goal-fill" style="width:${hasGoal ? pct : 0}%"></span>
+                </div>
+                ${hasGoal
+                    ? `<div class="muted small">Cierre proyectado ${Calc.fmtMXN(projected)} · ${pctProj}% meta</div>`
+                    : '<div class="muted small">Sin meta</div>'}
+            </div>`;
+    }
+
+    function layNextList(list, mode) {
+        if (!list || !list.length) {
+            return `<p class="muted small">${mode === 'liquidar' ? 'Sin SKUs en liquidación con stock.' : 'Sin candidatos claros a escalar.'}</p>`;
+        }
+        return `
+            <ol class="dash-next-ol">
+                ${list.map((r, i) => `
+                    <li data-dash-lote="${esc(r.lote.id)}" data-dash-mp="${esc(r.lote._mp || '')}">
+                        <span class="n">${i + 1}</span>
+                        <span class="name">${esc(short(r.lote.producto, 32))}
+                            <small class="dash-mp-mini">${r.lote._mp === 'amazon' ? 'Amz' : 'Meli'}</small>
+                        </span>
+                        <span class="num ${tone(mode === 'liquidar' ? -r.calc.valorInventario : r.calc.utilidad)}">
+                            ${mode === 'liquidar'
+                                ? Calc.fmtMXN(r.calc.valorInventario)
+                                : Calc.fmtMXN(r.calc.utilidad)}
+                        </span>
+                    </li>
+                `).join('')}
+            </ol>`;
+    }
+
+    function layCapitalUnificado(st) {
+        const stack = st.total > 0
+            ? ALLOC_BUCKETS.map(b => {
+                const val = st.buckets[b.key] || 0;
+                if (val <= 0) return '';
+                const w = Math.max(2, (val / st.total) * 100);
+                return `<span class="dash-bolsa-seg alloc-${b.key}" style="width:${w.toFixed(1)}%" title="${esc(b.label)}: ${Calc.fmtMXN(val)}"></span>`;
+            }).join('')
+            : '<span class="dash-bolsa-seg is-empty">Sin dinero en bolsitas aún</span>';
+        return `
+            <div class="dash-panel dash-capital-unified">
+                <div class="dash-bolsa-hero-label">Total en bolsitas</div>
+                <div class="dash-bolsa-hero-value mono">${Calc.fmtMXN(st.total)}</div>
+                <div class="dash-bolsa-stack" role="img" aria-label="Composición unificada">${stack}</div>
+                <ul class="dash-legend-list" style="margin-top:12px">
+                    ${ALLOC_BUCKETS.map(b => `
+                        <li>
+                            <span class="dash-dot alloc-dot-${b.key}"></span>
+                            ${esc(b.label)}
+                            <strong class="mono">${Calc.fmtMXN(st.buckets[b.key] || 0)}</strong>
+                            <span class="muted">Meli ${Calc.fmtMXN(st.meli.buckets[b.key] || 0)} · Amz ${Calc.fmtMXN(st.amz.buckets[b.key] || 0)}</span>
+                        </li>
+                    `).join('')}
+                </ul>
+                <p class="muted small" style="margin-top:10px">
+                    Disponible para comprar (reinversión): <strong class="mono">${Calc.fmtMXN(st.buckets.reinversion || 0)}</strong>
+                </p>
+            </div>
+            ${layAsignacionDualReadonly()}
+        `;
+    }
+
+    function bindGeneralExecutive(root, exec) {
+        root.querySelectorAll('[data-goal-save]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const utilEl = root.querySelector('[data-goal-utilidad]');
+                const cashEl = root.querySelector('[data-goal-cash]');
+                saveGeneralGoals({
+                    utilidad: utilEl ? utilEl.value : 0,
+                    cashIn: cashEl ? cashEl.value : 0,
+                });
+                UI.toast?.('Metas del mes guardadas');
+                render();
+            });
+        });
+        root.querySelectorAll('[data-agenda-toggle]').forEach(input => {
+            input.addEventListener('change', () => {
+                const li = input.closest('[data-agenda-id]');
+                const id = li?.dataset.agendaId;
+                if (!id) return;
+                toggleAgendaDone(id, input.checked);
+                li.classList.toggle('is-done', input.checked);
+            });
+        });
+        root.querySelectorAll('[data-agenda-open]').forEach(el => {
+            el.addEventListener('click', () => {
+                const mp = el.dataset.mp;
+                const loteId = el.dataset.lote;
+                if (loteId && window.LotesView?.selectAndGo) {
+                    if (mp && (mp === 'meli' || mp === 'amazon') && mp !== window.State.marketplace) {
+                        window.State.ui = { ...window.State.ui, mpView: mp };
+                        window.State.saveUI();
+                        window.State.switchMarketplace(mp);
+                        window.App?.refreshMarketplaceChrome?.();
+                    }
+                    LotesView.selectAndGo(loteId);
+                    return;
+                }
+                if (mp) {
+                    if (window.App?.applyMarketplaceView) window.App.applyMarketplaceView(mp);
+                    else document.querySelector(`.sb-mp [data-marketplace="${mp}"]`)?.click();
+                }
+            });
+        });
+        root.querySelectorAll('[data-general-snapshot]').forEach(btn => {
+            btn.addEventListener('click', () => openGeneralSnapshot(exec));
+        });
+        bindDealsTicker(root);
+    }
+
+    function openGeneralSnapshot(exec) {
+        const {
+            monthStats, goals, alerts, split, nextBuy, allocUnified, hardMeli, hardAmz,
+            nMeli, nAmz, aggCombined,
+        } = exec;
+        const when = new Date().toLocaleString('es-MX', {
+            dateStyle: 'full', timeStyle: 'short',
+        });
+        const escRows = (list, mode) => (list || []).map((r, i) =>
+            `<li>${i + 1}. ${esc(r.lote.producto)} (${r.lote._mp === 'amazon' ? 'Amz' : 'Meli'}) — ${
+                mode === 'liq' ? Calc.fmtMXN(r.calc.valorInventario) : Calc.fmtMXN(r.calc.utilidad)
+            }</li>`
+        ).join('') || '<li>Sin datos</li>';
+        const html = `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"><title>Cierre General · Ventas</title>
+<style>
+  body{font-family:Calibri,Carlito,Candara,'Segoe UI',Arial,sans-serif;max-width:720px;margin:32px auto;padding:0 20px;color:#1a1d23;line-height:1.45}
+  h1{font-size:28px;margin:0 0 4px} h2{font-size:16px;text-transform:uppercase;letter-spacing:.06em;color:#666;margin:28px 0 10px}
+  .sub{color:#666;font-size:13px;margin-bottom:24px} .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .card{border:1px solid #ddd;border-radius:10px;padding:14px} .k{font-size:11px;text-transform:uppercase;color:#888}
+  .v{font-size:22px;font-weight:700;margin-top:4px} ul{padding-left:18px;margin:0} li{margin:4px 0}
+  @media print{body{margin:0} button{display:none}}
+</style></head><body>
+  <button onclick="window.print()" style="float:right;padding:8px 12px">Imprimir / PDF</button>
+  <h1>Cierre · General</h1>
+  <p class="sub">${esc(when)} · Meli ${nMeli} · Amazon ${nAmz}</p>
+  <div class="grid">
+    <div class="card"><div class="k">Utilidad mes</div><div class="v">${Calc.fmtMXN(monthStats.ganancia)}</div>
+      <div class="sub">Meta ${goals.utilidad ? Calc.fmtMXN(goals.utilidad) : '—'} · proy. ${Calc.fmtMXN(monthStats.projGain)}</div></div>
+    <div class="card"><div class="k">Cash in mes</div><div class="v">${Calc.fmtMXN(monthStats.cashIn)}</div>
+      <div class="sub">Meta ${goals.cashIn ? Calc.fmtMXN(goals.cashIn) : '—'} · proy. ${Calc.fmtMXN(monthStats.projCash)}</div></div>
+    <div class="card"><div class="k">Capital / ganancia total</div><div class="v">${Calc.fmtMXN(aggCombined.gananciaRealizada)}</div>
+      <div class="sub">Capital ${Calc.fmtMXN(aggCombined.capitalDesplegado)} · stock ${Calc.fmtMXN(aggCombined.valorInventario)}</div></div>
+    <div class="card"><div class="k">Bolsitas</div><div class="v">${Calc.fmtMXN(allocUnified.total)}</div>
+      <div class="sub">Reinversión ${Calc.fmtMXN(allocUnified.buckets.reinversion || 0)}</div></div>
+  </div>
+  <h2>Alertas</h2><p>${esc(alerts.line)}</p>
+  <h2>Split sugerido</h2><p>${esc(split.line)} · Meli ${split.pctMeli}% · Amazon ${split.pctAmz}%</p>
+  <div class="grid">
+    <div class="card"><div class="k">Meli ROI / días / fees+ads</div>
+      <div>${Calc.fmtPct(hardMeli.roiCapital)} · ${esc(fmtDaysInv(hardMeli.diasInv))} · ${Calc.fmtPct(hardMeli.feeAdsPct)}</div></div>
+    <div class="card"><div class="k">Amazon ROI / días / fees+ads</div>
+      <div>${Calc.fmtPct(hardAmz.roiCapital)} · ${esc(fmtDaysInv(hardAmz.diasInv))} · ${Calc.fmtPct(hardAmz.feeAdsPct)}</div></div>
+  </div>
+  <h2>Escalar</h2><ul>${escRows(nextBuy.escalate, 'esc')}</ul>
+  <h2>Liquidar</h2><ul>${escRows(nextBuy.liquidate, 'liq')}</ul>
+  <p class="sub" style="margin-top:32px">Generado desde Ventas · vista General. Catálogos no mezclados.</p>
+</body></html>`;
+        const w = window.open('', '_blank', 'noopener,noreferrer,width=820,height=900');
+        if (!w) {
+            UI.toast?.('Permite ventanas emergentes para el snapshot', 'error');
+            return;
+        }
+        w.document.open();
+        w.document.write(html);
+        w.document.close();
+        UI.toast?.('Snapshot listo · imprime o guarda PDF');
+    }
+
+    function readAllocStateFor(mp) {
+        const store = window.State.ui?.capitalAlloc && typeof window.State.ui.capitalAlloc === 'object'
+            ? window.State.ui.capitalAlloc
+            : {};
+        const raw = store[mp] && typeof store[mp] === 'object' ? store[mp] : {};
+        const buckets = emptyAllocBuckets();
+        const src = migrateLegacyAllocMaps(raw.buckets && typeof raw.buckets === 'object' ? raw.buckets : {});
+        ALLOC_BUCKETS.forEach(({ key }) => {
+            const n = Number(src[key]);
+            buckets[key] = Number.isFinite(n) && n > 0 ? round2(n) : 0;
+        });
+        const total = round2(ALLOC_BUCKETS.reduce((s, b) => s + (buckets[b.key] || 0), 0));
+        return { buckets, percents: normalizePercents(raw.percents), total };
+    }
+
+    function layAsignacionDualReadonly() {
+        return `
+            <div class="dash-split-2">
+                ${layAsignacionReadonlyBlock('Mercado Libre', 'meli')}
+                ${layAsignacionReadonlyBlock('Amazon', 'amazon')}
+            </div>
+        `;
+    }
+
+    function layAsignacionReadonlyBlock(label, mp) {
+        const st = readAllocStateFor(mp);
+        const stack = st.total > 0
+            ? ALLOC_BUCKETS.map(b => {
+                const val = st.buckets[b.key] || 0;
+                if (val <= 0) return '';
+                const w = Math.max(2, (val / st.total) * 100);
+                return `<span class="dash-bolsa-seg alloc-${b.key}" style="width:${w.toFixed(1)}%" title="${esc(b.label)}: ${Calc.fmtMXN(val)}"></span>`;
+            }).join('')
+            : '<span class="dash-bolsa-seg is-empty">Sin dinero aún</span>';
+        const shortBtn = mp === 'amazon' ? 'Amazon' : 'Meli';
+        return `
+            <div class="dash-panel dash-alloc-readonly">
+                <div class="dash-alloc-head">
+                    <div>
+                        <h3>${esc(label)}</h3>
+                        <p class="muted small">Solo lectura · gestiona en el catálogo</p>
+                    </div>
+                    <button type="button" class="dash-chip-btn" data-dash-goto-mp="${mp}">Abrir ${esc(shortBtn)}</button>
+                </div>
+                <div class="dash-bolsa-hero-value" style="font-size:22px;margin:8px 0">${Calc.fmtMXN(st.total)}</div>
+                <div class="dash-bolsa-stack" role="img">${stack}</div>
+                <ul class="dash-legend-list" style="margin-top:12px">
+                    ${ALLOC_BUCKETS.map(b => `
+                        <li>
+                            <span class="dash-dot alloc-dot-${b.key}"></span>
+                            ${esc(b.label)}
+                            <strong>${Calc.fmtMXN(st.buckets[b.key] || 0)}</strong>
+                            <span class="muted">(${st.percents[b.key]}%)</span>
+                        </li>
+                    `).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
     /** Fecha ISO YYYY-MM-DD (inicio de filtro). Presets vivos: month | year. */
     function resolveChartFrom(ui = {}) {
         const preset = ui?.dashChartFromPreset === 'month' || ui?.dashChartFromPreset === 'year'
@@ -167,7 +1376,10 @@ const DashboardView = (() => {
         const totalGain = series.reduce((s, b) => s + b.ganancia, 0);
         const totalUds = series.reduce((s, b) => s + b.unidades, 0);
         const emptyHidden = !showEmpty && series.some(b => !(b.cashIn > 0 || b.ganancia > 0 || b.unidades > 0));
-        const mpLabel = window.State.marketplace === 'amazon' ? 'Amazon' : 'Mercado Libre';
+        const mpView = window.State.ui?.mpView;
+        const mpLabel = mpView === 'general'
+            ? 'General (ambos)'
+            : (window.State.marketplace === 'amazon' ? 'Amazon' : 'Mercado Libre');
         const rangeHint = fromDate
             ? (fromPreset === 'month'
                 ? 'Mes corriente → hoy'
@@ -219,8 +1431,8 @@ const DashboardView = (() => {
     function buildProgressSeries(lotes, period, range = 12, fromISO = '') {
         const fromDate = parseISODate(fromISO);
         const map = new Map();
-        const settings = window.State.settings;
         (lotes || []).forEach(lote => {
+            const settings = settingsForTaggedLote(lote);
             const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
 
             if (ventas.length) {
@@ -253,7 +1465,7 @@ const DashboardView = (() => {
             const precio = Number(lote.precio) || 0;
             const calc = Calc.computeLote(lote, settings);
             b.cashIn += precio * vendidas;
-            b.ganancia += (Number(calc.utilidad) || 0) * vendidas;
+            b.ganancia += calc.utilidad * vendidas;
             b.unidades += vendidas;
             b.pedidos += 1;
         });
@@ -625,28 +1837,32 @@ const DashboardView = (() => {
 
     function buildContext(agg) {
         const rows = agg.rows;
-        const isAmazon = window.State.marketplace === 'amazon';
+        const isGeneral = window.State.ui?.mpView === 'general';
+        const isAmazon = isGeneral ? null : (window.State.marketplace === 'amazon');
         let fees = 0;
         let costoVendido = 0;
         let gastoAds = 0;
         rows.forEach(({ lote, calc }) => {
             const v = calc.vendidas;
             fees += (calc.comisionVariable + calc.cargoFijo + calc.retIVA + calc.retISR) * v;
-            if (isAmazon) {
-                fees += ((Number(calc.envio) || 0) + (Number(calc.almacenamiento) || 0)) * v;
-            }
+            // Envío / FBA / varios siempre entran en fees del canal (Meli y Amazon)
+            fees += ((Number(calc.envio) || 0)
+                + (Number(calc.almacenamiento) || 0)
+                + (Number(calc.varios) || 0)) * v;
             costoVendido += (Number(lote.costo) || 0) * v;
             gastoAds += calc.gastoAds;
         });
-        return { agg, rows, fees, costoVendido, gastoAds, isAmazon };
+        return { agg, rows, fees, costoVendido, gastoAds, isAmazon, isGeneral };
     }
 
-    function layPyG({ agg, fees, costoVendido, gastoAds, isAmazon }) {
+    function layPyG({ agg, fees, costoVendido, gastoAds, isAmazon, isGeneral }) {
         const bruto = agg.cashIn - costoVendido;
         const neto = agg.gananciaRealizada;
-        const feeLabel = isAmazon
-            ? '− Fees Amazon (est.)'
-            : '− Fees ML + retenciones (est.)';
+        const feeLabel = isGeneral
+            ? '− Fees Meli + Amazon (est.)'
+            : (isAmazon
+                ? '− Fees Amazon (est.)'
+                : '− Fees ML + retenciones (est.)');
         const lines = [
             { label: 'Ingresos (cash in)', value: agg.cashIn },
             { label: '− Costo de lo vendido', value: -costoVendido },
@@ -1339,8 +2555,8 @@ const DashboardView = (() => {
                                 <div class="dash-strategy-col">
                                     <h4>${esc(st)} <span class="muted">${agg.strategyCount[st] || 0}</span></h4>
                                     ${list.length ? list.map(r => `
-                                        <button type="button" class="dash-link-row" data-dash-lote="${esc(r.lote.id)}">
-                                            <span>${esc(short(r.lote.producto, 26))}</span>
+                                        <button type="button" class="dash-link-row" data-dash-lote="${esc(r.lote.id)}" data-dash-mp="${esc(r.lote._mp || '')}">
+                                            <span>${esc(short(r.lote.producto, 26))}${r.lote._mp ? ` <small class="dash-mp-mini">${r.lote._mp === 'amazon' ? 'Amz' : 'Meli'}</small>` : ''}</span>
                                             <span class="num ${tone(r.calc.utilidad)}">${Calc.fmtMXN(r.calc.utilidad)}</span>
                                         </button>
                                     `).join('') : '<p class="muted small">Ninguno</p>'}
@@ -1382,9 +2598,10 @@ const DashboardView = (() => {
     function groupBestByProduct(rows) {
         const map = new Map();
         rows.forEach(r => {
-            const key = r.lote.productId
+            const fam = r.lote.productId
                 || String(r.lote.producto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
                 || r.lote.id;
+            const key = `${r.lote._mp || ''}:${fam}`;
             const prev = map.get(key);
             if (!prev || r.calc.utilidad > prev.calc.utilidad) map.set(key, r);
         });
@@ -1397,9 +2614,9 @@ const DashboardView = (() => {
                 <h3>${esc(title)}</h3>
                 <ol class="dash-rank-ol">
                     ${list.slice(0, 8).map((r, i) => `
-                        <li data-dash-lote="${esc(r.lote.id)}">
+                        <li data-dash-lote="${esc(r.lote.id)}" data-dash-mp="${esc(r.lote._mp || '')}">
                             <span class="n">${i + 1}</span>
-                            <span class="name" title="${esc(r.lote.producto)}${r.lote.variante ? ' · ' + esc(r.lote.variante) : ''}">${esc(short(r.lote.producto, 28))}${r.lote.variante ? ` <small class="muted">${esc(short(r.lote.variante, 10))}</small>` : ''}</span>
+                            <span class="name" title="${esc(r.lote.producto)}${r.lote.variante ? ' · ' + esc(r.lote.variante) : ''}">${esc(short(r.lote.producto, 28))}${r.lote.variante ? ` <small class="muted">${esc(short(r.lote.variante, 10))}</small>` : ''}${r.lote._mp ? ` <small class="dash-mp-mini">${r.lote._mp === 'amazon' ? 'Amz' : 'Meli'}</small>` : ''}</span>
                             <span class="num ${toneFn(r)}">${fmt(r)}</span>
                         </li>
                     `).join('') || '<li class="muted">Sin datos</li>'}
@@ -1501,10 +2718,26 @@ const DashboardView = (() => {
                 LotesView.openModal(null);
             });
         });
+        root.querySelectorAll('[data-dash-goto-mp]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mp = btn.dataset.dashGotoMp;
+                if (!mp || !['meli', 'amazon'].includes(mp)) return;
+                if (window.App?.applyMarketplaceView) window.App.applyMarketplaceView(mp);
+                else document.querySelector(`.sb-mp [data-marketplace="${mp}"]`)?.click();
+            });
+        });
         root.querySelectorAll('[data-dash-lote]').forEach(el => {
             el.addEventListener('click', () => {
                 const id = el.dataset.dashLote;
-                if (id && window.LotesView?.selectAndGo) LotesView.selectAndGo(id);
+                const mp = el.dataset.dashMp;
+                if (!id || !window.LotesView?.selectAndGo) return;
+                if (mp && (mp === 'meli' || mp === 'amazon') && mp !== window.State.marketplace) {
+                    window.State.ui = { ...window.State.ui, mpView: mp };
+                    window.State.saveUI();
+                    window.State.switchMarketplace(mp);
+                    window.App?.refreshMarketplaceChrome?.();
+                }
+                LotesView.selectAndGo(id);
             });
         });
         const setChartUI = (patch) => {
