@@ -195,6 +195,39 @@ const UI = (() => {
         }[ch]));
     }
 
+    /** Cha-ching corto al registrar venta (Meli y Amazon). */
+    let _audioCtx = null;
+    function playMoneySound() {
+        try {
+            const AC = window.AudioContext || window.webkitAudioContext;
+            if (!AC) return;
+            if (!_audioCtx) _audioCtx = new AC();
+            const ctx = _audioCtx;
+            if (ctx.state === 'suspended') ctx.resume();
+            const t0 = ctx.currentTime;
+
+            const ding = (freq, start, dur, gain = 0.18) => {
+                const osc = ctx.createOscillator();
+                const g = ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(freq, t0 + start);
+                osc.frequency.exponentialRampToValueAtTime(freq * 0.85, t0 + start + dur);
+                g.gain.setValueAtTime(0.0001, t0 + start);
+                g.gain.exponentialRampToValueAtTime(gain, t0 + start + 0.02);
+                g.gain.exponentialRampToValueAtTime(0.0001, t0 + start + dur);
+                osc.connect(g);
+                g.connect(ctx.destination);
+                osc.start(t0 + start);
+                osc.stop(t0 + start + dur + 0.02);
+            };
+
+            // “cha” + “ching”
+            ding(980, 0, 0.12, 0.16);
+            ding(1310, 0.08, 0.22, 0.2);
+            ding(1760, 0.12, 0.35, 0.12);
+        } catch (_) { /* sin audio / autoplay bloqueado */ }
+    }
+
     return {
         dialog,
         confirm,
@@ -204,6 +237,7 @@ const UI = (() => {
         backupChoice,
         toast,
         escapeHTML,
+        playMoneySound,
     };
 })();
 window.UI = UI;

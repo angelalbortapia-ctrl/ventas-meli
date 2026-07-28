@@ -1,6 +1,6 @@
 /* Service worker: cache-first local, network-first CDN. */
 
-const VERSION = 'vm-v37';
+const VERSION = 'vm-v85';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -14,6 +14,7 @@ const STATIC_ASSETS = [
     './js/palette.js',
     './js/insights.js',
     './js/lotes.js',
+    './js/envios.js',
     './js/dashboard.js',
     './js/sync.js',
     './js/settings.js',

@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=37">
+    <link rel="stylesheet" href="css/styles.css?v=67">
 </head>
 <body>
 
@@ -24,8 +24,17 @@
         <span class="sb-brand-dot"></span>
         <div class="sb-brand-text">
             <div class="name">Ventas Meli</div>
-            <div class="sub">Panel de rentabilidad</div>
+            <div class="sub">Mercado Libre · rentabilidad</div>
         </div>
+    </div>
+
+    <div class="sb-section">
+        <h5>Marketplace</h5>
+        <div class="sb-mp" role="tablist" aria-label="Marketplace">
+            <button type="button" class="sb-mp-btn active" data-marketplace="meli" role="tab" aria-selected="true">Mercado Libre</button>
+            <button type="button" class="sb-mp-btn" data-marketplace="amazon" role="tab" aria-selected="false">Amazon</button>
+        </div>
+        <p class="sb-mp-hint muted small">Catálogos separados. Amazon empieza vacío.</p>
     </div>
 
     <div class="sb-section">
@@ -39,6 +48,11 @@
                 <span class="sb-icon">📦</span>
                 <span>Productos</span>
                 <span class="badge-count" id="sb-count-lotes">0</span>
+            </button>
+            <button class="sb-item" data-tab="envios" role="tab" aria-selected="false" data-mp-only="amazon" data-feature="prep-envio" hidden>
+                <span class="sb-icon">🚚</span>
+                <span>Envíos</span>
+                <span class="badge-count" id="sb-count-envios" hidden>0</span>
             </button>
             <button class="sb-item" data-tab="insights" role="tab" aria-selected="false">
                 <span class="sb-icon">💡</span>
@@ -119,6 +133,9 @@
             <div id="lotes-canvas"></div>
         </section>
 
+        <!-- ============ ENVÍOS (Amazon) ============ -->
+        <section class="view" id="view-envios" hidden aria-label="Envíos"></section>
+
         <!-- ============ INSIGHTS ============ -->
         <section class="view" id="view-insights" hidden aria-label="Insights"></section>
 
@@ -140,6 +157,7 @@
                     <p class="muted small" style="margin-bottom:12px">
                         Recomendado: abre esta PWA en <strong>Safari</strong> → Compartir → <strong>Añadir a pantalla de inicio</strong>.
                         No hace falta App Store. Necesitas hospedar la app en HTTPS (GitHub Pages, Netlify, etc.) y el mismo login en ambos dispositivos.
+                        <br>Sync sube <strong>Mercado Libre y Amazon juntos</strong>. Si hay conflicto, verás el conteo de ambos catálogos.
                     </p>
                     <ol class="sync-steps muted small">
                         <li>Crea un proyecto en <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a></li>
@@ -182,7 +200,7 @@
                     </div>
                 </div>
 
-                <div class="card">
+                <div class="card" data-mp-only="meli">
                     <h3>Comisiones Mercado Libre</h3>
                     <label><span>Comisión Clásica (%)</span><input type="number" step="0.01" id="set-com-clasica"></label>
                     <label><span>Comisión Premium (%)</span><input type="number" step="0.01" id="set-com-premium"></label>
@@ -191,7 +209,7 @@
                     <p class="muted small">Default cargo fijo ≈ $35 (ajusta al valor vigente de tu tipo de publicación en ML).</p>
                 </div>
 
-                <div class="card">
+                <div class="card" data-mp-only="meli">
                     <h3>Retenciones SAT</h3>
                     <label class="check-row">
                         <input type="checkbox" id="set-resico">
@@ -200,6 +218,47 @@
                     <label><span>Retención IVA (%)</span><input type="number" step="0.01" id="set-iva"></label>
                     <label><span>Retención ISR (%)</span><input type="number" step="0.01" id="set-isr"></label>
                     <p class="muted small">Se calculan sobre el precio sin IVA (precio ÷ 1.16). Con RESICO activo el ISR se fija en 1% automáticamente.</p>
+                </div>
+
+                <div class="card" data-mp-only="amazon" hidden>
+                    <h3>Tarifas Amazon México</h3>
+                    <label class="check-row">
+                        <input type="checkbox" id="set-amz-tabla-cat" checked>
+                        <span>Usar tabla oficial de referido por categoría</span>
+                    </label>
+                    <label class="check-row">
+                        <input type="checkbox" id="set-amz-referido-sin-iva" checked>
+                        <span>Referido sobre precio sin IVA (÷ 1.16) — igual que Calculadora Amazon</span>
+                    </label>
+                    <label class="check-row">
+                        <input type="checkbox" id="set-amz-prep-envio" checked>
+                        <span>Preparación de envíos (menú Envíos · FBA a Amazon + FBM al cliente)</span>
+                    </label>
+                    <label><span>Tarifa mínima referido (MXN / ud)</span><input type="number" step="0.01" id="set-amz-min-referido"></label>
+                    <label><span>Categoría default</span>
+                        <select id="set-amz-cat-default"></select>
+                    </label>
+                    <label><span>Referido fijo (%) — solo si apagas la tabla</span><input type="number" step="0.01" id="set-amz-referido"></label>
+                    <hr class="card-sep">
+                    <label class="check-row">
+                        <input type="checkbox" id="set-amz-tabla-fba" checked>
+                        <span>Usar tabla FBA (tamaño × peso × precio)</span>
+                    </label>
+                    <label><span>Tamaño FBA default</span>
+                        <select id="set-amz-tamano">
+                            <option value="sobre">Sobre (≤ 38×27×2 cm)</option>
+                            <option value="estandar">Estándar (≤ 45×35×20 cm)</option>
+                            <option value="grande">Grande</option>
+                        </select>
+                    </label>
+                    <label><span>Peso default (kg)</span><input type="number" step="0.01" min="0" id="set-amz-peso"></label>
+                    <label><span>FBA fallback (MXN / ud)</span><input type="number" step="0.01" id="set-amz-fulfillment"></label>
+                    <p class="muted small">
+                        La Calculadora de ingresos aplica el % de referido sobre el precio sin IVA (precio ÷ 1.16),
+                        luego el mayor entre ese monto y el mínimo ($8). FBA depende del precio
+                        (&lt;$150 / $150–299 / $299–499 / ≥$499), tamaño y peso. El almacenamiento FBA
+                        se captura por producto (campo en Precios).
+                    </p>
                 </div>
 
                 <div class="card">
@@ -254,7 +313,7 @@
         </header>
 
         <nav class="modal-tabs">
-            <button class="modal-tab active" data-modal-tab="identidad">Identidad</button>
+            <button class="modal-tab active" data-modal-tab="identidad">Producto</button>
             <button class="modal-tab" data-modal-tab="precios">Precios & Costos</button>
             <button class="modal-tab" data-modal-tab="inventario">Inventario</button>
         </nav>
@@ -266,10 +325,14 @@
                     <label class="wide"><span>Producto</span><input type="text" id="f-producto" placeholder="Palomera Eléctrica…"></label>
                     <label><span>SKU</span><input type="text" id="f-sku" placeholder="Se genera solo"></label>
                     <label><span>Color / Variante</span><input type="text" id="f-variante" placeholder="Rojo"></label>
-                    <label>
+                    <label data-mp-field="meli">
                         <span>Categoría</span>
                         <input type="text" id="f-categoria" list="cat-list" placeholder="Ej. Cocina, Hogar">
                         <datalist id="cat-list"></datalist>
+                    </label>
+                    <label data-mp-field="amazon" hidden>
+                        <span>Categoría Amazon</span>
+                        <select id="f-amz-categoria"></select>
                     </label>
                     <label>
                         <span>Tipo Publicación</span>
@@ -296,10 +359,31 @@
                     <label><span>Costo unitario (MXN)</span><input type="number" step="0.01" id="f-costo"></label>
                     <label><span>Precio de venta (MXN)</span><input type="number" step="0.01" id="f-precio"></label>
                     <label><span>Precio competencia (MXN)</span><input type="number" step="0.01" id="f-precio-comp" placeholder="Opcional"></label>
+                    <label data-mp-field="amazon" hidden>
+                        <span>Tamaño FBA</span>
+                        <select id="f-tamano-fba">
+                            <option value="sobre">Sobre</option>
+                            <option value="estandar" selected>Estándar</option>
+                            <option value="grande">Grande</option>
+                        </select>
+                    </label>
+                    <label data-mp-field="amazon" hidden>
+                        <span>Peso (kg)</span>
+                        <input type="number" step="0.01" min="0" id="f-peso-kg" placeholder="0.30">
+                    </label>
+                    <label data-mp-field="amazon" hidden>
+                        <span>Almacenamiento FBA (MXN / ud)</span>
+                        <input type="number" step="0.01" min="0" id="f-almacenamiento" placeholder="0 · desde Calculadora">
+                    </label>
                     <label><span>Envío al cliente (MXN)</span><input type="number" step="0.01" id="f-envio"></label>
                     <label><span>Gasto Ads acumulado (MXN)</span><input type="number" step="0.01" id="f-gasto-ads" min="0" placeholder="0"></label>
                 </div>
-                <p class="muted small" style="margin-top:8px">El gasto Ads se compara vs el tope CPA por venta (en Rentabilidad).</p>
+                <p class="muted small" style="margin-top:8px" data-mp-field="meli">El gasto Ads se compara vs el tope CPA por venta (en Rentabilidad).</p>
+                <p class="muted small" style="margin-top:8px" data-mp-field="amazon" hidden>
+                    Fulfillment: si dejas <strong>Envío/FBA</strong> vacío y es FBA, se calcula con la tabla (tamaño × peso × precio).
+                    Si pones un monto, se usa como override. En FBM, ese campo es tu costo real de envío.
+                    <strong>Almacenamiento</strong>: copia el monto de la Calculadora de ingresos (p. ej. $1.09).
+                </p>
                 <div class="calc-preview" id="calc-preview"></div>
             </div>
 
@@ -329,17 +413,18 @@
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/calc.js?v=9"></script>
-<script src="js/data.js?v=12"></script>
-<script src="js/excel.js?v=4"></script>
-<script src="js/ui.js?v=4"></script>
-<script src="js/palette.js?v=5"></script>
-<script src="js/insights.js?v=8"></script>
-<script src="js/lotes.js?v=18"></script>
-<script src="js/dashboard.js?v=16"></script>
-<script src="js/sync.js?v=6"></script>
-<script src="js/settings.js?v=11"></script>
-<script src="js/app.js?v=19"></script>
+<script src="js/calc.js?v=14"></script>
+<script src="js/data.js?v=24"></script>
+<script src="js/excel.js?v=6"></script>
+<script src="js/ui.js?v=5"></script>
+<script src="js/palette.js?v=7"></script>
+<script src="js/insights.js?v=9"></script>
+<script src="js/envios.js?v=6"></script>
+<script src="js/lotes.js?v=43"></script>
+<script src="js/dashboard.js?v=43"></script>
+<script src="js/sync.js?v=8"></script>
+<script src="js/settings.js?v=15"></script>
+<script src="js/app.js?v=22"></script>
 
 </body>
 </html>

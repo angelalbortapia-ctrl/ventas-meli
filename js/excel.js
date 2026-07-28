@@ -5,7 +5,7 @@
 
 const ExcelIO = (() => {
 
-    const HEADERS = [
+    const HEADERS_MELI = [
         'SKU', 'Producto', 'Color / Variante', 'Categoría', 'Tipo Publicación', 'Fecha de Captura',
         'Costo', 'Unidades', 'Inversión Total Lote (MXN)',
         'Precio Competencia', 'Precio de Venta (MXN)',
@@ -15,6 +15,23 @@ const ExcelIO = (() => {
         'Inventario Restante', 'Unidades Vendidas', 'Estatus Publicación',
         'Estrategia', 'Tope Máximo CPA (Ads)', 'Gasto Ads (MXN)',
     ];
+
+    const HEADERS_AMAZON = [
+        'SKU', 'Producto', 'Color / Variante', 'Categoría Amazon', 'Logística', 'Fecha de Captura',
+        'Costo', 'Unidades', 'Inversión Total Lote (MXN)',
+        'Precio Competencia', 'Precio de Venta (MXN)',
+        '% Referido Amazon', 'Comisión Referido (MXN)', 'Tarifa mín. referido',
+        'FBA / Envío (MXN)', 'Almacenamiento FBA (MXN)', 'Peso kg', 'Tamaño FBA',
+        'Utilidad Neta Real', 'Margen Neto %', 'ROI Unitario %',
+        'Inventario Restante', 'Unidades Vendidas', 'Estatus Publicación',
+        'Estrategia', 'Tope Máximo CPA (Ads)', 'Gasto Ads (MXN)',
+    ];
+
+    const HEADERS = HEADERS_MELI;
+
+    function headersFor(settings) {
+        return (settings?.marketplace === 'amazon') ? HEADERS_AMAZON : HEADERS_MELI;
+    }
 
     function importFile(file) {
         return new Promise((resolve, reject) => {
@@ -85,62 +102,105 @@ const ExcelIO = (() => {
         if (fechaRaw instanceof Date) fecha = fechaRaw.toISOString().slice(0, 10);
         else if (typeof fechaRaw === 'string') fecha = fechaRaw.slice(0, 10);
 
+        const catAmz = (r['Categoría Amazon'] || '').toString().trim();
+        const cat = (r['Categoría'] || catAmz || '').toString().trim();
+        const tipoRaw = (r['Logística'] || r['Tipo Publicación'] || '').toString().trim();
         return {
             id: Data.newId(),
             sku: (r['SKU'] || '').toString().trim(),
             producto: (r['Producto'] || '').toString().trim(),
             variante: (r['Color / Variante'] || '').toString().trim(),
-            categoria: (r['Categoría'] || '').toString().trim(),
-            tipo: (r['Tipo Publicación'] || 'Clasica').toString().trim(),
+            categoria: cat,
+            categoriaAmazon: catAmz,
+            tipo: tipoRaw || (window.State?.marketplace === 'amazon' ? 'FBA' : 'Clasica'),
             fecha,
             costo: num('Costo') ?? 0,
             unidades: num('Unidades') ?? 0,
             precioCompetencia: num('Precio Competencia'),
             precio: num('Precio de Venta (MXN)') ?? 0,
-            envio: num('Envío al Cliente') ?? 0,
+            envio: num('Envío al Cliente') ?? num('FBA / Envío (MXN)') ?? 0,
             gastoAds: num('Gasto Ads (MXN)') ?? 0,
             vendidas: num('Unidades Vendidas') ?? 0,
             estatus: (r['Estatus Publicación'] || '✅ Activa / En Venta').toString().trim(),
+            pesoKg: num('Peso kg'),
+            tamanoFba: (r['Tamaño FBA'] || '').toString().trim() || '',
+            almacenamiento: num('Almacenamiento FBA (MXN)') ?? 0,
         };
     }
 
     function exportFile(lotes, settings, filename = 'Negocio.xlsx') {
         const wb = XLSX.utils.book_new();
+        const isAmz = settings?.marketplace === 'amazon';
+        const headers = headersFor(settings);
 
-        const rows = [HEADERS];
+        const rows = [headers];
         lotes.forEach(l => {
             const c = Calc.computeLote(l, settings);
-            rows.push([
-                l.sku,
-                l.producto,
-                l.variante,
-                l.categoria || '',
-                l.tipo,
-                l.fecha ? new Date(l.fecha) : '',
-                l.costo,
-                l.unidades,
-                (Number(l.costo) || 0) * (Number(l.unidades) || 0),
-                l.precioCompetencia ?? '',
-                l.precio,
-                c.pctComision,
-                c.comisionVariable,
-                c.cargoFijo,
-                l.envio,
-                c.retIVA,
-                c.retISR,
-                c.utilidad,
-                c.margen,
-                c.roi,
-                c.inventarioRestante,
-                l.vendidas,
-                l.estatus,
-                strategyLabel(c.estrategia),
-                c.topeCPA,
-                Number(l.gastoAds) || 0,
-            ]);
+            if (isAmz) {
+                const catKey = c.categoriaAmazon || l.categoriaAmazon || '';
+                const catLabel = (Calc.AMZ_CATEGORIES && Calc.AMZ_CATEGORIES[catKey]?.label) || l.categoria || catKey;
+                rows.push([
+                    l.sku,
+                    l.producto,
+                    l.variante,
+                    catLabel,
+                    l.tipo,
+                    l.fecha ? new Date(l.fecha) : '',
+                    l.costo,
+                    l.unidades,
+                    (Number(l.costo) || 0) * (Number(l.unidades) || 0),
+                    l.precioCompetencia ?? '',
+                    l.precio,
+                    c.pctComision,
+                    c.comisionVariable,
+                    c.referidoMinimo ?? 8,
+                    c.envio,
+                    c.almacenamiento ?? Number(l.almacenamiento) || 0,
+                    l.pesoKg ?? '',
+                    l.tamanoFba || c.fbaMeta?.tamano || '',
+                    c.utilidad,
+                    c.margen,
+                    c.roi,
+                    c.inventarioRestante,
+                    l.vendidas,
+                    l.estatus,
+                    strategyLabel(c.estrategia),
+                    c.topeCPA,
+                    Number(l.gastoAds) || 0,
+                ]);
+            } else {
+                rows.push([
+                    l.sku,
+                    l.producto,
+                    l.variante,
+                    l.categoria || '',
+                    l.tipo,
+                    l.fecha ? new Date(l.fecha) : '',
+                    l.costo,
+                    l.unidades,
+                    (Number(l.costo) || 0) * (Number(l.unidades) || 0),
+                    l.precioCompetencia ?? '',
+                    l.precio,
+                    c.pctComision,
+                    c.comisionVariable,
+                    c.cargoFijo,
+                    l.envio,
+                    c.retIVA,
+                    c.retISR,
+                    c.utilidad,
+                    c.margen,
+                    c.roi,
+                    c.inventarioRestante,
+                    l.vendidas,
+                    l.estatus,
+                    strategyLabel(c.estrategia),
+                    c.topeCPA,
+                    Number(l.gastoAds) || 0,
+                ]);
+            }
         });
         const ws1 = XLSX.utils.aoa_to_sheet(rows);
-        ws1['!cols'] = HEADERS.map(h => ({ wch: Math.max(12, Math.min(28, h.length + 2)) }));
+        ws1['!cols'] = headers.map(h => ({ wch: Math.max(12, Math.min(28, h.length + 2)) }));
         XLSX.utils.book_append_sheet(wb, ws1, 'Lotes_Operaciones');
 
         const agg = Calc.aggregate(lotes, settings);

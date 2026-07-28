@@ -11,6 +11,10 @@ const SettingsView = (() => {
         ['set-umbral-cargo',    'umbralCargoFijo',    v => v,        v => v],
         ['set-iva',             'retencionIVA',       v => v / 100,  v => (v * 100).toFixed(2)],
         ['set-isr',             'retencionISR',       v => v / 100,  v => (v * 100).toFixed(2)],
+        ['set-amz-referido',    'comisionReferido',   v => v / 100,  v => (v * 100).toFixed(2)],
+        ['set-amz-min-referido','tarifaReferidoMinima', v => v,      v => v],
+        ['set-amz-fulfillment', 'tarifaFulfillmentDefault', v => v,  v => v],
+        ['set-amz-peso',        'pesoKgDefault',      v => v,        v => v],
         ['set-umbral-liquidar', 'umbralLiquidar',     v => v,        v => v],
         ['set-umbral-escalar',  'umbralEscalar',      v => v,        v => v],
         ['set-cpa',             'topeCPA',            v => v / 100,  v => (v * 100).toFixed(2)],
@@ -18,10 +22,41 @@ const SettingsView = (() => {
 
     function loadIntoForm() {
         const s = window.State.settings;
+        const mp = window.State.marketplace === 'amazon' ? 'amazon' : 'meli';
+        document.querySelectorAll('[data-mp-only]').forEach(el => {
+            el.hidden = el.dataset.mpOnly !== mp;
+        });
+        document.querySelectorAll('[data-mp-field]').forEach(el => {
+            el.hidden = el.dataset.mpField !== mp;
+        });
+
+        // Categorías Amazon en select de Ajustes
+        const catSel = document.getElementById('set-amz-cat-default');
+        if (catSel && Calc.amzCategoryList) {
+            const cur = s.categoriaDefault || 'hogar_cocina';
+            catSel.innerHTML = Calc.amzCategoryList().map(c =>
+                `<option value="${c.id}">${c.label}</option>`
+            ).join('');
+            if ([...catSel.options].some(o => o.value === cur)) catSel.value = cur;
+        }
+
         FIELDS.forEach(([id, key, , toDisplay]) => {
             const el = document.getElementById(id);
-            if (el) el.value = toDisplay(s[key]);
+            if (el && s[key] != null) el.value = toDisplay(s[key]);
         });
+
+        const tamano = document.getElementById('set-amz-tamano');
+        if (tamano && s.tamanoFbaDefault) tamano.value = s.tamanoFbaDefault;
+
+        const tablaCat = document.getElementById('set-amz-tabla-cat');
+        if (tablaCat) tablaCat.checked = s.usarTablaCategorias !== false;
+        const tablaFba = document.getElementById('set-amz-tabla-fba');
+        if (tablaFba) tablaFba.checked = s.usarTablaFba !== false;
+        const refSinIva = document.getElementById('set-amz-referido-sin-iva');
+        if (refSinIva) refSinIva.checked = s.referidoSobreSinIVA !== false;
+        const prepEnvio = document.getElementById('set-amz-prep-envio');
+        if (prepEnvio) prepEnvio.checked = s.prepEnvioActivo !== false;
+
         const resico = document.getElementById('set-resico');
         if (resico) resico.checked = !!s.resico;
         const isr = document.getElementById('set-isr');
@@ -36,6 +71,37 @@ const SettingsView = (() => {
         const v = parseFloat(el.value);
         if (isNaN(v)) return;
         window.State.settings[key] = fromDisplay(v);
+        window.State.saveSettings();
+        UI.toast('Ajustes guardados');
+    }
+
+    function onAmzSelectChange(e) {
+        const el = e.currentTarget;
+        if (el.id === 'set-amz-cat-default') {
+            window.State.settings.categoriaDefault = el.value;
+        } else if (el.id === 'set-amz-tamano') {
+            window.State.settings.tamanoFbaDefault = el.value;
+        }
+        window.State.saveSettings();
+        UI.toast('Ajustes guardados');
+    }
+
+    function onAmzToggle(e) {
+        const el = e.currentTarget;
+        if (el.id === 'set-amz-tabla-cat') {
+            window.State.settings.usarTablaCategorias = !!el.checked;
+        } else if (el.id === 'set-amz-tabla-fba') {
+            window.State.settings.usarTablaFba = !!el.checked;
+        } else if (el.id === 'set-amz-referido-sin-iva') {
+            window.State.settings.referidoSobreSinIVA = !!el.checked;
+        } else if (el.id === 'set-amz-prep-envio') {
+            window.State.settings.prepEnvioActivo = !!el.checked;
+            window.App?.refreshMarketplaceChrome?.();
+            window.App?.refreshNavCounts?.();
+            if (!el.checked && window.State.view === 'envios') {
+                window.App?.switchTab?.('lotes');
+            }
+        }
         window.State.saveSettings();
         UI.toast('Ajustes guardados');
     }
@@ -179,6 +245,12 @@ const SettingsView = (() => {
             if (el) el.addEventListener('change', onChange);
         });
         document.getElementById('set-resico')?.addEventListener('change', onResicoChange);
+        document.getElementById('set-amz-tabla-cat')?.addEventListener('change', onAmzToggle);
+        document.getElementById('set-amz-tabla-fba')?.addEventListener('change', onAmzToggle);
+        document.getElementById('set-amz-referido-sin-iva')?.addEventListener('change', onAmzToggle);
+        document.getElementById('set-amz-prep-envio')?.addEventListener('change', onAmzToggle);
+        document.getElementById('set-amz-cat-default')?.addEventListener('change', onAmzSelectChange);
+        document.getElementById('set-amz-tamano')?.addEventListener('change', onAmzSelectChange);
         document.getElementById('btn-reset-settings')?.addEventListener('click', () => window.App && window.App.resetSettings());
         document.getElementById('btn-clear-ventas')?.addEventListener('click', () => {
             const p = window.App?.clearVentasRestore?.({ confirm: true });

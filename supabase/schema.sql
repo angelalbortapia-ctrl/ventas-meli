@@ -1,5 +1,12 @@
 -- Ventas Meli — schema de sync (ejecutar en Supabase SQL Editor)
 -- Project Settings → API: copia Project URL y anon public key a Ajustes de la app.
+--
+-- Dual marketplace (app v41+):
+--   lotes            = catálogo Mercado Libre
+--   settings._amazon = { lotes, settings } de Amazon
+--   settings._marketplace = marketplace activo ('meli' | 'amazon')
+--   settings._syncMeta   = { version: 2, counts, active, packedAt }
+-- No hace falta migrar la tabla: Amazon viaja dentro de settings jsonb.
 
 create table if not exists public.ventas_meli_state (
   user_id uuid primary key references auth.users (id) on delete cascade,

@@ -15,9 +15,26 @@ const Palette = (() => {
     function baseActions(App) {
         return [
             { section: 'Navegación', icon: '📦', title: 'Ir a Productos', keys: 'Lotes', run: () => App.switchTab('lotes') },
+            { section: 'Navegación', icon: '🚚', title: 'Ir a Envíos', keys: 'Amazon paquetes por enviar', run: () => App.switchTab('envios') },
             { section: 'Navegación', icon: '📊', title: 'Ir a Inicio', keys: 'Dashboard KPIs métricas', run: () => App.switchTab('dashboard') },
             { section: 'Navegación', icon: '💡', title: 'Ir a Insights', keys: 'Alertas recomendaciones', run: () => App.switchTab('insights') },
             { section: 'Navegación', icon: '⚙️', title: 'Ir a Ajustes', keys: 'Comisiones IVA umbral', run: () => App.switchTab('settings') },
+            { section: 'Marketplace', icon: '🛒', title: 'Cambiar a Mercado Libre', keys: 'Meli', run: () => {
+                if (window.State.marketplace !== 'meli') {
+                    window.State.switchMarketplace('meli');
+                    App.refreshMarketplaceChrome?.();
+                    SettingsView.loadIntoForm();
+                    App.switchTab(window.State.view || 'dashboard');
+                }
+            } },
+            { section: 'Marketplace', icon: '📦', title: 'Cambiar a Amazon', keys: 'Amazon FBA FBM', run: () => {
+                if (window.State.marketplace !== 'amazon') {
+                    window.State.switchMarketplace('amazon');
+                    App.refreshMarketplaceChrome?.();
+                    SettingsView.loadIntoForm();
+                    App.switchTab(window.State.view || 'dashboard');
+                }
+            } },
 
             { section: 'Acciones', icon: '➕', title: 'Nuevo lote', keys: 'Producto agregar crear', run: () => LotesView.openModal(null) },
             { section: 'Acciones', icon: '📥', title: 'Importar Excel', keys: 'Cargar archivo xlsx', run: () => document.getElementById('file-import').click() },

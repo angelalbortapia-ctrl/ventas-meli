@@ -51,10 +51,16 @@ const InsightsView = (() => {
         },
         ({ lote, calc }) => {
             if (calc.estrategia !== 'ESCALAR' || calc.margen < 0.30 || !calc.inventarioRestante) return null;
+            const isAmz = window.State.marketplace === 'amazon'
+                || window.State.settings?.marketplace === 'amazon';
             return {
                 severity: 'low', kind: 'opportunity',
-                title: `Premium: ${lote.producto}`,
-                text: `Margen ${Calc.fmtPct(calc.margen)} · tope CPA ${Calc.fmtMXN(calc.topeCPA)}.`,
+                title: isAmz
+                    ? `Escalar con Ads: ${lote.producto}`
+                    : `Premium: ${lote.producto}`,
+                text: isAmz
+                    ? `Margen ${Calc.fmtPct(calc.margen)} · tope CPA ${Calc.fmtMXN(calc.topeCPA)}. Considera Sponsored Products.`
+                    : `Margen ${Calc.fmtPct(calc.margen)} · tope CPA ${Calc.fmtMXN(calc.topeCPA)}.`,
                 lote, calc,
             };
         },

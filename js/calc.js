@@ -16,7 +16,8 @@
 
 const Calc = (() => {
 
-    const DEFAULT_SETTINGS = {
+    const DEFAULT_SETTINGS_MELI = {
+        marketplace: 'meli',
         comisionClasica: 0.15,
         comisionPremium: 0.20,
         // Cargo fijo aprox. ML MX (publicaciones bajo umbral). Ajusta en Ajustes.
@@ -28,19 +29,287 @@ const Calc = (() => {
         umbralLiquidar: 50,
         umbralEscalar: 80,
         topeCPA: 0.40,
+        comisionReferido: 0.12,
+        tarifaFulfillmentDefault: 55,
     };
 
+    /**
+     * Amazon MX (Seller Central / Revenue Calculator).
+     * Referido: % de categoría sobre precio sin IVA (precio ÷ 1.16), máx. con mínimo $8.
+     *   Cuadra con la Calculadora de ingresos (ej. $459.99 · 12% → $47.59).
+     * FBA = tabla por tamaño × peso × banda de precio (si lote.envio vacío).
+     * Almacenamiento = lote.almacenamiento (MXN/ud, opcional; calculadora lo estima aparte).
+     */
+    const DEFAULT_SETTINGS_AMAZON = {
+        marketplace: 'amazon',
+        comisionReferido: 0.15,          // fallback / override manual
+        tarifaReferidoMinima: 8,         // MXN por artículo
+        usarTablaCategorias: true,       // false → solo comisionReferido fijo
+        referidoSobreSinIVA: true,       // true = igual que Revenue Calculator MX
+        prepEnvioActivo: true,           // vista Envíos + marcar pedidos por preparar
+        categoriaDefault: 'hogar_cocina',
+        usarTablaFba: true,              // false → solo tarifaFulfillmentDefault / lote.envio
+        tarifaFulfillmentDefault: 64,    // Estándar ~0.3 kg, precio ≥ $499
+        tamanoFbaDefault: 'estandar',    // sobre | estandar | grande
+        pesoKgDefault: 0.3,
+        comisionClasica: 0.15,
+        comisionPremium: 0.15,
+        cargoFijo: 0,
+        umbralCargoFijo: 0,
+        retencionIVA: 0,
+        retencionISR: 0,
+        resico: false,
+        umbralLiquidar: 50,
+        umbralEscalar: 80,
+        topeCPA: 0.40,
+    };
+
+    /** Categorías oficiales Amazon MX (referido % con IVA). */
+    const AMZ_CATEGORIES = {
+        acc_amazon:          { label: 'Accesorios dispositivos Amazon', pct: 0.45 },
+        bebe:                { label: 'Productos para bebé', pct: 0.15 },
+        electronica:         { label: 'Electrónicos', pct: 0.10 },
+        acc_electronica:     { label: 'Accesorios electrónicos', tier: { upTo: 2000, low: 0.15, high: 0.08 } },
+        muebles:             { label: 'Muebles', pct: 0.15 },
+        colchones:           { label: 'Colchones', pct: 0.15 },
+        patio:               { label: 'Patio y Jardín', pct: 0.15 },
+        alimentacion:        { label: 'Alimentación y Gourmet', band: { upTo: 500, low: 0.12, high: 0.15 } },
+        hogar_cocina:        { label: 'Hogar y Cocina', pct: 0.15 },
+        electrodomesticos:   { label: 'Electrodomésticos', pct: 0.15 },
+        musica:              { label: 'Instrumentos musicales', pct: 0.15 },
+        oficina:             { label: 'Oficina y Papelería', pct: 0.10 },
+        deportes:            { label: 'Deportes y Aire libre', pct: 0.15 },
+        computadoras:        { label: 'Computadoras', pct: 0.10 },
+        mascotas:            { label: 'Mascotas', pct: 0.15 },
+        herramientas:        { label: 'Herramientas y Mejoras del hogar', pct: 0.15 },
+        herramientas_elec:   { label: 'Herramientas eléctricas', pct: 0.12 },
+        juguetes:            { label: 'Juguetes y Juegos', band: { upTo: 300, low: 0.08, high: 0.15 } },
+        multimedia:          { label: 'Multimedia (Libros, DVD, Música)', pct: 0.15 },
+        videojuegos:         { label: 'Videojuegos y Accesorios', pct: 0.15 },
+        consolas:            { label: 'Videoconsolas', pct: 0.08 },
+        automotriz:          { label: 'Automotriz y Motocicletas', pct: 0.12 },
+        neumaticos:          { label: 'Neumáticos', pct: 0.10 },
+        belleza:             { label: 'Belleza', band: { upTo: 200, low: 0.12, high: 0.15 } },
+        salud:               { label: 'Salud y Cuidado personal', band: { upTo: 200, low: 0.12, high: 0.15 } },
+        alcohol:             { label: 'Bebidas alcohólicas', pct: 0.08 },
+        ropa:                { label: 'Ropa y Accesorios', pct: 0.15 },
+        calzado:             { label: 'Calzado', pct: 0.15 },
+        lentes:              { label: 'Lentes y accesorios', pct: 0.15 },
+        bolsos:              { label: 'Mochilas, Bolsos y Equipaje', pct: 0.15 },
+        relojes:             { label: 'Relojes', tier: { upTo: 5000, low: 0.16, high: 0.05 } },
+        joyeria:             { label: 'Joyería', pct: 0.15 },
+        industria:           { label: 'Industria, Empresas y Ciencia', pct: 0.14 },
+        otros:               { label: 'Todo lo demás', pct: 0.15 },
+    };
+
+    /** Alias texto libre → clave (para categorías ya tipadas a mano). */
+    const AMZ_CAT_ALIASES = {
+        cocina: 'hogar_cocina', hogar: 'hogar_cocina', 'hogar y cocina': 'hogar_cocina',
+        gaming: 'videojuegos', videojuegos: 'videojuegos', electronica: 'electronica',
+        electrónicos: 'electronica', electronicos: 'electronica', salud: 'salud',
+        belleza: 'belleza', juguetes: 'juguetes', deportes: 'deportes', baño: 'hogar_cocina',
+        bano: 'hogar_cocina', oficina: 'oficina', mascotas: 'mascotas', ropa: 'ropa',
+        computadoras: 'computadoras', bebe: 'bebe', bebés: 'bebe',
+        alimentacion: 'alimentacion', alimentos: 'alimentacion', gourmet: 'alimentacion',
+        chocolate: 'alimentacion', comida: 'alimentacion', 'alimentacion y gourmet': 'alimentacion',
+    };
+
+    /**
+     * Tabla FBA general (no Salud/Alimentación/Alcohol).
+     * Bandas precio: 0=<150, 1=150–299, 2=299–499, 3=≥499
+     * Valores = [tarifa base por tramo de peso…] + addPerExtra
+     */
+    const FBA_GENERAL = {
+        sobre: {
+            // tramos: 0-0.1, 0.1-0.2, 0.2-0.3, 0.3-0.4, >0.4 (usa último + extra no aplica igual)
+            weights: [0.1, 0.2, 0.3, 0.4, Infinity],
+            bands: [
+                [27.00, 27.20, 27.40, 27.60, 27.80],
+                [33.00, 34.00, 35.00, 36.00, 37.00],
+                [49.00, 50.00, 51.00, 52.00, 53.00],
+                [60.00, 60.40, 60.80, 61.20, 61.50],
+            ],
+        },
+        estandar: {
+            weights: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, Infinity],
+            bands: [
+                [28.00, 28.05, 28.10, 28.15, 28.20, 28.25, 28.30, 28.35, 28.40, 28.45, 28.50],
+                [33.00, 34.00, 35.00, 36.00, 37.00, 37.50, 38.00, 38.50, 39.00, 39.50, 40.00],
+                [50.00, 51.00, 52.00, 53.00, 54.00, 55.00, 56.00, 57.00, 58.00, 59.00, 60.00],
+                [61.80, 63.00, 64.00, 66.00, 67.00, 68.30, 69.60, 71.00, 72.00, 72.70, 72.80],
+            ],
+            // extra por cada 0.25 kg sobre 1 kg
+            extraAfter1kg: [1.15, 1.15, 1.75, 1.50],
+        },
+        grande: {
+            // base 0–1 kg; luego + por 0.5 kg hasta 50; simplificado
+            base1kg: [32.00, 38.00, 61.00, 75.40],
+            per05_to50: [2.80, 2.80, 3.10, 3.75],
+        },
+    };
+
+    /** Misma estructura, tarifas reducidas Salud / Alimentación / Alcohol. */
+    const FBA_ESSENTIALS = {
+        sobre: {
+            weights: [0.1, 0.2, 0.3, 0.4, Infinity],
+            bands: [
+                [4.50, 4.60, 4.70, 4.80, 4.90],
+                [5.50, 5.60, 5.70, 5.80, 5.90],
+                [14.00, 14.10, 14.20, 14.30, 14.40],
+                [60.00, 60.40, 60.80, 61.20, 61.50],
+            ],
+        },
+        estandar: {
+            weights: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, Infinity],
+            bands: [
+                [5.00, 5.10, 5.20, 5.30, 5.40, 5.50, 5.60, 5.70, 5.80, 5.90, 6.00],
+                [6.00, 6.10, 6.20, 6.30, 6.40, 6.50, 6.60, 6.70, 6.80, 6.90, 7.00],
+                [14.50, 14.60, 14.70, 14.80, 14.90, 15.00, 15.10, 15.20, 15.30, 15.40, 15.50],
+                [61.80, 63.00, 64.00, 66.00, 67.00, 68.30, 69.60, 71.00, 72.00, 72.70, 72.80],
+            ],
+            extraAfter1kg: [0.15, 0.30, 0.45, 1.50],
+        },
+        grande: {
+            base1kg: [5.20, 6.20, 15.50, 75.40],
+            per05_to50: [0.25, 0.50, 0.75, 3.75],
+        },
+    };
+
+    const DEFAULT_SETTINGS = DEFAULT_SETTINGS_MELI;
+
+    function defaultsFor(marketplace = 'meli') {
+        return marketplace === 'amazon'
+            ? { ...DEFAULT_SETTINGS_AMAZON }
+            : { ...DEFAULT_SETTINGS_MELI };
+    }
+
     function effectiveSettings(settings = {}) {
-        const s = { ...DEFAULT_SETTINGS, ...settings };
-        // RESICO manda sobre el slider ISR si está activo
-        if (s.resico) s.retencionISR = 0.01;
+        const mp = settings.marketplace === 'amazon' ? 'amazon' : 'meli';
+        const s = { ...defaultsFor(mp), ...settings, marketplace: mp };
+        // RESICO manda sobre el slider ISR si está activo (solo Meli)
+        if (mp === 'meli' && s.resico) s.retencionISR = 0.01;
         return s;
     }
 
-    function comisionPct(tipo, s = DEFAULT_SETTINGS) {
+    function amzCategoryList() {
+        return Object.entries(AMZ_CATEGORIES).map(([id, c]) => ({ id, label: c.label }));
+    }
+
+    function resolveAmzCategoryKey(lote, settings = {}) {
+        const s = effectiveSettings(settings);
+        const raw = String(lote?.categoriaAmazon || lote?.categoria || s.categoriaDefault || 'otros').trim();
+        if (AMZ_CATEGORIES[raw]) return raw;
+        const norm = raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        if (AMZ_CAT_ALIASES[norm]) return AMZ_CAT_ALIASES[norm];
+        // match por label parcial
+        for (const [id, c] of Object.entries(AMZ_CATEGORIES)) {
+            const lab = c.label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            if (lab.includes(norm) || norm.includes(lab.slice(0, 8))) return id;
+        }
+        return s.categoriaDefault && AMZ_CATEGORIES[s.categoriaDefault] ? s.categoriaDefault : 'otros';
+    }
+
+    function amzReferralPct(precio, categoryKey) {
+        const cat = AMZ_CATEGORIES[categoryKey] || AMZ_CATEGORIES.otros;
+        const p = Number(precio) || 0;
+        if (cat.tier) {
+            if (p <= cat.tier.upTo) return cat.tier.low;
+            // tasa efectiva ponderada para display; el fee se calcula aparte
+            return (cat.tier.upTo * cat.tier.low + (p - cat.tier.upTo) * cat.tier.high) / p;
+        }
+        if (cat.band) return p <= cat.band.upTo ? cat.band.low : cat.band.high;
+        return cat.pct;
+    }
+
+    function amzReferralFeeAmount(precio, categoryKey, settings = {}) {
+        const s = effectiveSettings(settings);
+        const p = Number(precio) || 0;
+        const min = Number(s.tarifaReferidoMinima) || 8;
+        // Revenue Calculator MX aplica el % sobre precio sin IVA (÷ 1.16).
+        // Umbrales de banda/tier siguen siendo sobre el precio de lista.
+        const base = s.referidoSobreSinIVA !== false && p > 0 ? p / 1.16 : p;
+        if (!s.usarTablaCategorias) {
+            const pct = Number(s.comisionReferido) || 0.15;
+            return Math.max(base * pct, min);
+        }
+        const cat = AMZ_CATEGORIES[categoryKey] || AMZ_CATEGORIES.otros;
+        let fee;
+        if (cat.tier) {
+            // Misma lógica oficial, luego ÷ 1.16 si referidoSobreSinIVA
+            if (p <= cat.tier.upTo) fee = p * cat.tier.low;
+            else fee = cat.tier.upTo * cat.tier.low + (p - cat.tier.upTo) * cat.tier.high;
+            if (s.referidoSobreSinIVA !== false) fee = fee / 1.16;
+        } else if (cat.band) {
+            fee = base * (p <= cat.band.upTo ? cat.band.low : cat.band.high);
+        } else {
+            fee = base * cat.pct;
+        }
+        return Math.max(fee, min);
+    }
+
+    function amzPriceBandIndex(precio) {
+        const p = Number(precio) || 0;
+        if (p < 150) return 0;
+        if (p < 299) return 1;
+        if (p < 499) return 2;
+        return 3;
+    }
+
+    function amzIsEssentialsCategory(categoryKey) {
+        return categoryKey === 'salud' || categoryKey === 'alimentacion' || categoryKey === 'alcohol';
+    }
+
+    function lookupFbaTier(table, tamano, peso, band) {
+        const size = table[tamano] || table.estandar;
+        if (tamano === 'grande') {
+            const base = size.base1kg[band];
+            const w = Math.max(0, Number(peso) || 0);
+            if (w <= 1) return base;
+            const steps = Math.ceil((Math.min(w, 50) - 1) / 0.5);
+            return base + steps * size.per05_to50[band];
+        }
+        const weights = size.weights;
+        const rates = size.bands[band];
+        const w = Math.max(0, Number(peso) || 0);
+        let idx = weights.findIndex(limit => w <= limit);
+        if (idx < 0) idx = rates.length - 1;
+        let fee = rates[Math.min(idx, rates.length - 1)];
+        if (w > 1 && size.extraAfter1kg) {
+            const extraSteps = Math.ceil((w - 1) / 0.25);
+            fee = rates[rates.length - 1] + extraSteps * size.extraAfter1kg[band];
+        }
+        return fee;
+    }
+
+    function amzFbaFee(lote, precio, settings = {}) {
+        const s = effectiveSettings(settings);
+        const override = Number(lote.envio);
+        if (override > 0) return { fee: override, source: 'manual' };
+        if (!s.usarTablaFba) {
+            return { fee: Number(s.tarifaFulfillmentDefault) || 0, source: 'default' };
+        }
+        const catKey = resolveAmzCategoryKey(lote, s);
+        const table = amzIsEssentialsCategory(catKey) ? FBA_ESSENTIALS : FBA_GENERAL;
+        const tamano = String(lote.tamanoFba || s.tamanoFbaDefault || 'estandar').toLowerCase();
+        const sizeKey = tamano.startsWith('sob') ? 'sobre' : tamano.startsWith('gran') ? 'grande' : 'estandar';
+        const peso = Number(lote.pesoKg);
+        const pesoEff = Number.isFinite(peso) && peso > 0 ? peso : (Number(s.pesoKgDefault) || 0.3);
+        const band = amzPriceBandIndex(precio);
+        const fee = lookupFbaTier(table, sizeKey, pesoEff, band);
+        return { fee, source: 'tabla', tamano: sizeKey, peso: pesoEff, band };
+    }
+
+    function comisionPct(tipo, s = DEFAULT_SETTINGS, lote = null) {
+        const st = effectiveSettings(s);
+        if (st.marketplace === 'amazon') {
+            if (!st.usarTablaCategorias) return Number(st.comisionReferido) || 0.15;
+            const precio = Number(lote?.precio) || 0;
+            const key = resolveAmzCategoryKey(lote || {}, st);
+            return amzReferralPct(precio, key);
+        }
         const t = String(tipo || '').toLowerCase();
-        if (t.startsWith('prem')) return s.comisionPremium;
-        return s.comisionClasica;
+        if (t.startsWith('prem')) return st.comisionPremium;
+        return st.comisionClasica;
     }
 
     /** Costo máximo de adquisición para lograr un margen objetivo al precio de lista. */
@@ -48,16 +317,10 @@ const Calc = (() => {
         const s = effectiveSettings(settings);
         const precio = Number(lote.precio) || 0;
         if (precio <= 0) return null;
-        const pctComision = comisionPct(lote.tipo, s);
-        const comisionVariable = precio * pctComision;
-        const cargoFijo = precio > 0 && precio < s.umbralCargoFijo ? s.cargoFijo : 0;
-        const envio = Number(lote.envio) || 0;
-        const precioSinIVA = precio / 1.16;
-        const retIVA = precioSinIVA * s.retencionIVA;
-        const retISR = precioSinIVA * s.retencionISR;
-        const fees = comisionVariable + cargoFijo + envio + retIVA + retISR;
-        // utilidad = precio - costo - fees = margen * precio
-        // costo = precio - fees - margen*precio
+        const at = utilidadAtPrice(lote, precio, s);
+        const fulfill = at.envio != null ? at.envio : (Number(lote.envio) || 0);
+        const alm = at.almacenamiento != null ? at.almacenamiento : (Number(lote.almacenamiento) || 0);
+        const fees = at.comisionVariable + at.cargoFijo + at.retIVA + at.retISR + fulfill + alm;
         const costo = precio * (1 - margenObjetivo) - fees;
         return Math.max(0, costo);
     }
@@ -74,7 +337,9 @@ const Calc = (() => {
         if (ideal == null) return null;
         const actual = Number(lote.costo) || 0;
         const at = utilidadAtPrice(lote, precio, s);
-        const fees = at.comisionVariable + at.cargoFijo + (Number(lote.envio) || 0) + at.retIVA + at.retISR;
+        const envioFee = at.envio != null ? at.envio : (Number(lote.envio) || 0);
+        const alm = at.almacenamiento != null ? at.almacenamiento : (Number(lote.almacenamiento) || 0);
+        const fees = at.comisionVariable + at.cargoFijo + envioFee + alm + at.retIVA + at.retISR;
         const diff = actual - ideal; // + = compraste más caro que el tope
         let verdict = 'en_objetivo';
         if (diff > 0.5) verdict = 'arriba';
@@ -92,10 +357,13 @@ const Calc = (() => {
             breakdown: {
                 comisionVariable: at.comisionVariable,
                 cargoFijo: at.cargoFijo,
-                envio: Number(lote.envio) || 0,
+                envio: envioFee,
+                almacenamiento: alm,
                 retIVA: at.retIVA,
                 retISR: at.retISR,
                 pctComision: at.pctComision,
+                categoriaAmazon: at.categoriaAmazon,
+                referidoMinimo: at.referidoMinimo,
             },
         };
     }
@@ -122,20 +390,53 @@ const Calc = (() => {
         };
     }
 
-    /** Utilidad neta por unidad a un precio de venta dado (fees ML + SAT). */
+    /** Utilidad neta por unidad (Meli+SAT o Amazon referido+fulfillment). */
     function utilidadAtPrice(lote, precioVenta, settings = DEFAULT_SETTINGS) {
         const s = effectiveSettings(settings);
         const costo = Number(lote.costo) || 0;
         const precio = Number(precioVenta) || 0;
-        const envio = Number(lote.envio) || 0;
-        const pctComision = comisionPct(lote.tipo, s);
+
+        if (s.marketplace === 'amazon') {
+            const catKey = resolveAmzCategoryKey(lote, s);
+            const comisionVariable = amzReferralFeeAmount(precio, catKey, s);
+            // % de categoría (p.ej. 12%), no fee/precio (~10.3% efectivo)
+            const pctComision = precio > 0 ? amzReferralPct(precio, catKey) : comisionPct(lote.tipo, s, lote);
+            const tipo = String(lote.tipo || 'FBA').toUpperCase();
+            let envio = 0;
+            let fbaMeta = null;
+            if (tipo === 'FBM') {
+                envio = Number(lote.envio) || 0; // tu costo real de envío
+            } else {
+                fbaMeta = amzFbaFee(lote, precio, s);
+                envio = fbaMeta.fee;
+            }
+            const almacenamiento = Math.max(0, Number(lote.almacenamiento) || 0);
+            const utilidad = precio - costo - comisionVariable - envio - almacenamiento;
+            return {
+                utilidad,
+                margen: precio > 0 ? utilidad / precio : 0,
+                pctComision,
+                comisionVariable,
+                cargoFijo: 0,
+                envio,
+                almacenamiento,
+                retIVA: 0,
+                retISR: 0,
+                categoriaAmazon: catKey,
+                referidoMinimo: Number(s.tarifaReferidoMinima) || 8,
+                fbaMeta,
+            };
+        }
+
+        let envio = Number(lote.envio) || 0;
+        const pctComision = comisionPct(lote.tipo, s, lote);
         const comisionVariable = precio * pctComision;
-        const cargoFijo = precio > 0 && precio < s.umbralCargoFijo ? s.cargoFijo : 0;
+        const cargoFijo = precio > 0 && s.umbralCargoFijo > 0 && precio < s.umbralCargoFijo ? s.cargoFijo : 0;
         const precioSinIVA = precio > 0 ? precio / 1.16 : 0;
         const retIVA = precioSinIVA * s.retencionIVA;
         const retISR = precioSinIVA * s.retencionISR;
         const utilidad = precio - costo - comisionVariable - cargoFijo - envio - retIVA - retISR;
-        return { utilidad, margen: precio > 0 ? utilidad / precio : 0, pctComision, comisionVariable, cargoFijo, retIVA, retISR };
+        return { utilidad, margen: precio > 0 ? utilidad / precio : 0, pctComision, comisionVariable, cargoFijo, envio, retIVA, retISR };
     }
 
     function syncVendidas(lote) {
@@ -165,7 +466,14 @@ const Calc = (() => {
 
         const unit = utilidadAtPrice(lote, precio, s);
         const { utilidad, margen, pctComision, comisionVariable, cargoFijo, retIVA, retISR } = unit;
+        const envioEfectivo = unit.envio != null ? unit.envio : envio;
+        const almacenamiento = unit.almacenamiento != null
+            ? unit.almacenamiento
+            : Math.max(0, Number(lote.almacenamiento) || 0);
         const roi = costo > 0 ? utilidad / costo : 0;
+        const categoriaAmazon = unit.categoriaAmazon || null;
+        const referidoMinimo = unit.referidoMinimo || null;
+        const fbaMeta = unit.fbaMeta || null;
 
         const inversion = costo * unidades;
         const inventarioRestante = Math.max(0, unidades - vendidas);
@@ -219,8 +527,13 @@ const Calc = (() => {
             pctComision,
             comisionVariable,
             cargoFijo,
+            envio: envioEfectivo,
+            almacenamiento,
             retIVA,
             retISR,
+            categoriaAmazon,
+            referidoMinimo,
+            fbaMeta,
             utilidad,
             margen,
             roi,
@@ -412,6 +725,10 @@ const Calc = (() => {
 
     return {
         DEFAULT_SETTINGS,
+        DEFAULT_SETTINGS_MELI,
+        DEFAULT_SETTINGS_AMAZON,
+        AMZ_CATEGORIES,
+        defaultsFor,
         effectiveSettings,
         computeLote,
         utilidadAtPrice,
@@ -426,6 +743,10 @@ const Calc = (() => {
         fmtPct,
         fmtDate,
         comisionPct,
+        amzCategoryList,
+        resolveAmzCategoryKey,
+        amzReferralFeeAmount,
+        amzFbaFee,
     };
 })();
 window.Calc = Calc;

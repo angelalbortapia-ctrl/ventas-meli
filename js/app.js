@@ -13,12 +13,17 @@ const App = (() => {
     const TAB_LABELS = {
         dashboard: 'Inicio',
         lotes: 'Productos',
+        envios: 'Envíos',
         insights: 'Insights',
         settings: 'Ajustes',
     };
 
     function switchTab(tab) {
         if (!TAB_LABELS[tab]) return;
+        // Envíos solo existe en Amazon con la función activa
+        if (tab === 'envios' && window.EnviosView && !EnviosView.isEnabled()) {
+            tab = 'settings';
+        }
         const view = document.getElementById('view-' + tab);
         if (!view) return;
         window.State.view = tab;
@@ -39,6 +44,7 @@ const App = (() => {
         if (tab === 'dashboard') DashboardView.render();
         else if (tab === 'insights') InsightsView.render();
         else if (tab === 'lotes') LotesView.render();
+        else if (tab === 'envios') EnviosView.render();
         refreshNavCounts();
     }
 
@@ -137,6 +143,14 @@ const App = (() => {
         if (mIns) {
             mIns.textContent = alerts;
             mIns.hidden = alerts === 0;
+        }
+
+        const pendingShip = window.EnviosView?.pendingCount?.() || 0;
+        const sbEnv = document.getElementById('sb-count-envios');
+        if (sbEnv) {
+            sbEnv.textContent = pendingShip;
+            sbEnv.hidden = pendingShip === 0;
+            sbEnv.classList.toggle('badge-alert', pendingShip > 0);
         }
     }
 
@@ -282,23 +296,46 @@ const App = (() => {
             try {
                 const text = await file.text();
                 const data = JSON.parse(text);
-                if (!data || !Array.isArray(data.lotes)) throw new Error('Formato inválido');
+                if (!data || (!Array.isArray(data.lotes) && !data.stores)) throw new Error('Formato inválido');
+                const nMeli = data.stores?.meli?.lotes?.length ?? (data.marketplace !== 'amazon' ? (data.lotes?.length || 0) : 0);
+                const nAmz = data.stores?.amazon?.lotes?.length ?? (data.marketplace === 'amazon' ? (data.lotes?.length || 0) : 0);
                 const ok = await UI.confirm({
                     title: 'Restaurar respaldo',
-                    message: `Se restaurarán <strong>${data.lotes.length}</strong> lote(s) y se reemplazarán los actuales. ¿Continuar?`,
+                    message: `Se restaurará el respaldo (Meli: <strong>${nMeli}</strong> · Amazon: <strong>${nAmz}</strong>) y reemplazará los datos locales. ¿Continuar?`,
                     primaryLabel: 'Restaurar',
                     danger: true,
                 });
                 if (!ok) return;
-                window.State.lotes = data.lotes.map(Data.normalize);
-                if (data.settings) {
-                    window.State.settings = { ...Calc.DEFAULT_SETTINGS, ...data.settings };
-                    window.State.saveSettings();
-                    SettingsView.loadIntoForm();
+                if (data.stores?.meli || data.stores?.amazon) {
+                    const m = data.stores.meli || { lotes: [], settings: {} };
+                    const a = data.stores.amazon || { lotes: [], settings: {} };
+                    Data.saveLotes((m.lotes || []).map(l => Data.normalize(l, [])), 'meli');
+                    Data.saveSettings({ ...Calc.defaultsFor('meli'), ...(m.settings || {}), marketplace: 'meli' }, 'meli');
+                    Data.saveLotes((a.lotes || []).map(l => Data.normalize(l, [])), 'amazon');
+                    Data.saveSettings({ ...Calc.defaultsFor('amazon'), ...(a.settings || {}), marketplace: 'amazon' }, 'amazon');
+                    const mp = data.marketplace === 'amazon' ? 'amazon' : 'meli';
+                    window.State.marketplace = mp;
+                    window.State.ui = { ...window.State.ui, marketplace: mp };
+                    window.State.saveUI();
+                    window.State.lotes = Data.loadLotes(mp);
+                    window.State.settings = Data.loadSettings(mp);
+                } else {
+                    window.State.lotes = data.lotes.map(l => Data.normalize(l, []));
+                    if (data.settings) {
+                        window.State.settings = {
+                            ...Calc.defaultsFor(window.State.marketplace),
+                            ...data.settings,
+                            marketplace: window.State.marketplace,
+                        };
+                        window.State.saveSettings();
+                    }
+                    window.State.save();
                 }
-                window.State.save();
+                refreshMarketplaceChrome();
+                SettingsView.loadIntoForm();
                 markBackupDone();
                 UI.toast('Respaldo restaurado');
+                window.State.notify();
             } catch (err) {
                 UI.toast('Error: ' + err.message, 'error');
             } finally {
@@ -314,11 +351,25 @@ const App = (() => {
     }
 
     function exportJSON() {
+        const active = Data.normalizeMarketplace(window.State.marketplace);
+        Data.saveLotes(window.State.lotes, active);
+        Data.saveSettings(window.State.settings, active);
         const data = {
-            version: 3,
+            version: 4,
             exportedAt: new Date().toISOString(),
+            marketplace: active,
             lotes: window.State.lotes,
             settings: window.State.settings,
+            stores: {
+                meli: {
+                    lotes: active === 'meli' ? window.State.lotes : Data.loadLotes('meli'),
+                    settings: active === 'meli' ? window.State.settings : Data.loadSettings('meli'),
+                },
+                amazon: {
+                    lotes: active === 'amazon' ? window.State.lotes : Data.loadLotes('amazon'),
+                    settings: active === 'amazon' ? window.State.settings : Data.loadSettings('amazon'),
+                },
+            },
         };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -339,7 +390,7 @@ const App = (() => {
             primaryLabel: 'Restaurar',
         });
         if (!ok) return;
-        window.State.settings = { ...Calc.DEFAULT_SETTINGS };
+        window.State.settings = Calc.defaultsFor(window.State.marketplace);
         window.State.saveSettings();
         SettingsView.loadIntoForm();
         UI.toast('Ajustes restaurados');
@@ -420,6 +471,7 @@ const App = (() => {
         if (window.State.view === 'dashboard') DashboardView.render();
         else if (window.State.view === 'insights') InsightsView.render();
         else if (window.State.view === 'lotes') LotesView.render();
+        else if (window.State.view === 'envios') EnviosView.render();
         refreshNavCounts();
         return true;
     }
@@ -438,14 +490,97 @@ const App = (() => {
         history.replaceState({}, '', location.pathname + (q ? '?' + q : '') + location.hash);
     }
 
+    function refreshMarketplaceChrome() {
+        const mp = Data.normalizeMarketplace(window.State.marketplace);
+        const meta = Data.mpMeta(mp);
+        document.querySelectorAll('[data-marketplace]').forEach(el => {
+            el.classList.toggle('active', el.dataset.marketplace === mp);
+            el.setAttribute('aria-selected', el.dataset.marketplace === mp ? 'true' : 'false');
+        });
+        const brand = document.querySelector('.sb-brand-text .name');
+        if (brand) brand.textContent = mp === 'amazon' ? 'Ventas Amazon' : 'Ventas Meli';
+        const sub = document.querySelector('.sb-brand-text .sub');
+        if (sub) sub.textContent = mp === 'amazon' ? 'Amazon México · rentabilidad' : 'Mercado Libre · rentabilidad';
+        const root = document.querySelector('.tb-crumb-root');
+        if (root) root.textContent = meta.short;
+        document.body.dataset.marketplace = mp;
+        document.querySelectorAll('[data-mp-only]').forEach(el => {
+            el.hidden = el.dataset.mpOnly !== mp;
+        });
+        document.querySelectorAll('[data-mp-field]').forEach(el => {
+            el.hidden = el.dataset.mpField !== mp;
+        });
+        // Feature flags (p.ej. menú Envíos)
+        const prepOn = mp === 'amazon' && window.State.settings?.prepEnvioActivo !== false;
+        document.querySelectorAll('[data-feature="prep-envio"]').forEach(el => {
+            el.hidden = !prepOn;
+        });
+        if (window.State.view === 'envios' && !prepOn) {
+            switchTab('lotes');
+        }
+        // Labels del modal
+        const tipoLabel = document.querySelector('label:has(#f-tipo) > span');
+        if (tipoLabel) tipoLabel.textContent = mp === 'amazon' ? 'Logística' : 'Tipo Publicación';
+        const envioLabel = document.querySelector('label:has(#f-envio) > span');
+        if (envioLabel) {
+            envioLabel.textContent = mp === 'amazon'
+                ? 'Fulfillment override (MXN)'
+                : 'Envío al cliente (MXN)';
+        }
+        const tipoSel = document.getElementById('f-tipo');
+        if (tipoSel) {
+            const cur = tipoSel.value;
+            if (mp === 'amazon') {
+                tipoSel.innerHTML = '<option value="FBA">FBA (Logística Amazon)</option><option value="FBM">FBM (Tú envías)</option>';
+                tipoSel.value = (cur === 'FBM' || cur === 'FBA') ? cur : 'FBA';
+            } else {
+                tipoSel.innerHTML = '<option value="Clasica">Clásica</option><option value="Premium">Premium</option>';
+                tipoSel.value = (cur === 'Premium' || cur === 'Clasica') ? cur : 'Clasica';
+            }
+        }
+        // Selects de categorías Amazon
+        const fillAmzCats = (sel, selected) => {
+            if (!sel || !Calc.amzCategoryList) return;
+            const cur = selected || sel.value;
+            sel.innerHTML = Calc.amzCategoryList().map(c =>
+                `<option value="${c.id}">${c.label}</option>`
+            ).join('');
+            if (cur && [...sel.options].some(o => o.value === cur)) sel.value = cur;
+            else if (window.State.settings?.categoriaDefault) sel.value = window.State.settings.categoriaDefault;
+        };
+        fillAmzCats(document.getElementById('f-amz-categoria'));
+        fillAmzCats(document.getElementById('set-amz-cat-default'), window.State.settings?.categoriaDefault);
+    }
+
+    function initMarketplaceSwitch() {
+        document.querySelectorAll('[data-marketplace]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mp = btn.dataset.marketplace;
+                if (!mp || mp === window.State.marketplace) return;
+                window.State.switchMarketplace(mp);
+                refreshMarketplaceChrome();
+                SettingsView.loadIntoForm();
+                if (window.State.view === 'dashboard') DashboardView.render();
+                else if (window.State.view === 'insights') InsightsView.render();
+                else if (window.State.view === 'lotes') LotesView.render();
+                else if (window.State.view === 'envios') EnviosView.render();
+                refreshNavCounts();
+                UI.toast(mp === 'amazon' ? 'Catálogo Amazon (vacío / propio)' : 'Catálogo Mercado Libre');
+            });
+        });
+    }
+
     // ---- Init ----------------------------------------------------------
     function init() {
-        window.State.lotes = Data.loadLotes();
-        window.State.settings = Data.loadSettings();
         window.State.ui = Data.loadUI();
+        window.State.marketplace = Data.normalizeMarketplace(window.State.ui.marketplace);
+        window.State.lotes = Data.loadLotes(window.State.marketplace);
+        window.State.settings = Data.loadSettings(window.State.marketplace);
 
         window.App = App; // expose for other modules
 
+        initMarketplaceSwitch();
+        refreshMarketplaceChrome();
         initSidebar();
         initTopbar();
         initExcel();
@@ -454,6 +589,7 @@ const App = (() => {
         initPWA();
 
         LotesView.init();
+        EnviosView.init();
         DashboardView.init();
         InsightsView.init();
         SettingsView.init();
@@ -499,5 +635,6 @@ const App = (() => {
         markBackupNeeded,
         refreshBackupHint,
         refreshNavCounts,
+        refreshMarketplaceChrome,
     };
 })();

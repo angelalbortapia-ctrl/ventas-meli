@@ -11,6 +11,7 @@ const LotesView = (() => {
         search: '',
         strategies: new Set(),   // Multi-select
         withStock: false,
+        shipPending: false,      // legacy filter (ya no se usa; cola en vista Envíos)
         selected: null,          // familyKey (producto normalizado)
         selectedVariant: null,   // id del lote/variante activa
         sort: { key: 'utilidad', dir: 'desc' },
@@ -18,6 +19,38 @@ const LotesView = (() => {
         margenObjetivoPct: 25,   // % editable en Sugerencias → compra ideal
         mobileDetail: false,     // iPhone: lista ↔ detalle a pantalla completa
     };
+
+    const ENVIO_LABELS = {
+        por_preparar: 'Por empaquetar',
+        empaquetado: 'Empaquetado',
+        etiqueta: 'Con etiqueta',
+        listo: 'Listo para llevar',
+        enviado: 'Enviado al cliente',
+    };
+    /** FBA: tú mandas inventario AL almacén de Amazon (inbound). */
+    const FBA_INBOUND_LABELS = {
+        creando: 'Creando envío',
+        por_enviar: 'Por enviar a FBA',
+        en_transito: 'En tránsito',
+        recibido: 'Recibido en FBA',
+    };
+    const ENVIO_ESTADOS_OPTS_FBM = [
+        { value: '', label: '— Sin prep.' },
+        { value: 'por_preparar', label: 'Por empaquetar' },
+        { value: 'empaquetado', label: 'Empaquetado' },
+        { value: 'etiqueta', label: 'Con etiqueta' },
+        { value: 'listo', label: 'Listo para llevar' },
+        { value: 'enviado', label: 'Enviado al cliente' },
+    ];
+    const ENVIO_ESTADOS_OPTS_FBA = [
+        { value: '', label: '— Aún no' },
+        { value: 'creando', label: 'Creando envío' },
+        { value: 'por_enviar', label: 'Por enviar a FBA' },
+        { value: 'en_transito', label: 'En tránsito' },
+        { value: 'recibido', label: 'Recibido en FBA' },
+    ];
+    // alias legacy
+    const ENVIO_ESTADOS_OPTS = ENVIO_ESTADOS_OPTS_FBM;
 
     function isMobile() {
         return window.matchMedia('(max-width: 768px)').matches;
@@ -37,6 +70,29 @@ const LotesView = (() => {
     const familyKey = l => l.productId || normalize(l.producto || '') || ('id:' + l.id);
 
     const STRAT_PRIORITY = { LIQUIDAR: 0, MANTENER: 1, ESCALAR: 2, AGOTADO: 3, PAUSADA: 4, FINALIZADA: 5 };
+
+    /** Variantes dadas de baja a 0 / finalizadas: no salen en chips ni en “N colores”. */
+    function isVariantVisible(lote, calc) {
+        const est = String(lote.estatus || '');
+        if (est.includes('Finalizada')) return false;
+        const uds = Number(lote.unidades) || 0;
+        const rest = calc?.inventarioRestante != null
+            ? calc.inventarioRestante
+            : Math.max(0, uds - (Number(lote.vendidas) || 0));
+        // Baja total: 0/0 y sin ventas → ocultar
+        if (uds <= 0 && rest <= 0 && !(lote.ventas || []).length) return false;
+        return true;
+    }
+
+    function pendingShipCount() {
+        return window.EnviosView?.pendingCount?.() || 0;
+    }
+
+    function prepEnvioOn() {
+        // Controles de estatus en Productos: siempre en Amazon.
+        // El menú Envíos se puede apagar aparte (EnviosView.isEnabled).
+        return isAmzMarketplace();
+    }
 
     // ---- Data pipeline --------------------------------------------------
     /** Filas individuales (lotes) que pasan filtros de búsqueda/estrategia/stock. */
@@ -80,11 +136,18 @@ const LotesView = (() => {
             variants.sort((a, b) => (a.lote.variante || '').localeCompare(b.lote.variante || '', 'es'));
             const stockRest = variants.reduce((s, v) => s + v.calc.inventarioRestante, 0);
             const stockTotal = variants.reduce((s, v) => s + (Number(v.lote.unidades) || 0), 0);
+            const shipPending = variants.reduce((s, v) => s + (Data.countPendingShipments?.(v.lote) || 0), 0);
             const best = variants.slice().sort((a, b) => b.calc.utilidad - a.calc.utilidad)[0];
             const estrategia = variants.slice().sort((a, b) =>
                 (STRAT_PRIORITY[a.calc.estrategia] ?? 9) - (STRAT_PRIORITY[b.calc.estrategia] ?? 9)
             )[0].calc.estrategia;
-            const colores = [...new Set(variants.map(v => v.lote.variante).filter(Boolean))];
+            const colores = [...new Set(
+                variants
+                    .filter(v => isVariantVisible(v.lote, v.calc))
+                    .map(v => v.lote.variante)
+                    .filter(Boolean)
+            )];
+            const archivadas = variants.filter(v => !isVariantVisible(v.lote, v.calc)).length;
             const productId = variants[0].lote.productId;
             const imagen = Data.familyImage(window.State.lotes, productId)
                 || variants.map(v => v.lote.imagen).find(Boolean)
@@ -97,8 +160,10 @@ const LotesView = (() => {
                 imagen,
                 variants,
                 colores,
+                archivadas,
                 stockRest,
                 stockTotal,
+                shipPending,
                 utilidad: best.calc.utilidad,
                 margen: best.calc.margen,
                 roi: best.calc.roi,
@@ -228,9 +293,12 @@ const LotesView = (() => {
 
     function renderContent() {
         const list = families();
+        const pickVisible = fam =>
+            fam.variants.find(v => isVariantVisible(v.lote, v.calc)) || fam.variants[0];
+
         if (list.length && (!local.selected || !list.find(f => f.key === local.selected))) {
             local.selected = list[0].key;
-            local.selectedVariant = list[0].variants[0].lote.id;
+            local.selectedVariant = pickVisible(list[0]).lote.id;
         } else if (!list.length) {
             local.selected = null;
             local.selectedVariant = null;
@@ -239,11 +307,12 @@ const LotesView = (() => {
         const family = list.find(f => f.key === local.selected) || null;
         if (family) {
             const stillThere = family.variants.find(v => v.lote.id === local.selectedVariant);
-            if (!stillThere) local.selectedVariant = family.variants[0].lote.id;
+            const stillVisible = stillThere && isVariantVisible(stillThere.lote, stillThere.calc);
+            if (!stillVisible) local.selectedVariant = pickVisible(family).lote.id;
         }
 
         const variantRow = family
-            ? family.variants.find(v => v.lote.id === local.selectedVariant) || family.variants[0]
+            ? family.variants.find(v => v.lote.id === local.selectedVariant) || pickVisible(family)
             : null;
 
         const nProd = list.length;
@@ -331,6 +400,7 @@ const LotesView = (() => {
 
     // ---- Chip filters --------------------------------------------------
     function renderChips() {
+        const isAmz = window.State.marketplace === 'amazon';
         const chips = [
             { key: 'ESCALAR',  cls: 'esc', label: '🟢 Escalar' },
             { key: 'MANTENER', cls: 'man', label: '🟡 Mantener' },
@@ -376,9 +446,15 @@ const LotesView = (() => {
         `;
 
         if (!list.length) {
+            const isAmz = window.State.marketplace === 'amazon';
+            const noCatalog = !window.State.lotes.length;
             return head + `<div class="lotes-empty-list">
-                <div style="font-size:32px; opacity:0.35; margin-bottom:8px">🔍</div>
-                <div>Sin resultados. Ajusta filtros o crea un nuevo lote.</div>
+                <div style="font-size:32px; opacity:0.35; margin-bottom:8px">${noCatalog ? '📦' : '🔍'}</div>
+                <div>${noCatalog
+                    ? (isAmz
+                        ? 'Catálogo Amazon vacío. Agrega tus propios productos (no usa los de Mercado Libre).'
+                        : 'Sin productos. Crea tu primer lote.')
+                    : 'Sin resultados. Ajusta filtros o crea un nuevo lote.'}</div>
             </div>`;
         }
 
@@ -387,7 +463,9 @@ const LotesView = (() => {
                 ? (f.colores.length === 1
                     ? esc(f.colores[0])
                     : `${f.colores.length} colores · ${f.colores.map(esc).join(' · ')}`)
-                : `${f.variants.length} variante${f.variants.length === 1 ? '' : 's'}`;
+                : (f.archivadas
+                    ? 'Sin colores activos'
+                    : `${f.variants.length} variante${f.variants.length === 1 ? '' : 's'}`);
             const thumb = f.imagen
                 ? `<img class="lotes-row-thumb" src="${f.imagen}" alt="" loading="lazy">`
                 : `<span class="lotes-row-thumb is-empty" aria-hidden="true"></span>`;
@@ -402,6 +480,7 @@ const LotesView = (() => {
                         ${f.categoria ? `<span>·</span><span>${esc(f.categoria)}</span>` : ''}
                         <span>·</span>
                         <span>Stock ${f.stockRest}/${f.stockTotal}</span>
+                        ${prepEnvioOn() && f.shipPending ? `<span>·</span><span class="ship-pending-tag">🚚 ${f.shipPending} por enviar</span>` : ''}
                     </div>
                 </div>
                 <div class="lotes-metric ${f.utilidad>=0?'pos':'neg'}">
@@ -428,13 +507,14 @@ const LotesView = (() => {
             `;
         }
         const { lote, calc } = row;
-        const multi = family.variants.length > 1;
+        const visibleVariants = family.variants.filter(v => isVariantVisible(v.lote, v.calc));
+        const multi = visibleVariants.length > 1;
         const imagen = family.imagen || lote.imagen || '';
         const productId = family.productId || lote.productId || '';
 
         const colorPills = multi ? `
             <div class="variant-pills" role="tablist" aria-label="Colores / variantes">
-                ${family.variants.map(v => `
+                ${visibleVariants.map(v => `
                     <button type="button"
                         class="variant-pill ${v.lote.id === lote.id ? 'active' : ''}"
                         data-pick-variant="${v.lote.id}"
@@ -482,21 +562,39 @@ const LotesView = (() => {
                         ${lote.categoria ? `<span>·</span><span>${esc(lote.categoria)}</span>` : ''}
                         <span>·</span>
                         <span>Compra ${Calc.fmtDate(lote.fecha)}</span>
-                        ${multi ? `<span>·</span><span>${family.variants.length} colores</span>` : ''}
+                        ${multi ? `<span>·</span><span>${visibleVariants.length} colores</span>` : ''}
                     </div>
-                    <div class="kebab" data-kebab>
-                        <button class="icon-btn" data-kebab-btn aria-label="Más acciones">⋯</button>
-                        <div class="kebab-menu" data-kebab-menu hidden>
-                            <button class="kebab-item" data-action="edit"    data-id="${lote.id}">✏️ Editar</button>
-                            <button class="kebab-item" data-action="sale"    data-id="${lote.id}">🛒 Registrar venta</button>
-                            <button class="kebab-item" data-action="restock" data-id="${lote.id}">📦 Reabastecer SKU</button>
-                            <button class="kebab-item" data-action="dup"     data-id="${lote.id}">🧬 Duplicar variante</button>
-                            <button class="kebab-item" data-action="status"  data-id="${lote.id}">🔀 Cambiar estatus</button>
-                            <div class="kebab-sep"></div>
-                            <button class="kebab-item danger" data-action="del" data-id="${lote.id}">🗑 Eliminar lote</button>
+                    <div class="lotes-detail-actions">
+                        <button type="button" class="btn btn-sm" data-action="edit" data-id="${lote.id}">✏️ Editar</button>
+                        <div class="kebab" data-kebab>
+                            <button class="icon-btn" data-kebab-btn aria-label="Más acciones">⋯</button>
+                            <div class="kebab-menu" data-kebab-menu hidden>
+                                <button class="kebab-item" data-action="edit"    data-id="${lote.id}">✏️ Editar ficha completa</button>
+                                <button class="kebab-item" data-action="sale"    data-id="${lote.id}">🛒 Registrar venta</button>
+                                <button class="kebab-item" data-action="restock" data-id="${lote.id}">📦 Reabastecer SKU</button>
+                                <button class="kebab-item" data-action="writeoff" data-id="${lote.id}">🗑 Baja de inventario</button>
+                                <button class="kebab-item" data-action="dup"     data-id="${lote.id}">🧬 Duplicar variante</button>
+                                <button class="kebab-item" data-action="status"  data-id="${lote.id}">🔀 Cambiar estatus</button>
+                                <div class="kebab-sep"></div>
+                                <button class="kebab-item danger" data-action="del" data-id="${lote.id}">🗑 Eliminar lote</button>
+                            </div>
                         </div>
                     </div>
                 </div>
+                ${isAmzMarketplace() ? `
+                <div class="logistica-bar" role="group" aria-label="Logística Amazon">
+                    <span class="logistica-bar-label">¿Quién envía?</span>
+                    <button type="button" class="logistica-opt ${String(lote.tipo).toUpperCase() === 'FBA' ? 'active' : ''}"
+                        data-action="set-logistica" data-id="${lote.id}" data-tipo="FBA">
+                        FBA · Amazon
+                    </button>
+                    <button type="button" class="logistica-opt ${String(lote.tipo).toUpperCase() === 'FBM' ? 'active' : ''}"
+                        data-action="set-logistica" data-id="${lote.id}" data-tipo="FBM">
+                        FBM · Tú envías
+                    </button>
+                </div>
+                ${renderEnvioPanel(family, lote)}
+                ` : ''}
                 <div class="lotes-detail-title-row">
                     ${imageBlock}
                     <div class="lotes-detail-title-text">
@@ -552,6 +650,8 @@ const LotesView = (() => {
     }
 
     function renderTabRentabilidad(lote, calc) {
+        const isAmz = window.State.marketplace === 'amazon'
+            || window.State.settings?.marketplace === 'amazon';
         const adsCls = calc.adsStatus === 'over' ? 'neg'
             : calc.adsStatus === 'near' ? 'warn'
             : calc.adsStatus === 'ok' ? 'pos' : '';
@@ -563,17 +663,33 @@ const LotesView = (() => {
             sin_tope: 'Sin tope (no Escalar/Mantener)',
             na: 'Sin gasto Ads registrado',
         }[calc.adsStatus] || '';
+        const catLabel = isAmz && calc.categoriaAmazon && Calc.AMZ_CATEGORIES?.[calc.categoriaAmazon]
+            ? Calc.AMZ_CATEGORIES[calc.categoriaAmazon].label
+            : '';
+        const comLabel = isAmz
+            ? `Referido ${catLabel ? `(${catLabel}) ` : ''}(${(calc.pctComision * 100).toFixed(1)}%)`
+            : `Comisión Meli (${(calc.pctComision * 100).toFixed(0)}%)`;
+        const envioLabel = isAmz
+            ? (String(lote.tipo || '').toUpperCase() === 'FBM' ? 'Envío FBM' : 'FBA logística')
+            : 'Envío al cliente';
+        const envioVal = calc.envio != null ? calc.envio : (Number(lote.envio) || 0);
+        const fbaNote = isAmz && calc.fbaMeta?.source === 'tabla'
+            ? ` · ${calc.fbaMeta.tamano} · ${calc.fbaMeta.peso} kg`
+            : (isAmz && calc.fbaMeta?.source === 'manual' ? ' · override' : '');
 
         return `
             <h4>Desglose por unidad</h4>
             <div class="breakdown">
                 <div class="breakdown-row"><span class="label">Precio de venta</span><span class="val">${Calc.fmtMXN(lote.precio)}</span></div>
                 <div class="breakdown-row"><span class="label">Costo unitario</span><span class="val">− ${Calc.fmtMXN(lote.costo)}</span></div>
-                <div class="breakdown-row"><span class="label">Comisión Meli (${(calc.pctComision*100).toFixed(0)}%)</span><span class="val">− ${Calc.fmtMXN(calc.comisionVariable)}</span></div>
-                ${calc.cargoFijo ? `<div class="breakdown-row"><span class="label">Cargo fijo publicación</span><span class="val">− ${Calc.fmtMXN(calc.cargoFijo)}</span></div>` : ''}
-                <div class="breakdown-row"><span class="label">Envío al cliente</span><span class="val">− ${Calc.fmtMXN(lote.envio)}</span></div>
+                <div class="breakdown-row"><span class="label">${comLabel}${isAmz && calc.referidoMinimo ? ` · mín ${Calc.fmtMXN(calc.referidoMinimo)}` : ''}</span><span class="val">− ${Calc.fmtMXN(calc.comisionVariable)}</span></div>
+                ${!isAmz && calc.cargoFijo ? `<div class="breakdown-row"><span class="label">Cargo fijo publicación</span><span class="val">− ${Calc.fmtMXN(calc.cargoFijo)}</span></div>` : ''}
+                <div class="breakdown-row"><span class="label">${envioLabel}${fbaNote}</span><span class="val">− ${Calc.fmtMXN(envioVal)}</span></div>
+                ${isAmz && (calc.almacenamiento > 0) ? `<div class="breakdown-row"><span class="label">Almacenamiento FBA</span><span class="val">− ${Calc.fmtMXN(calc.almacenamiento)}</span></div>` : ''}
+                ${!isAmz ? `
                 <div class="breakdown-row"><span class="label">Retención IVA SAT</span><span class="val">− ${Calc.fmtMXN(calc.retIVA)}</span></div>
                 <div class="breakdown-row"><span class="label">Retención ISR SAT</span><span class="val">− ${Calc.fmtMXN(calc.retISR)}</span></div>
+                ` : ''}
                 <div class="breakdown-row total">
                     <span class="label">Utilidad neta por unidad</span>
                     <span class="val ${calc.utilidad>=0?'pos':'neg'}">${Calc.fmtMXN(calc.utilidad)}</span>
@@ -605,15 +721,16 @@ const LotesView = (() => {
                 stockRest: calc.inventarioRestante,
                 stockTotal: Number(lote.unidades) || 0,
             };
-        const multi = family.variants.length > 1;
+        const visibleVariants = family.variants.filter(v => isVariantVisible(v.lote, v.calc));
+        const multi = visibleVariants.length > 1;
         const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
         const sparkHTML = ventasSparkline(ventas, calc);
 
-        // Stock de todas las variantes del producto
+        // Stock solo de colores activos (ocultos los dados de baja a 0)
         const stockBlock = multi ? `
             <h4>Stock por color</h4>
             <div class="variant-stock-grid">
-                ${family.variants.map(v => `
+                ${visibleVariants.map(v => `
                     <button type="button"
                         class="variant-stock-card ${v.lote.id === lote.id ? 'active' : ''}"
                         data-pick-variant="${v.lote.id}">
@@ -650,7 +767,7 @@ const LotesView = (() => {
 
         // Ventas: si hay varias variantes, listar las del producto con columna color
         const allVentas = multi
-            ? family.variants.flatMap(v => (v.lote.ventas || []).map(venta => ({
+            ? visibleVariants.flatMap(v => (v.lote.ventas || []).map(venta => ({
                 ...venta,
                 variante: v.lote.variante || '—',
                 loteId: v.lote.id,
@@ -678,10 +795,16 @@ const LotesView = (() => {
             <div class="section-flex">
                 <h4>${multi ? 'Ventas del producto' : 'Registro de ventas'}</h4>
                 <div class="section-flex-actions">
+                    <button class="btn btn-sm" data-action="writeoff" data-id="${lote.id}">🗑 Baja</button>
                     <button class="btn btn-sm" data-action="restock" data-id="${lote.id}">📦 Reabastecer</button>
                     <button class="btn primary btn-sm" data-action="sale" data-id="${lote.id}">+ Registrar venta</button>
                 </div>
             </div>
+            ${prepEnvioOn() && String(lote.tipo || '').toUpperCase() === 'FBM' ? `
+                <p class="muted small ship-help">
+                    FBM: en cada venta elige el <strong>estatus de envío al cliente</strong>.
+                </p>
+            ` : ''}
             ${!multi ? sparkHTML : ''}
             ${allVentas.length ? `
                 <table class="mini-table" style="margin-top:8px">
@@ -692,6 +815,7 @@ const LotesView = (() => {
                             <th class="num">Uds.</th>
                             <th class="num">Precio</th>
                             <th class="num">Total</th>
+                            ${prepEnvioOn() && String(lote.tipo || '').toUpperCase() === 'FBM' ? '<th>Envío al cliente</th>' : ''}
                             <th></th>
                         </tr>
                     </thead>
@@ -703,6 +827,7 @@ const LotesView = (() => {
                                 <td class="num">${v.unidades}</td>
                                 <td class="num">${Calc.fmtMXN(v.precio)}</td>
                                 <td class="num">${Calc.fmtMXN(v.precio * v.unidades)}</td>
+                                ${prepEnvioOn() && String(lote.tipo || '').toUpperCase() === 'FBM' ? `<td>${shipEstadoSelect(v.loteId, v)}</td>` : ''}
                                 <td class="num"><button class="icon-btn" data-action="del-venta" data-lote="${v.loteId}" data-venta="${v.id}" title="Eliminar venta">×</button></td>
                             </tr>
                         `).join('')}
@@ -710,6 +835,86 @@ const LotesView = (() => {
                 </table>
             ` : `<p class="muted small" style="margin-top:8px">Sin ventas registradas. Presiona <strong>+ Registrar venta</strong> y elige el color.</p>`}
         `;
+    }
+
+    function renderEnvioPanel(family, lote) {
+        const isFba = String(lote.tipo || '').toUpperCase() === 'FBA';
+
+        // FBA = mandar inventario a Amazon (por lote), no por venta al cliente
+        if (isFba) {
+            const cur = lote.fbaInboundEstado || '';
+            const opts = ENVIO_ESTADOS_OPTS_FBA.map(o =>
+                `<option value="${o.value}" ${o.value === cur ? 'selected' : ''}>${o.label}</option>`
+            ).join('');
+            const yaEnFba = cur === 'recibido';
+            return `
+                <div class="envio-panel envio-panel-fba">
+                    <div class="envio-panel-title">Enviar a FBA (Amazon)</div>
+                    <p class="muted small" style="margin:4px 0 10px">
+                        Cuando mandas inventario al almacén de Amazon.
+                    </p>
+                    <div class="envio-panel-row" style="border-top:0;padding-top:0">
+                        <div class="envio-panel-info">
+                            <strong>${esc(lote.sku || lote.producto)}</strong>
+                            <span class="muted">· stock ${Math.max(0, (Number(lote.unidades) || 0) - (Number(lote.vendidas) || 0))} ud</span>
+                            ${yaEnFba ? `<span class="ship-badge ship-enviado">✓ Recibido en FBA</span>` : ''}
+                        </div>
+                        <select class="ship-estado-select"
+                            data-fba-inbound
+                            data-lote="${esc(lote.id)}"
+                            aria-label="Estatus envío a FBA">${opts}</select>
+                    </div>
+                </div>`;
+        }
+
+        // FBM = tú envías al cliente (por venta)
+        const rows = family.variants.flatMap(v => (v.lote.ventas || []).map(venta => ({
+            ...venta,
+            loteId: v.lote.id,
+            variante: v.lote.variante || '',
+        }))).sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
+
+        if (!rows.length) {
+            return `
+                <div class="envio-panel">
+                    <div class="envio-panel-title">Estatus envío al cliente</div>
+                    <p class="muted small" style="margin:6px 0 10px">
+                        Con FBM tú envías al comprador. Registra una venta y elige el estatus aquí.
+                    </p>
+                    <button type="button" class="btn primary btn-sm" data-action="sale" data-id="${lote.id}">+ Registrar venta</button>
+                </div>`;
+        }
+
+        return `
+            <div class="envio-panel">
+                <div class="envio-panel-title">Estatus envío al cliente</div>
+                <p class="muted small" style="margin:4px 0 10px">FBM: tú preparas y mandas el pedido al comprador.</p>
+                <div class="envio-panel-list">
+                    ${rows.slice(0, 12).map(v => `
+                        <div class="envio-panel-row">
+                            <div class="envio-panel-info">
+                                <strong>${Calc.fmtDate(v.fecha)}</strong>
+                                ${v.variante ? `<span class="muted">· ${esc(v.variante)}</span>` : ''}
+                                <span class="muted">· ${v.unidades} ud · ${Calc.fmtMXN(v.precio)}</span>
+                            </div>
+                            ${shipEstadoSelect(v.loteId, v)}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+    }
+
+    function shipEstadoSelect(loteId, venta) {
+        const cur = venta.envioEstado || '';
+        const opts = ENVIO_ESTADOS_OPTS_FBM.map(o =>
+            `<option value="${o.value}" ${o.value === cur ? 'selected' : ''}>${o.label}</option>`
+        ).join('');
+        return `<select class="ship-estado-select" data-ship-estado data-lote="${esc(loteId)}" data-venta="${esc(venta.id)}" aria-label="Estatus de envío">${opts}</select>`;
+    }
+
+    function isAmzMarketplace() {
+        return window.State.marketplace === 'amazon'
+            || window.State.settings?.marketplace === 'amazon';
     }
 
     function renderTabRecomendacion(lote, calc) {
@@ -749,8 +954,11 @@ const LotesView = (() => {
             <section class="compra-ideal" id="compra-ideal-panel" data-lote-id="${esc(lote.id)}">
                 <h4>Costo de adquisición ideal</h4>
                 <p class="ci-explain muted small">
-                    Partimos del <strong>precio de venta</strong> (${Calc.fmtMXN(a.precio)}), restamos comisión Meli,
-                    cargo fijo, envío y retenciones SAT. El resultado es el <strong>costo máximo</strong> al que
+                    Partimos del <strong>precio de venta</strong> (${Calc.fmtMXN(a.precio)}), restamos
+                    ${window.State.marketplace === 'amazon'
+                        ? 'comisión por referido y fulfillment/envío'
+                        : 'comisión Meli, cargo fijo, envío y retenciones SAT'}.
+                    El resultado es el <strong>costo máximo</strong> al que
                     deberías comprar para lograr el margen objetivo.
                 </p>
                 <div class="ci-margen-row">
@@ -802,14 +1010,25 @@ const LotesView = (() => {
         const v = verdictMap[a.verdict] || verdictMap.en_objetivo;
         const diffCls = a.diff > 0.5 ? 'neg' : a.diff < -0.5 ? 'pos' : '';
 
+        const isAmz = window.State.marketplace === 'amazon'
+            || window.State.settings?.marketplace === 'amazon';
+        const catName = isAmz && b.categoriaAmazon && Calc.AMZ_CATEGORIES?.[b.categoriaAmazon]
+            ? Calc.AMZ_CATEGORIES[b.categoriaAmazon].label
+            : '';
+        const comLabel = isAmz
+            ? `Referido${catName ? ` · ${catName}` : ''} (${(b.pctComision * 100).toFixed(1)}%)`
+            : `Comisión Meli (${(b.pctComision * 100).toFixed(0)}%)`;
         return `
             <div class="breakdown">
                 <div class="breakdown-row"><span class="label">Precio de venta</span><span class="val">${Calc.fmtMXN(a.precio)}</span></div>
-                <div class="breakdown-row"><span class="label">Comisión Meli (${(b.pctComision * 100).toFixed(0)}%)</span><span class="val">− ${Calc.fmtMXN(b.comisionVariable)}</span></div>
-                ${b.cargoFijo ? `<div class="breakdown-row"><span class="label">Cargo fijo</span><span class="val">− ${Calc.fmtMXN(b.cargoFijo)}</span></div>` : ''}
-                <div class="breakdown-row"><span class="label">Envío</span><span class="val">− ${Calc.fmtMXN(b.envio)}</span></div>
+                <div class="breakdown-row"><span class="label">${comLabel}</span><span class="val">− ${Calc.fmtMXN(b.comisionVariable)}</span></div>
+                ${!isAmz && b.cargoFijo ? `<div class="breakdown-row"><span class="label">Cargo fijo</span><span class="val">− ${Calc.fmtMXN(b.cargoFijo)}</span></div>` : ''}
+                <div class="breakdown-row"><span class="label">${isAmz ? 'FBA / envío' : 'Envío'}</span><span class="val">− ${Calc.fmtMXN(b.envio)}</span></div>
+                ${isAmz && b.almacenamiento > 0 ? `<div class="breakdown-row"><span class="label">Almacenamiento FBA</span><span class="val">− ${Calc.fmtMXN(b.almacenamiento)}</span></div>` : ''}
+                ${!isAmz ? `
                 <div class="breakdown-row"><span class="label">Retención IVA SAT</span><span class="val">− ${Calc.fmtMXN(b.retIVA)}</span></div>
                 <div class="breakdown-row"><span class="label">Retención ISR SAT</span><span class="val">− ${Calc.fmtMXN(b.retISR)}</span></div>
+                ` : ''}
                 <div class="breakdown-row"><span class="label">Margen objetivo (${Calc.fmtPct(a.margenObjetivo)})</span><span class="val">− ${Calc.fmtMXN(a.precio * a.margenObjetivo)}</span></div>
                 <div class="breakdown-row total">
                     <span class="label">Costo ideal máx. de compra</span>
@@ -924,6 +1143,27 @@ const LotesView = (() => {
         }
         if (e.tipo === 'reabastecimiento') {
             return `📦 Reabastecimiento — +${e.meta.unidades} uds a ${Calc.fmtMXN(e.meta.costoUnitario)} · costo promedio ${Calc.fmtMXN(e.meta.costoAnterior)} → ${Calc.fmtMXN(e.meta.costoPromedio)}${e.meta.notas ? ` · ${esc(e.meta.notas)}` : ''}`;
+        }
+        if (e.tipo === 'baja-inventario') {
+            const motivos = {
+                dano: 'Daño / defecto',
+                venta_externa: 'Venta fuera del marketplace',
+                merma: 'Merma / extravío',
+                devolucion_proveedor: 'Devolución a proveedor',
+                otro: 'Otro',
+            };
+            const m = motivos[e.meta.motivo] || e.meta.motivo || 'Otro';
+            return `🗑 Baja de inventario — −${e.meta.unidades} uds · ${esc(m)} · valor al costo ${Calc.fmtMXN(e.meta.valorPerdido)}${e.meta.notas ? ` · ${esc(e.meta.notas)}` : ''}`;
+        }
+        if (e.tipo === 'envio-prep') {
+            const from = ENVIO_LABELS[e.meta.from] || e.meta.from || '—';
+            const to = ENVIO_LABELS[e.meta.to] || e.meta.to || '—';
+            return `🚚 Envío al cliente — ${esc(from)} → <strong>${esc(to)}</strong>${e.meta.unidades ? ` · ${e.meta.unidades} uds` : ''}`;
+        }
+        if (e.tipo === 'fba-inbound') {
+            const from = FBA_INBOUND_LABELS[e.meta.from] || e.meta.from || '—';
+            const to = FBA_INBOUND_LABELS[e.meta.to] || e.meta.to || '—';
+            return `📦 Envío a FBA — ${esc(from)} → <strong>${esc(to)}</strong>`;
         }
         return `• ${esc(e.tipo)}`;
     }
@@ -1064,10 +1304,12 @@ const LotesView = (() => {
                 const action = btn.dataset.action;
                 const id = btn.dataset.id;
                 if (action === 'edit') openModal(id);
+                else if (action === 'set-logistica') setLogistica(id, btn.dataset.tipo);
                 else if (action === 'dup') duplicate(id);
                 else if (action === 'del') await remove(id);
                 else if (action === 'sale') await recordSale(id);
                 else if (action === 'restock') await restock(id);
+                else if (action === 'writeoff') await writeOff(id);
                 else if (action === 'status') await changeStatus(id);
                 else if (action === 'del-venta') await removeSale(btn.dataset.lote, btn.dataset.venta);
                 else if (action === 'pick-image') pickProductImage(btn.dataset.productId);
@@ -1083,9 +1325,67 @@ const LotesView = (() => {
                 await inlineEdit(id, field);
             });
         });
+
+        // Estatus de envío por venta (FBM) o inbound FBA
+        document.querySelectorAll('[data-ship-estado]').forEach(sel => {
+            sel.addEventListener('change', () => {
+                setVentaEnvioEstado(sel.dataset.lote, sel.dataset.venta, sel.value);
+            });
+        });
+        document.querySelectorAll('[data-fba-inbound]').forEach(sel => {
+            sel.addEventListener('change', () => {
+                setFbaInboundEstado(sel.dataset.lote, sel.value);
+            });
+        });
+    }
+
+    function setFbaInboundEstado(loteId, estado) {
+        const l = window.State.lotes.find(x => x.id === loteId);
+        if (!l || !Data.setLoteFbaInboundEstado) return;
+        try {
+            Data.setLoteFbaInboundEstado(l, estado || '');
+            window.State.lotes = Data.upsertLote(window.State.lotes, l);
+            window.State.save();
+            renderContent();
+            window.App?.refreshNavCounts?.();
+            const lab = estado ? (FBA_INBOUND_LABELS[estado] || estado) : 'Aún no';
+            UI.toast(`FBA: ${lab}`);
+        } catch (err) {
+            UI.toast(err.message || 'Error', 'error');
+        }
+    }
+
+    function setVentaEnvioEstado(loteId, ventaId, estado) {
+        const l = window.State.lotes.find(x => x.id === loteId);
+        if (!l || !Data.setVentaEnvioEstado) return;
+        try {
+            Data.setVentaEnvioEstado(l, ventaId, estado || '');
+            window.State.lotes = Data.upsertLote(window.State.lotes, l);
+            window.State.save();
+            renderContent();
+            window.App?.refreshNavCounts?.();
+            const lab = estado ? (ENVIO_LABELS[estado] || estado) : 'Sin preparación';
+            UI.toast(`Envío: ${lab}`);
+        } catch (err) {
+            UI.toast(err.message || 'Error', 'error');
+        }
     }
 
     // ---- Inline edit ---------------------------------------------------
+    function setLogistica(id, tipo) {
+        const lote = window.State.lotes.find(l => l.id === id);
+        if (!lote) return;
+        const next = String(tipo || '').toUpperCase() === 'FBM' ? 'FBM' : 'FBA';
+        if (lote.tipo === next) return;
+        lote.tipo = next;
+        window.State.lotes = Data.upsertLote(window.State.lotes, lote);
+        window.State.save();
+        renderContent();
+        UI.toast(next === 'FBA'
+            ? 'FBA · Amazon almacena y envía'
+            : 'FBM · Tú preparas el envío');
+    }
+
     async function inlineEdit(id, field) {
         const lote = window.State.lotes.find(l => l.id === id);
         if (!lote) return;
@@ -1417,6 +1717,92 @@ const LotesView = (() => {
         }
     }
 
+    async function writeOff(id) {
+        const l = window.State.lotes.find(x => x.id === id);
+        if (!l) return;
+        const stock = Math.max(0, (Number(l.unidades) || 0) - Calc.syncVendidas(l));
+        if (stock <= 0) {
+            UI.toast('No hay piezas disponibles para dar de baja', 'error');
+            return;
+        }
+
+        const form = document.createElement('div');
+        form.innerHTML = `
+            <p class="dlg-msg">Quita piezas del inventario <strong>sin registrar venta</strong> (daño, venta fuera del marketplace, merma, etc.). Queda en el historial con el valor al costo.</p>
+            <div class="sale-stock-hint">
+                SKU <code>${esc(l.sku)}</code>${l.variante ? ` · ${esc(l.variante)}` : ''} ·
+                disponibles: <strong>${stock}</strong> / ${l.unidades} del lote · costo ${Calc.fmtMXN(l.costo)}
+            </div>
+            <div class="form-grid">
+                <label><span>Piezas a quitar</span><input type="number" id="w-uds" value="1" min="1" max="${stock}" step="1"></label>
+                <label><span>Motivo</span>
+                    <select id="w-motivo">
+                        <option value="dano">Daño / defecto</option>
+                        <option value="venta_externa">Venta fuera del marketplace</option>
+                        <option value="merma">Merma / extravío</option>
+                        <option value="devolucion_proveedor">Devolución a proveedor</option>
+                        <option value="otro">Otro</option>
+                    </select>
+                </label>
+                <label class="wide"><span>Notas (opcional)</span><input type="text" id="w-notas" placeholder="Ej. caja aplastada, vendido en efectivo…"></label>
+            </div>
+            <div class="sale-hint muted small" style="margin-top:10px" id="w-preview">—</div>
+        `;
+
+        const update = () => {
+            const qty = parseInt(form.querySelector('#w-uds').value) || 0;
+            const el = form.querySelector('#w-preview');
+            if (!el) return;
+            if (qty <= 0 || qty > stock) {
+                el.textContent = qty > stock ? `Máximo ${stock} disponibles` : '—';
+                return;
+            }
+            const valor = (Number(l.costo) || 0) * qty;
+            el.innerHTML = `Stock → <strong>${stock - qty}</strong> disp. · valor al costo que sales: <strong>${Calc.fmtMXN(valor)}</strong>`;
+        };
+        setTimeout(() => {
+            form.querySelectorAll('input, select').forEach(i => i.addEventListener('input', update));
+            form.querySelectorAll('select').forEach(i => i.addEventListener('change', update));
+            update();
+        }, 30);
+
+        const result = await UI.dialog({
+            title: `Baja de inventario · ${esc(l.producto)}`,
+            body: form,
+            actions: [
+                { label: 'Cancelar', variant: 'ghost', value: null },
+                { label: 'Quitar piezas', variant: 'danger', value: 'save' },
+            ],
+        });
+        if (result !== 'save') return;
+
+        const qty = parseInt(form.querySelector('#w-uds').value) || 0;
+        const motivo = form.querySelector('#w-motivo').value;
+        const notas = form.querySelector('#w-notas').value.trim();
+        try {
+            Data.writeOffLote(l, { unidades: qty, motivo, notas });
+            window.State.lotes = Data.upsertLote(window.State.lotes, l);
+            local.selected = familyKey(l);
+            // Si la variante quedó archivada (0/0), saltar a otro color activo
+            const calcAfter = Calc.computeLote(l, window.State.settings);
+            const archivada = !isVariantVisible(l, calcAfter);
+            if (archivada) {
+                const fam = families().find(f => f.key === local.selected);
+                const next = fam?.variants.find(v => isVariantVisible(v.lote, v.calc));
+                local.selectedVariant = next ? next.lote.id : l.id;
+            } else {
+                local.selectedVariant = l.id;
+            }
+            window.State.save();
+            renderContent();
+            UI.toast(archivada
+                ? `−${qty} uds dadas de baja · ${esc(l.variante || 'variante')} ya no aparece en colores`
+                : `−${qty} uds dadas de baja · ${Calc.fmtMXN((Number(l.costo) || 0) * qty)} al costo`);
+        } catch (err) {
+            UI.toast(err.message || 'Error al dar de baja', 'error');
+        }
+    }
+
     async function recordSale(id) {
         const seed = window.State.lotes.find(x => x.id === id);
         if (!seed) return;
@@ -1466,6 +1852,15 @@ const LotesView = (() => {
                     <label><span>Fecha</span><input type="date" id="s-fecha" value="${new Date().toISOString().slice(0, 10)}"></label>
                     <label><span>Unidades</span><input type="number" id="s-uds" value="1" min="1" step="1" max="${Math.max(1, stock)}"></label>
                     <label class="wide"><span>Precio real de venta (MXN)</span><input type="number" id="s-precio" value="${l.precio}" step="0.01"></label>
+                    ${prepEnvioOn() && String(l.tipo || '').toUpperCase() === 'FBM' ? `
+                    <label class="wide check-row ship-sale-check">
+                        <input type="checkbox" id="s-por-enviar" checked>
+                        <span><strong>Por enviar al cliente</strong>
+                            <small class="muted" style="display:block;font-weight:400;margin-top:2px">
+                                FBM: tú preparas el paquete. (En FBA el estatus es “mandar a Amazon”, arriba del producto.)
+                            </small>
+                        </span>
+                    </label>` : ''}
                     <label class="wide"><span>Notas (opcional)</span><input type="text" id="s-notas" placeholder="Ej. venta con envío gratis"></label>
                 </div>
                 <div class="sale-hint muted small" style="margin-top:10px">
@@ -1514,6 +1909,8 @@ const LotesView = (() => {
         const uds = parseInt(form.querySelector('#s-uds').value) || 0;
         const precio = parseFloat(form.querySelector('#s-precio').value) || 0;
         const notas = form.querySelector('#s-notas').value;
+        const porEnviar = !!form.querySelector('#s-por-enviar')?.checked;
+        const envioEstado = porEnviar ? 'por_preparar' : '';
         const stock = Math.max(0, (Number(l.unidades) || 0) - (Number(l.vendidas) || 0));
 
         if (uds <= 0 || precio <= 0) { UI.toast('Datos incompletos', 'error'); return; }
@@ -1527,15 +1924,51 @@ const LotesView = (() => {
             if (!ok) return;
         }
 
-        Data.addVenta(l, { fecha, precio, unidades: uds, notas });
+        const venta = Data.addVenta(l, { fecha, precio, unidades: uds, notas, envioEstado });
         window.State.lotes = Data.upsertLote(window.State.lotes, l);
         local.selected = familyKey(l);
         local.selectedVariant = l.id;
+        if (envioEstado && envioEstado !== 'enviado') {
+            // La cola vive en Envíos; no hace falta abrir inventario
+        }
         window.State.save();
+
+        // Auto-reparto por defecto: costo recuperado + ganancia → bolsitas
+        let allocMsg = '';
+        try {
+            const u = Calc.utilidadAtPrice(l, precio, window.State.settings).utilidad;
+            const liberated = (Math.max(0, Number(l.costo) || 0) + (Number(u) || 0)) * uds;
+            const entry = window.DashboardView?.applySaleLiberation?.(liberated, {
+                ventaId: venta?.id,
+                loteId: l.id,
+                unidades: uds,
+                precio,
+                fecha,
+            });
+            if (entry && liberated > 0) {
+                const s = entry.splits || {};
+                const parts = [
+                    s.reinversion > 0 ? `Reinversión ${Calc.fmtMXN(s.reinversion)}` : '',
+                    s.reserva > 0 ? `Reserva ${Calc.fmtMXN(s.reserva)}` : '',
+                    s.ads > 0 ? `Ads ${Calc.fmtMXN(s.ads)}` : '',
+                    s.insumos > 0 ? `Insumos ${Calc.fmtMXN(s.insumos)}` : '',
+                    s.utilidad > 0 ? `Utilidad ${Calc.fmtMXN(s.utilidad)}` : '',
+                ].filter(Boolean);
+                allocMsg = parts.length
+                    ? ` · bolsitas ${Calc.fmtMXN(liberated)} (${parts.join(' · ')})`
+                    : ` · bolsitas ${Calc.fmtMXN(liberated)}`;
+            }
+        } catch { /* no bloquear la venta */ }
+
         renderContent();
+        window.App?.refreshNavCounts?.();
+        UI.playMoneySound?.();
+        const shipMsg = envioEstado && envioEstado !== 'enviado'
+            ? ' · quedó en Envíos'
+            : '';
         UI.toast(multi
-            ? `Venta registrada · ${l.variante || 'variante'} (−${uds})`
-            : 'Venta registrada');
+            ? `Venta registrada · ${l.variante || 'variante'} (−${uds})${shipMsg}${allocMsg}`
+            : `Venta registrada${shipMsg}${allocMsg}`);
     }
 
     async function removeSale(loteId, ventaId) {
@@ -1543,15 +1976,19 @@ const LotesView = (() => {
         if (!l) return;
         const ok = await UI.confirm({
             title: 'Eliminar venta',
-            message: 'Se restará del contador de vendidas y se registrará en el historial.',
+            message: 'Se restará del inventario vendido y, si estaba en bolsitas, también se quita ese monto (útil en devoluciones).',
             primaryLabel: 'Eliminar', danger: true
         });
         if (!ok) return;
         Data.removeVenta(l, ventaId);
         window.State.lotes = Data.upsertLote(window.State.lotes, l);
         window.State.save();
+        let reversed = false;
+        try { reversed = !!window.DashboardView?.reverseSaleLiberation?.(ventaId); } catch { /* ignore */ }
         renderContent();
-        UI.toast('Venta eliminada');
+        UI.toast(reversed
+            ? 'Venta eliminada · monto quitado de bolsitas'
+            : 'Venta eliminada');
     }
 
     // ---- Modal edición -------------------------------------------------
@@ -1561,6 +1998,7 @@ const LotesView = (() => {
         ['f-costo','costo'], ['f-unidades','unidades'],
         ['f-precio-comp','precioCompetencia'], ['f-precio','precio'],
         ['f-envio','envio'], ['f-gasto-ads','gastoAds'], ['f-estatus','estatus'],
+        ['f-peso-kg','pesoKg'], ['f-tamano-fba','tamanoFba'], ['f-almacenamiento','almacenamiento'],
     ];
 
     function openModal(id = null) {
@@ -1568,6 +2006,7 @@ const LotesView = (() => {
         const l = id ? window.State.lotes.find(x => x.id === id) : blankLote();
         if (!l) return;
         document.getElementById('modal-title').textContent = id ? 'Editar lote' : 'Nuevo lote';
+        window.App?.refreshMarketplaceChrome?.();
         setForm(l);
         // Vendidas: solo lectura, derivadas de ventas
         const vendidasEl = document.getElementById('f-vendidas');
@@ -1606,14 +2045,23 @@ const LotesView = (() => {
     }
 
     function blankLote() {
+        const isAmz = window.State.marketplace === 'amazon';
+        const s = window.State.settings || {};
         return {
             id: Data.newId(),
             productId: '',
-            sku: '', producto: '', variante: '', tipo: 'Clasica',
+            sku: '', producto: '', variante: '',
+            tipo: isAmz ? 'FBA' : 'Clasica',
             fecha: new Date().toISOString().slice(0, 10),
-            categoria: '', notas: '',
+            categoria: isAmz ? (s.categoriaDefault || 'hogar_cocina') : '',
+            categoriaAmazon: isAmz ? (s.categoriaDefault || 'hogar_cocina') : '',
+            notas: '',
             costo: 0, unidades: 1, precioCompetencia: null,
             precio: 0, envio: 0, gastoAds: 0, vendidas: 0, estatus: '✅ Activa / En Venta',
+            pesoKg: isAmz ? (Number(s.pesoKgDefault) || 0.3) : null,
+            tamanoFba: isAmz ? (s.tamanoFbaDefault || 'estandar') : '',
+            almacenamiento: 0,
+            fbaInboundEstado: '',
             ventas: [], historial: [],
         };
     }
@@ -1625,10 +2073,24 @@ const LotesView = (() => {
             const v = l[key];
             el.value = v === null || v === undefined ? '' : v;
         }
+        const amzCat = document.getElementById('f-amz-categoria');
+        if (amzCat) {
+            const key = l.categoriaAmazon || l.categoria
+                || window.State.settings?.categoriaDefault || 'hogar_cocina';
+            const resolved = Calc.resolveAmzCategoryKey
+                ? Calc.resolveAmzCategoryKey({ categoriaAmazon: key, categoria: key }, window.State.settings)
+                : key;
+            if ([...amzCat.options].some(o => o.value === resolved)) amzCat.value = resolved;
+        }
     }
 
     function getForm() {
         const prev = editing ? window.State.lotes.find(x => x.id === editing) : null;
+        const isAmz = window.State.marketplace === 'amazon';
+        const amzCatEl = document.getElementById('f-amz-categoria');
+        const amzCat = isAmz && amzCatEl ? amzCatEl.value : '';
+        const pesoEl = document.getElementById('f-peso-kg');
+        const tamanoEl = document.getElementById('f-tamano-fba');
         return {
             id: editing || Data.newId(),
             productId: prev?.productId || '',
@@ -1637,13 +2099,22 @@ const LotesView = (() => {
             variante: document.getElementById('f-variante').value.trim(),
             tipo: document.getElementById('f-tipo').value,
             fecha: document.getElementById('f-fecha').value,
-            categoria: document.getElementById('f-categoria').value.trim(),
+            categoria: isAmz && amzCat
+                ? (Calc.AMZ_CATEGORIES?.[amzCat]?.label || amzCat)
+                : document.getElementById('f-categoria').value.trim(),
+            categoriaAmazon: isAmz ? amzCat : (prev?.categoriaAmazon || ''),
             costo: parseFloat(document.getElementById('f-costo').value) || 0,
             unidades: parseInt(document.getElementById('f-unidades').value) || 0,
             precioCompetencia: parseFloat(document.getElementById('f-precio-comp').value) || null,
             precio: parseFloat(document.getElementById('f-precio').value) || 0,
             envio: parseFloat(document.getElementById('f-envio').value) || 0,
             gastoAds: parseFloat(document.getElementById('f-gasto-ads')?.value) || 0,
+            pesoKg: isAmz && pesoEl ? (parseFloat(pesoEl.value) || null) : (prev?.pesoKg ?? null),
+            tamanoFba: isAmz && tamanoEl ? (tamanoEl.value || 'estandar') : (prev?.tamanoFba || ''),
+            almacenamiento: isAmz
+                ? Math.max(0, parseFloat(document.getElementById('f-almacenamiento')?.value) || 0)
+                : (prev?.almacenamiento || 0),
+            fbaInboundEstado: prev?.fbaInboundEstado || '',
             ventas: prev?.ventas || [],
             historial: prev?.historial || [],
             imagen: prev?.imagen || '',
@@ -1655,12 +2126,27 @@ const LotesView = (() => {
     function renderPreview() {
         const l = getForm();
         const c = Calc.computeLote(l, window.State.settings);
+        const isAmz = window.State.marketplace === 'amazon'
+            || window.State.settings?.marketplace === 'amazon';
+        const catName = isAmz && c.categoriaAmazon && Calc.AMZ_CATEGORIES?.[c.categoriaAmazon]
+            ? Calc.AMZ_CATEGORIES[c.categoriaAmazon].label
+            : '';
+        const comLabel = isAmz
+            ? `Referido${catName ? ` · ${catName}` : ''} (${(c.pctComision * 100).toFixed(1)}%)`
+            : `Comisión Meli (${(c.pctComision * 100).toFixed(0)}%)`;
+        const envioVal = c.envio != null ? c.envio : (Number(l.envio) || 0);
+        const envioLabel = isAmz
+            ? (String(l.tipo || '').toUpperCase() === 'FBM' ? 'Envío FBM' : 'FBA logística')
+            : 'Envío al cliente';
         document.getElementById('calc-preview').innerHTML = `
-            <div class="cp-row"><span>Comisión Meli (${(c.pctComision*100).toFixed(0)}%)</span><span>− ${Calc.fmtMXN(c.comisionVariable)}</span></div>
-            ${c.cargoFijo ? `<div class="cp-row"><span>Cargo fijo</span><span>− ${Calc.fmtMXN(c.cargoFijo)}</span></div>` : ''}
-            <div class="cp-row"><span>Envío al cliente</span><span>− ${Calc.fmtMXN(l.envio)}</span></div>
+            <div class="cp-row"><span>${comLabel}</span><span>− ${Calc.fmtMXN(c.comisionVariable)}</span></div>
+            ${!isAmz && c.cargoFijo ? `<div class="cp-row"><span>Cargo fijo</span><span>− ${Calc.fmtMXN(c.cargoFijo)}</span></div>` : ''}
+            <div class="cp-row"><span>${envioLabel}</span><span>− ${Calc.fmtMXN(envioVal)}</span></div>
+            ${isAmz && c.almacenamiento > 0 ? `<div class="cp-row"><span>Almacenamiento FBA</span><span>− ${Calc.fmtMXN(c.almacenamiento)}</span></div>` : ''}
+            ${!isAmz ? `
             <div class="cp-row"><span>Retención IVA</span><span>− ${Calc.fmtMXN(c.retIVA)}</span></div>
             <div class="cp-row"><span>Retención ISR</span><span>− ${Calc.fmtMXN(c.retISR)}</span></div>
+            ` : ''}
             <div class="cp-row"><span>Costo unitario</span><span>− ${Calc.fmtMXN(l.costo)}</span></div>
             <div class="cp-row total ${c.utilidad >= 0 ? 'pos' : 'neg'}">
                 <span>Utilidad neta por unidad</span>

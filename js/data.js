@@ -13,9 +13,43 @@
 
 const Data = (() => {
 
-    const STORAGE_KEY = 'ventas-meli:v1';
-    const SETTINGS_KEY = 'ventas-meli:settings:v1';
     const UI_KEY = 'ventas-meli:ui:v1';
+
+    /** Catálogos separados por marketplace (no se mezclan productos). */
+    const MARKETPLACES = {
+        meli: {
+            id: 'meli',
+            label: 'Mercado Libre',
+            short: 'Meli',
+            lotesKey: 'ventas-meli:v1',
+            settingsKey: 'ventas-meli:settings:v1',
+            useSeed: true,
+        },
+        amazon: {
+            id: 'amazon',
+            label: 'Amazon',
+            short: 'Amazon',
+            lotesKey: 'ventas-amazon:v1',
+            settingsKey: 'ventas-amazon:settings:v1',
+            useSeed: false,
+        },
+    };
+
+    // Compat: claves históricas de Meli
+    const STORAGE_KEY = MARKETPLACES.meli.lotesKey;
+    const SETTINGS_KEY = MARKETPLACES.meli.settingsKey;
+
+    function normalizeMarketplace(mp) {
+        return mp === 'amazon' ? 'amazon' : 'meli';
+    }
+
+    function currentMarketplace() {
+        return normalizeMarketplace(window.State?.marketplace);
+    }
+
+    function mpMeta(mp = currentMarketplace()) {
+        return MARKETPLACES[normalizeMarketplace(mp)];
+    }
 
     const PRODUCT_IDS = {
         palomera: 'p-palomera',
@@ -70,18 +104,30 @@ const Data = (() => {
         return Number(l.vendidas) || 0;
     }
 
-    // Normaliza lote a schema v3.
+    // Normaliza lote a schema v3 (+ campos Amazon MX).
     function normalize(l, siblings = []) {
         const ventas = Array.isArray(l.ventas) ? l.ventas : [];
+        const pesoRaw = l.pesoKg;
+        const pesoKg = pesoRaw != null && pesoRaw !== '' && !isNaN(Number(pesoRaw))
+            ? Number(pesoRaw)
+            : null;
         const out = {
             id: l.id || newId(),
             productId: resolveProductId(l, siblings),
             sku: l.sku || '',
             producto: l.producto || '',
             variante: l.variante || '',
-            tipo: l.tipo || 'Clasica',
+            tipo: l.tipo || (currentMarketplace() === 'amazon' ? 'FBA' : 'Clasica'),
             fecha: l.fecha || new Date().toISOString().slice(0, 10),
             categoria: l.categoria || '',
+            // Amazon: clave de tabla de referido + logística FBA
+            categoriaAmazon: l.categoriaAmazon || '',
+            pesoKg,
+            tamanoFba: l.tamanoFba || '',
+            // Amazon FBA: costo de almacenamiento estimado por unidad (Revenue Calculator)
+            almacenamiento: Math.max(0, Number(l.almacenamiento) || 0),
+            // Amazon FBA: estatus de mandar inventario AL almacén de Amazon (inbound)
+            fbaInboundEstado: normalizeFbaInboundEstado(l.fbaInboundEstado),
             notas: l.notas || '',
             costo: Number(l.costo) || 0,
             unidades: Number(l.unidades) || 0,
@@ -135,49 +181,97 @@ const Data = (() => {
         return out;
     }
 
-    function loadLotes() {
+    function loadLotes(mp = currentMarketplace()) {
+        const meta = mpMeta(mp);
         try {
-            const raw = localStorage.getItem(STORAGE_KEY);
+            const raw = localStorage.getItem(meta.lotesKey);
             if (!raw) {
+                if (!meta.useSeed) {
+                    saveLotes([], mp);
+                    return [];
+                }
                 const seed = SEED.map((l, i, arr) => normalize(l, arr.slice(0, i)));
-                saveLotes(seed);
+                saveLotes(seed, mp);
                 return seed;
             }
             const migrated = migrateLotes(JSON.parse(raw));
-            saveLotes(migrated); // persiste productIds
+            saveLotes(migrated, mp); // persiste productIds
             return migrated;
         } catch (e) {
             console.error('Error cargando lotes:', e);
+            if (!meta.useSeed) return [];
             return SEED.map((l, i, arr) => normalize(l, arr.slice(0, i)));
         }
     }
 
-    function saveLotes(lotes) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(lotes));
+    function saveLotes(lotes, mp = currentMarketplace()) {
+        localStorage.setItem(mpMeta(mp).lotesKey, JSON.stringify(lotes));
     }
 
-    function loadSettings() {
+    function loadSettings(mp = currentMarketplace()) {
+        const id = normalizeMarketplace(mp);
+        const base = Calc.defaultsFor ? Calc.defaultsFor(id) : { ...Calc.DEFAULT_SETTINGS, marketplace: id };
         try {
-            const raw = localStorage.getItem(SETTINGS_KEY);
-            if (!raw) return { ...Calc.DEFAULT_SETTINGS };
-            return { ...Calc.DEFAULT_SETTINGS, ...JSON.parse(raw) };
+            const raw = localStorage.getItem(mpMeta(id).settingsKey);
+            if (!raw) return { ...base, marketplace: id };
+            const parsed = JSON.parse(raw) || {};
+            // Quitar meta de sync si quedó persistida por error
+            delete parsed._amazon;
+            delete parsed._marketplace;
+            delete parsed._syncMeta;
+            return { ...base, ...parsed, marketplace: id };
         } catch (e) {
-            return { ...Calc.DEFAULT_SETTINGS };
+            return { ...base, marketplace: id };
         }
     }
 
-    function saveSettings(settings) {
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    function saveSettings(settings, mp = currentMarketplace()) {
+        const id = normalizeMarketplace(mp);
+        const clean = { ...(settings || {}), marketplace: id };
+        delete clean._amazon;
+        delete clean._marketplace;
+        delete clean._syncMeta;
+        localStorage.setItem(mpMeta(id).settingsKey, JSON.stringify(clean));
     }
 
     function loadUI() {
         try {
-            const ui = JSON.parse(localStorage.getItem(UI_KEY) || '{}') || {};
-            // Preferencias de layouts viejos (tabs Dashboard/Insights) ya no aplican
+            const raw = localStorage.getItem(UI_KEY) || '{}';
+            const ui = JSON.parse(raw) || {};
+            const before = JSON.stringify(ui);
+            // Preferencias de layouts / gráficas viejas ya no aplican
             delete ui.insightLayout;
             delete ui.insightLayoutId;
             delete ui.dashLayout;
             delete ui.dashLayoutId;
+            delete ui.dashChartProposal;
+            delete ui.dashChartStyle;
+            delete ui.dashChartMetric;
+            // Migrar filtros de gráfica legado (año/mes/semana → YYYY-MM-DD)
+            if (ui.dashChartFrom && !/^\d{4}-\d{2}-\d{2}$/.test(String(ui.dashChartFrom))) {
+                const s = String(ui.dashChartFrom).trim();
+                let iso = '';
+                if (/^W-(\d{4})-(\d{2})-(\d{2})$/.test(s)) {
+                    const m = s.match(/^W-(\d{4})-(\d{2})-(\d{2})$/);
+                    iso = `${m[1]}-${m[2]}-${m[3]}`;
+                } else if (/^\d{4}-\d{2}$/.test(s)) {
+                    iso = `${s}-01`;
+                } else if (/^\d{4}$/.test(s)) {
+                    iso = `${s}-01-01`;
+                }
+                ui.dashChartFrom = iso;
+            }
+            if (ui.dashChartFromPreset !== 'month' && ui.dashChartFromPreset !== 'year') {
+                delete ui.dashChartFromPreset;
+            }
+            if (ui.capitalAlloc != null && typeof ui.capitalAlloc !== 'object') {
+                delete ui.capitalAlloc;
+            }
+            if (ui.marketplace !== 'amazon') ui.marketplace = 'meli';
+            const after = JSON.stringify(ui);
+            if (after !== before) {
+                try { localStorage.setItem(UI_KEY, after); } catch { /* ignore */ }
+            }
             return ui;
         } catch {
             return {};
@@ -194,10 +288,11 @@ const Data = (() => {
 
     /**
      * Borra todas las ventas y restaura unidades al seed original (por SKU).
-     * Productos nuevos (no seed) solo pierden ventas; mantienen sus unidades.
+     * En Amazon (sin seed) solo limpia ventas y mantiene unidades.
      */
-    function clearVentasRestoreStock(lotes) {
-        const bySku = Object.fromEntries(SEED.map(s => [s.sku, s]));
+    function clearVentasRestoreStock(lotes, mp = currentMarketplace()) {
+        const useSeed = mpMeta(mp).useSeed;
+        const bySku = useSeed ? Object.fromEntries(SEED.map(s => [s.sku, s])) : {};
         let ventasCleared = 0;
         const next = (lotes || []).map(l => {
             const seed = bySku[l.sku];
@@ -320,15 +415,102 @@ const Data = (() => {
             precio: Number(venta.precio) || Number(lote.precio) || 0,
             unidades: Number(venta.unidades) || 1,
             notas: venta.notas || '',
+            // Preparación de envío (FBM / Easy Ship): por_preparar → empaquetado → etiqueta → listo → enviado
+            envioEstado: normalizeEnvioEstado(venta.envioEstado),
+            envioNota: venta.envioNota || '',
         };
         lote.ventas = [...(lote.ventas || []), v];
         lote.vendidas = syncVendidasFromVentas(lote);
         lote.historial = [...(lote.historial || []), {
             ts: Date.now(),
             tipo: 'venta',
-            meta: { ventaId: v.id, fecha: v.fecha, unidades: v.unidades, precio: v.precio }
+            meta: {
+                ventaId: v.id,
+                fecha: v.fecha,
+                unidades: v.unidades,
+                precio: v.precio,
+                envioEstado: v.envioEstado || '',
+            }
         }];
         return v;
+    }
+
+    const ENVIO_ESTADOS = ['por_preparar', 'empaquetado', 'etiqueta', 'listo', 'enviado'];
+    /** Inbound a FBA (mandar inventario a Amazon). */
+    const FBA_INBOUND_ESTADOS = ['creando', 'por_enviar', 'en_transito', 'recibido'];
+
+    function normalizeEnvioEstado(v) {
+        const s = String(v || '').trim();
+        return ENVIO_ESTADOS.includes(s) ? s : '';
+    }
+
+    function normalizeFbaInboundEstado(v) {
+        const s = String(v || '').trim();
+        // migrar claves viejas → nuevas
+        const legacy = {
+            por_preparar: 'por_enviar',
+            empaquetado: 'en_transito',
+            etiqueta: 'en_transito',
+            listo: 'en_transito',
+            enviado: 'recibido',
+        };
+        if (FBA_INBOUND_ESTADOS.includes(s)) return s;
+        if (legacy[s]) return legacy[s];
+        return '';
+    }
+
+    function setVentaEnvioEstado(lote, ventaId, estado, { notas = '' } = {}) {
+        const idx = (lote.ventas || []).findIndex(x => x.id === ventaId);
+        if (idx < 0) throw new Error('Venta no encontrada');
+        const next = normalizeEnvioEstado(estado);
+        const prev = lote.ventas[idx];
+        const updated = {
+            ...prev,
+            envioEstado: next,
+            envioNota: notas !== '' ? notas : (prev.envioNota || ''),
+        };
+        lote.ventas = lote.ventas.map((v, i) => (i === idx ? updated : v));
+        lote.historial = [...(lote.historial || []), {
+            ts: Date.now(),
+            tipo: 'envio-prep',
+            meta: {
+                ventaId,
+                from: prev.envioEstado || '',
+                to: next,
+                unidades: prev.unidades,
+                notas: updated.envioNota || '',
+            },
+        }];
+        return updated;
+    }
+
+    /** Estatus de mandar inventario al almacén FBA (no es envío al cliente). */
+    function setLoteFbaInboundEstado(lote, estado, { notas = '' } = {}) {
+        const next = normalizeFbaInboundEstado(estado);
+        const from = lote.fbaInboundEstado || '';
+        lote.fbaInboundEstado = next;
+        lote.historial = [...(lote.historial || []), {
+            ts: Date.now(),
+            tipo: 'fba-inbound',
+            meta: {
+                from,
+                to: next,
+                notas: notas || '',
+            },
+        }];
+        return lote;
+    }
+
+    function countPendingShipments(lote) {
+        const tipo = String(lote.tipo || '').toUpperCase();
+        if (tipo === 'FBA') {
+            const e = lote.fbaInboundEstado || '';
+            return e && e !== 'recibido' ? 1 : 0;
+        }
+        return (lote.ventas || []).filter(v => {
+            const e = v.envioEstado;
+            return e && e !== 'enviado';
+        }).length;
     }
 
     function removeVenta(lote, ventaId) {
@@ -383,6 +565,55 @@ const Data = (() => {
             lote.estatus = '✅ Activa / En Venta';
         }
         lote.vendidas = syncVendidasFromVentas(lote);
+        return lote;
+    }
+
+    /**
+     * Baja de inventario (daño, venta fuera, merma, etc.): reduce unidades del lote
+     * sin registrar venta. Nunca deja unidades por debajo de vendidas.
+     */
+    function writeOffLote(lote, { unidades, motivo = 'otro', notas = '' } = {}) {
+        const qty = Math.max(0, Math.round(Number(unidades) || 0));
+        if (qty <= 0) throw new Error('Indica cuántas piezas quitar');
+        const udsPrev = Number(lote.unidades) || 0;
+        const vendidas = syncVendidasFromVentas(lote);
+        const stockDisp = Math.max(0, udsPrev - vendidas);
+        if (qty > stockDisp) {
+            throw new Error(`Solo hay ${stockDisp} disponible${stockDisp === 1 ? '' : 's'} (no puedes bajar por debajo de las vendidas)`);
+        }
+        const udsNext = udsPrev - qty;
+        const costoUnit = Number(lote.costo) || 0;
+        const valorPerdido = Math.round(costoUnit * qty * 100) / 100;
+        const motivoKey = String(motivo || 'otro');
+        lote.historial = [...(lote.historial || []), {
+            ts: Date.now(),
+            tipo: 'baja-inventario',
+            meta: {
+                unidades: qty,
+                motivo: motivoKey,
+                notas: notas || '',
+                costoUnitario: costoUnit,
+                valorPerdido,
+                unidadesAntes: udsPrev,
+                unidadesDespues: udsNext,
+                stockDisponibleAntes: stockDisp,
+                stockDisponibleDespues: stockDisp - qty,
+            },
+        }];
+        lote.unidades = udsNext;
+        lote.vendidas = vendidas;
+        const stockAfter = udsNext - vendidas;
+        if (stockAfter <= 0) {
+            const est = String(lote.estatus || '');
+            if (vendidas > 0) {
+                if (est.includes('Activa') || est.includes('En Venta')) {
+                    lote.estatus = '📦 Sin stock';
+                }
+            } else if (udsNext <= 0) {
+                // Baja total sin ventas: archivar para que no figure como color activo
+                lote.estatus = '❌ Finalizada';
+            }
+        }
         return lote;
     }
 
@@ -498,7 +729,11 @@ const Data = (() => {
     return {
         STORAGE_KEY,
         SETTINGS_KEY,
+        MARKETPLACES,
         SEED,
+        normalizeMarketplace,
+        currentMarketplace,
+        mpMeta,
         loadLotes,
         saveLotes,
         loadSettings,
@@ -518,7 +753,13 @@ const Data = (() => {
         duplicateLote,
         addVenta,
         removeVenta,
+        setVentaEnvioEstado,
+        setLoteFbaInboundEstado,
+        countPendingShipments,
+        ENVIO_ESTADOS,
+        normalizeEnvioEstado,
         restockLote,
+        writeOffLote,
         mergeBySku,
         attachVentasBySku,
         productNameKey,
@@ -528,6 +769,7 @@ const Data = (() => {
 window.Data = Data;
 
 window.State = {
+    marketplace: 'meli',
     lotes: [],
     settings: {},
     ui: {},
@@ -535,7 +777,20 @@ window.State = {
     subscribers: new Set(),
     subscribe(fn) { this.subscribers.add(fn); return () => this.subscribers.delete(fn); },
     notify() { this.subscribers.forEach(fn => fn()); },
-    save() { Data.saveLotes(this.lotes); this.notify(); },
-    saveSettings() { Data.saveSettings(this.settings); this.notify(); },
+    save() { Data.saveLotes(this.lotes, this.marketplace); this.notify(); },
+    saveSettings() { Data.saveSettings(this.settings, this.marketplace); this.notify(); },
     saveUI() { Data.saveUI(this.ui); },
+    /** Cambia de marketplace guardando el catálogo activo y cargando el otro. */
+    switchMarketplace(mp) {
+        const next = Data.normalizeMarketplace(mp);
+        if (next === this.marketplace) return;
+        Data.saveLotes(this.lotes, this.marketplace);
+        Data.saveSettings(this.settings, this.marketplace);
+        this.marketplace = next;
+        this.ui = { ...this.ui, marketplace: next };
+        this.saveUI();
+        this.lotes = Data.loadLotes(next);
+        this.settings = Data.loadSettings(next);
+        this.notify();
+    },
 };
