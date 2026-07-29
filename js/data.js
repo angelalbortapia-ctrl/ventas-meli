@@ -328,6 +328,7 @@ const Data = (() => {
      * Alinea lotes Amazon con snapshots de la Calculadora de ingresos MX.
      * - Prasada aceite coco $439 → alm 1.75 · utilidad $78
      * - Kirkland crema avellanas (CCREMA) $459 → alm 0.75 · utilidad $87.15
+     * - Chocolate Alquimia 400g (CHOC-ALQ-400) $449 → alm 1.09 · utilidad ~$139.36
      * También corrige categoría/override FBA rotos en aceites de coco.
      */
     function alignAmazonRevenueCalcLotes(lotes) {
@@ -459,6 +460,42 @@ const Data = (() => {
                     // 690 g producto; Calculadora usa tramo ≤0.8 kg ($6.70 en banda $150–299)
                     pesoKg: (peso > 0.7 && peso <= 0.8) ? peso : 0.8,
                     almacenamiento: 0.45,
+                    varios: 0,
+                    envio: 0,
+                }, [], 'amazon');
+            }
+
+            // Chocolate Sin Azúcar Keto Barks Alquimia 400g (CHOC-ALQ-400)
+            // Calculadora Amazon MX: referido $46.45 · FBA $14.90 · alm $1.09
+            // (antes caía en Hogar 15% + FBA general $53 — no cuadra)
+            const isChocAlq = sku === 'CHOC-ALQ-400'
+                || sku.includes('CHOC-ALQ')
+                || (name.includes('chocolate') && name.includes('alquimia'))
+                || (name.includes('keto') && name.includes('barks'))
+                || (name.includes('chocolate') && name.includes('sin azucar') && Math.abs(precio - 449) < 0.01)
+                || (Math.abs(precio - 449) < 0.01 && Math.abs(costo - 247.2) < 0.05);
+            if (isChocAlq) {
+                const alm = Number(l.almacenamiento) || 0;
+                const varios = Number(l.varios) || 0;
+                const envio = Number(l.envio) || 0;
+                const cat = String(l.categoriaAmazon || '').toLowerCase();
+                const peso = Number(l.pesoKg) || 0;
+                const ok = cat === 'alimentacion'
+                    && envio === 0
+                    && varios === 0
+                    && Math.abs(alm - 1.09) < 0.01
+                    && peso > 0.4 && peso <= 0.5;
+                if (ok) return l;
+                changed = true;
+                return normalize({
+                    ...l,
+                    tipo: 'FBA',
+                    categoria: 'Alimentación y Gourmet',
+                    categoriaAmazon: 'alimentacion',
+                    tamanoFba: 'estandar',
+                    // 400 g producto; Calculadora cobra tramo ≤0.5 kg ($14.90 en banda $299–499)
+                    pesoKg: (peso > 0.4 && peso <= 0.5) ? peso : 0.5,
+                    almacenamiento: 1.09,
                     varios: 0,
                     envio: 0,
                 }, [], 'amazon');
