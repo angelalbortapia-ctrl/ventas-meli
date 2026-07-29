@@ -356,3 +356,4 @@ const EnviosView = (() => {
 
     return { render, init, pendingCount, isEnabled };
 })();
+window.EnviosView = EnviosView;

@@ -1,6 +1,6 @@
 # Ventas Meli — Gestor de lotes y rentabilidad
 
-Aplicación web local (PWA instalable) para gestionar tus operaciones de venta en Mercado Libre.
+Aplicación web local (PWA instalable) para gestionar operaciones de venta en Mercado Libre y Amazon.
 
 Espeja y automatiza tu Excel `Negocio.xlsx` (pestañas `Lotes_Operaciones` + `Resumen_General`) y le añade capacidades que Excel no tiene:
 
@@ -15,7 +15,7 @@ Espeja y automatiza tu Excel `Negocio.xlsx` (pestañas `Lotes_Operaciones` + `Re
 - **Productos** tipo Inbox + Split con detalle en tabs (Rentabilidad · Inventario · Recomendación · Historial).
 - **Split redimensionable** con drag persistente en localStorage.
 - **Edición inline** de precio y stock (click en el número).
-- **Dashboard**: Progreso mensual/anual, P&G, Caja, Portafolio y Ranking.
+- **Dashboard**: Progreso mensual/anual, P&G, Caja, Portafolio y Ranking + consola **General** (Meli + Amazon).
 - **Import / Export a Excel** (respeta formato original, exporta ventas también).
 - **Respaldo JSON** local + sync opcional con Supabase (Mac ↔ iPhone).
 - **Modales propios** en vez de `confirm()` nativos.
@@ -86,21 +86,25 @@ También puedes **instalarla como PWA** (Chrome: menú → Instalar Ventas Meli)
 
 ```
 ventas-meli/
-├── index.html              layout + tabs + modal + palette host
+├── index.html              layout + tabs + modal
 ├── manifest.json           PWA manifest
-├── sw.js                   Service worker (cache-first)
-├── css/styles.css          Estilos (light + dark)
+├── sw.js                   Service worker (network-first + cache offline)
+├── css/styles.css          Temas Meli / Amazon / General
 ├── js/
-│   ├── calc.js             Motor de cálculo + recomendaciones dinámicas
+│   ├── calc.js             Motor de cálculo
 │   ├── data.js             Modelo + persistencia + historial
 │   ├── excel.js            Import/Export SheetJS
 │   ├── ui.js               Modales, dialogs, prompt, toast
 │   ├── palette.js          Command palette ⌘K
 │   ├── insights.js         Reglas de negocio + alertas
-│   ├── lotes.js            Vista Productos (Inbox Split)
-│   ├── dashboard.js        KPIs + rotación + top + alertas
-│   ├── settings.js         Ajustes de cálculo
-│   └── app.js              Bootstrap + navegación + dark mode + PWA
+│   ├── envios.js           Prep. envíos Amazon
+│   ├── lotes.js            Vista productos
+│   ├── dashboard.js        Inicio + consola General
+│   ├── sync.js             Sync Supabase
+│   ├── settings.js         Ajustes de cálculo + Sync
+│   └── app.js              Bootstrap + navegación + PWA
+├── supabase/
+│   └── schema.sql          Tabla Sync (`ventas_meli_state`)
 └── README.md
 ```
 
@@ -110,11 +114,12 @@ Todo se guarda en `localStorage`. Para llevártelo a otro equipo:
 
 - **Respaldo JSON** — botón Respaldo → elige exportar / importar.
 - **Excel** — botón Exportar Excel (compatible con `Negocio.xlsx` + hoja Ventas).
+- **Sync Supabase** — Ajustes → pega URL + anon key → ejecuta `supabase/schema.sql` → mismo login en Mac e iPhone.
 
 ## Roadmap
 
-- Integración API Mercado Libre (traer pedidos y comisiones reales).
-- Multi-canal (Amazon, Shopify).
+- Import local de pedidos ML (CSV/Excel) con match por SKU.
+- Amazon SP-API.
 - Alertas de recompra por velocidad de venta.
 - Exportación PDF de fichas por SKU para proveedores.
 - Punto de reorden calculado según lead time.

@@ -1242,14 +1242,17 @@ const DashboardView = (() => {
   <h2>Liquidar</h2><ul>${escRows(nextBuy.liquidate, 'liq')}</ul>
   <p class="sub" style="margin-top:32px">Generado desde Ventas · vista General. Catálogos no mezclados.</p>
 </body></html>`;
-        const w = window.open('', '_blank', 'noopener,noreferrer,width=820,height=900');
+        const w = window.open('', '_blank', 'width=820,height=900');
         if (!w) {
             UI.toast?.('Permite ventanas emergentes para el snapshot', 'error');
             return;
         }
+        // noopener en windowFeatures hace que open() devuelva null; cortamos opener a mano
+        try { w.opener = null; } catch { /* ignore */ }
         w.document.open();
         w.document.write(html);
         w.document.close();
+        try { w.focus(); } catch { /* ignore */ }
         UI.toast?.('Snapshot listo · imprime o guarda PDF');
     }
 

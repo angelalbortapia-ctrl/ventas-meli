@@ -532,7 +532,7 @@ const Sync = (() => {
             }, 'amazon');
 
             window.State.marketplace = marketplace;
-            window.State.ui = { ...window.State.ui, marketplace };
+            window.State.ui = { ...window.State.ui, marketplace, mpView: marketplace };
             window.State.saveUI();
             window.State.lotes = Data.loadLotes(marketplace);
             window.State.settings = Data.loadSettings(marketplace);
@@ -544,6 +544,7 @@ const Sync = (() => {
             if (window.State.view === 'lotes' && window.LotesView?.render) LotesView.render();
             if (window.State.view === 'dashboard' && window.DashboardView?.render) DashboardView.render();
             if (window.State.view === 'insights' && window.InsightsView?.render) InsightsView.render();
+            if (window.State.view === 'envios' && window.EnviosView?.render) EnviosView.render();
             if (window.App?.refreshNavCounts) App.refreshNavCounts();
 
             const counts = {

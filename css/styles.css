@@ -5,7 +5,7 @@
 
 /* ============================================================================
    Temas por marketplace:
-   Meli → amarillo/azul ML · Amazon → naranja Amazon · General → Material Google
+   Meli → azul · Amazon → naranja · General → tinta (une ambos)
    ============================================================================ */
 :root {
     /* Layout tokens */
@@ -93,30 +93,18 @@ body[data-mp-view="amazon"] {
     --info: #232f3e;
 }
 
-/* Amarillo ML en chrome de marca (no en tipografía) */
-body[data-mp-view="meli"] .sb-mp-btn.active,
-body[data-mp-view="meli"] .fab,
-body[data-mp-view="meli"] .toast.success {
-    background: var(--brand);
-    border-color: var(--brand);
-    color: var(--brand-ink);
-}
-body[data-mp-view="meli"] .fab:hover,
-body[data-mp-view="meli"] .sb-mp-btn.active:hover {
-    background: #f0d800;
-    border-color: #f0d800;
-    color: var(--brand-ink);
-}
-body[data-mp-view="meli"] .sb-foot .dot {
-    background: var(--brand);
-    box-shadow: 0 0 0 3px rgba(255, 230, 0, 0.35);
-}
+/* Brand-dots: misma familia (gradiente diagonal), General une Meli + Amazon */
 body[data-mp-view="meli"] .sb-brand-dot {
     background: linear-gradient(135deg, #ffe600, #3483fa);
-    box-shadow: 0 0 0 3px rgba(255, 230, 0, 0.35);
+    box-shadow: 0 0 0 3px rgba(52, 131, 250, 0.18);
+}
+body[data-mp-view="meli"] .sb-foot .dot {
+    background: var(--primary);
+    box-shadow: 0 0 0 3px rgba(52, 131, 250, 0.2);
 }
 body[data-mp-view="amazon"] .sb-brand-dot {
     background: linear-gradient(135deg, #ff9900, #232f3e);
+    box-shadow: 0 0 0 3px rgba(255, 153, 0, 0.2);
 }
 body[data-mp-view="amazon"] .sidebar {
     border-right-color: #e3e6e6;
@@ -244,6 +232,15 @@ body[data-marketplace="amazon"] .sb-brand-dot {
     background: var(--primary-tint-strong);
     color: var(--primary-text);
 }
+.sb-item-hint {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+.sb-item.active .sb-item-hint { color: inherit; opacity: 0.75; }
 .sb-item[hidden] {
     display: none !important;
 }
@@ -280,46 +277,46 @@ body[data-marketplace="amazon"] .sb-brand-dot {
 }
 
 /* ==========================================================================
-   Modo General — Material Google (claro, azul Google, superficies limpias)
+   Modo General — vista unificada (tinta neutra; acentos Meli/Amazon)
    ========================================================================== */
 body[data-mp-view="general"] {
-    --gx-ink: #202124;
+    --gx-ink: #1a1a1a;
     --gx-ink-2: #3c4043;
-    --gx-mist: #e8eaed;
-    --gx-paper: #f8f9fa;
+    --gx-mist: #eeeef0;
+    --gx-paper: #f5f5f5;
     --gx-panel: #ffffff;
-    --gx-line: rgba(60, 64, 67, 0.12);
-    --gx-line-strong: rgba(60, 64, 67, 0.20);
-    --gx-accent: #1a73e8;
-    --gx-accent-soft: #e8f0fe;
+    --gx-line: rgba(26, 26, 26, 0.10);
+    --gx-line-strong: rgba(26, 26, 26, 0.18);
+    --gx-accent: #2b2f36;
+    --gx-accent-soft: #f0f1f2;
     --gx-teal: var(--gx-accent);
     --gx-teal-soft: var(--gx-accent-soft);
-    --gx-meli: #4285f4;
-    --gx-amz: #fbbc04;
+    --gx-meli: #3483fa;
+    --gx-amz: #ff9900;
     --gx-ok: #34a853;
-    --gx-warn: #f9ab00;
-    --gx-bad: #ea4335;
-    --bg: #f8f9fa;
+    --gx-warn: #d68f2a;
+    --gx-bad: #c93e3e;
+    --bg: #f5f5f5;
     --surface: #ffffff;
-    --surface-alt: #f1f3f4;
-    --border: #dadce0;
-    --border-strong: #bdc1c6;
-    --text: #202124;
-    --text-muted: #5f6368;
-    --text-dim: #80868b;
-    --primary: #1a73e8;
-    --primary-hover: #1765cc;
-    --primary-tint: #e8f0fe;
-    --primary-tint-strong: #d2e3fc;
-    --primary-border: #aecbfa;
-    --primary-text: #174ea6;
+    --surface-alt: #eeeef0;
+    --border: #e0e0e0;
+    --border-strong: #c4c4c4;
+    --text: #1a1a1a;
+    --text-muted: #666666;
+    --text-dim: #999999;
+    /* Tinta neutra: distinto de Meli azul y Amazon naranja, mismo patrón de tabs */
+    --primary: #2b2f36;
+    --primary-hover: #1a1d22;
+    --primary-tint: #f0f1f2;
+    --primary-tint-strong: #e4e6e9;
+    --primary-border: #c5c8ce;
+    --primary-text: #2b2f36;
     --on-primary: #ffffff;
-    --radius: 8px;
-    --shadow-sm: 0 1px 2px 0 rgba(60, 64, 67, 0.10), 0 1px 3px 1px rgba(60, 64, 67, 0.06);
-    --shadow: 0 1px 2px 0 rgba(60, 64, 67, 0.12), 0 1px 3px 1px rgba(60, 64, 67, 0.08);
-    --shadow-lg: 0 4px 8px 3px rgba(60, 64, 67, 0.10), 0 1px 3px rgba(60, 64, 67, 0.12);
+    --radius: 10px;
+    --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.04);
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.12);
 }
-
 body[data-mp-view="general"] .fab,
 body[data-mp-view="general"] .mobile-tabbar,
 body[data-mp-view="general"] .kbd-hint,
@@ -338,9 +335,8 @@ body[data-mp-view="general"] .main-wrap {
     min-width: 0;
     z-index: 1;
     background:
-        radial-gradient(800px 380px at 0% 0%, rgba(66, 133, 244, 0.08), transparent 55%),
-        radial-gradient(600px 320px at 100% 0%, rgba(251, 188, 4, 0.07), transparent 50%),
-        radial-gradient(500px 280px at 80% 40%, rgba(52, 168, 83, 0.05), transparent 45%),
+        radial-gradient(720px 340px at 0% 0%, rgba(52, 131, 250, 0.07), transparent 55%),
+        radial-gradient(560px 300px at 100% 0%, rgba(255, 153, 0, 0.06), transparent 50%),
         var(--bg);
 }
 body[data-mp-view="general"] .sb-brand {
@@ -348,7 +344,7 @@ body[data-mp-view="general"] .sb-brand {
 }
 body[data-mp-view="general"] .sb-brand-text .name {
     color: var(--text);
-    letter-spacing: 0.02em;
+    letter-spacing: -0.01em;
     font-size: 14px;
     font-weight: 700;
 }
@@ -356,8 +352,8 @@ body[data-mp-view="general"] .sb-brand-text .sub {
     color: var(--text-muted);
 }
 body[data-mp-view="general"] .sb-brand-dot {
-    background: conic-gradient(from 210deg, #4285f4, #ea4335, #fbbc04, #34a853, #4285f4);
-    box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.12);
+    background: linear-gradient(135deg, #3483fa, #ff9900);
+    box-shadow: 0 0 0 3px rgba(43, 47, 54, 0.12);
 }
 body[data-mp-view="general"] .sb-section h5 {
     color: var(--text-dim);
@@ -365,24 +361,11 @@ body[data-mp-view="general"] .sb-section h5 {
 body[data-mp-view="general"] .sb-mp-hint {
     color: var(--text-muted);
 }
-body[data-mp-view="general"] .sb-mp-btn {
-    background: var(--surface);
-    border-color: var(--border);
-    color: var(--text-muted);
-}
-body[data-mp-view="general"] .sb-mp-btn:hover {
-    color: var(--text);
-    border-color: var(--border-strong);
-}
+/* Mismos tabs que Meli/Amazon: solid fill + texto claro (sin tint Google) */
 body[data-mp-view="general"] .sb-mp-btn.active {
-    background: var(--primary-tint-strong);
-    color: var(--primary-text);
-    border-color: var(--primary-border);
-}
-body[data-mp-view="general"] .sb-mp-btn[data-marketplace="general"].active {
     background: var(--primary);
+    color: var(--on-primary);
     border-color: var(--primary);
-    color: #fff;
 }
 body[data-mp-view="general"] .sb-foot {
     border-top-color: var(--border);
@@ -390,6 +373,7 @@ body[data-mp-view="general"] .sb-foot {
 }
 body[data-mp-view="general"] .sb-foot .dot {
     background: var(--primary);
+    box-shadow: 0 0 0 3px rgba(43, 47, 54, 0.15);
 }
 
 body[data-mp-view="general"] .topbar {
@@ -656,60 +640,6 @@ body[data-mp-view="general"] .gx-body {
     background: var(--primary-tint-strong);
     color: var(--primary-text);
 }
-.sb-general-card {
-    margin: 4px;
-    padding: 14px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--bg);
-}
-.sb-general-kicker {
-    margin: 0 0 6px;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-}
-.sb-general-copy {
-    margin: 0 0 12px;
-    font-size: 12px;
-    line-height: 1.45;
-    color: var(--text-muted);
-}
-.sb-general-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-.sb-general-cta {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 10px 11px;
-    border: 1px solid var(--border);
-    border-radius: 9px;
-    background: var(--surface);
-    font: inherit;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-}
-.sb-general-cta:hover {
-    border-color: var(--primary-border);
-    background: var(--primary-tint);
-}
-.sb-general-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-.sb-general-dot.meli { background: var(--gx-meli); }
-.sb-general-dot.amz { background: var(--gx-amz); }
 
 /* —— General content —— */
 .gx-exec { padding: 0 !important; }
@@ -735,7 +665,9 @@ body[data-mp-view="general"] .gx-body {
     width: 420px;
     height: 420px;
     border-radius: 50%;
-    background: radial-gradient(circle, rgba(26,115,232,0.12), transparent 68%);
+    background:
+        radial-gradient(circle at 30% 40%, rgba(52, 131, 250, 0.14), transparent 55%),
+        radial-gradient(circle at 70% 60%, rgba(255, 153, 0, 0.12), transparent 58%);
     pointer-events: none;
 }
 .gx-hero-copy,

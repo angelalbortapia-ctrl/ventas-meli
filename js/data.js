@@ -5,7 +5,7 @@
      id, productId, sku, producto, variante, tipo, fecha, categoria, notas,
      costo, unidades, precioCompetencia, precio, envio, vendidas, estatus,
      imagen,   // data URL JPEG comprimido; compartida por productId (familia)
-     ventas:   [{ id, fecha, precio, unidades, notas }]
+     ventas:   [{ id, fecha, precio, unidades, notas, envioEstado?, meliOrderId?, meliItemId? }]
      historial:[{ ts, tipo, meta }]
    vendidas se deriva de ventas[] cuando hay eventos (una sola verdad).
    productId agrupa variantes del mismo producto (estable, no por typo de nombre).
@@ -125,12 +125,128 @@ const Data = (() => {
         return Number(l.vendidas) || 0;
     }
 
+    /** SKU comparable para match Excel / ML import. */
+    function normalizeSku(sku) {
+        return String(sku || '').trim().toLowerCase();
+    }
+
+    function normalizeVenta(v) {
+        const out = {
+            id: v.id || newId(),
+            fecha: v.fecha || new Date().toISOString().slice(0, 10),
+            precio: Number(v.precio) || 0,
+            unidades: Number(v.unidades) || 1,
+            notas: v.notas || '',
+            envioEstado: normalizeEnvioEstado(v.envioEstado),
+            envioNota: v.envioNota || '',
+        };
+        const oid = v.meliOrderId != null && v.meliOrderId !== '' ? String(v.meliOrderId) : '';
+        const iid = v.meliItemId != null && v.meliItemId !== '' ? String(v.meliItemId) : '';
+        if (oid) out.meliOrderId = oid;
+        if (iid) out.meliItemId = iid;
+        return out;
+    }
+
+    function meliOrderLineKey(orderId, sku) {
+        return `${String(orderId || '')}::${normalizeSku(sku)}`;
+    }
+
+    function hasMeliOrderLine(lotes, orderId, sku) {
+        if (!orderId) return false;
+        return (lotes || []).some(l =>
+            (l.ventas || []).some(v => {
+                if (!v.meliOrderId) return false;
+                if (String(v.meliOrderId) !== String(orderId)) return false;
+                return normalizeSku(l.sku) === normalizeSku(sku);
+            })
+        );
+    }
+
+    /**
+     * Importa filas normalizadas de ML a lotes Meli existentes (match por SKU).
+     * No crea lotes. Dedup por meliOrderId + sku.
+     * rows: [{ orderId, sku, fecha, precio, unidades, titulo, itemId }]
+     */
+    function importMeliOrders(lotes, rows = []) {
+        const result = {
+            lotes: lotes || [],
+            imported: 0,
+            duplicates: 0,
+            unmatched: [],
+        };
+        if (!rows.length) return result;
+
+        const bySku = new Map();
+        (result.lotes || []).forEach((l, idx) => {
+            const key = normalizeSku(l.sku);
+            if (!key) return;
+            if (!bySku.has(key)) bySku.set(key, []);
+            bySku.get(key).push(idx);
+        });
+
+        const seenKeys = new Set();
+        (result.lotes || []).forEach(l => {
+            (l.ventas || []).forEach(v => {
+                if (v.meliOrderId) {
+                    seenKeys.add(meliOrderLineKey(v.meliOrderId, l.sku));
+                }
+            });
+        });
+
+        const next = result.lotes.map(l => ({ ...l, ventas: [...(l.ventas || [])], historial: [...(l.historial || [])] }));
+
+        rows.forEach(r => {
+            const sku = normalizeSku(r.sku);
+            const orderId = String(r.orderId || '');
+            if (!sku) {
+                result.unmatched.push({
+                    orderId,
+                    sku: '',
+                    titulo: r.titulo || '',
+                    reason: 'sin_sku',
+                });
+                return;
+            }
+            const idxs = bySku.get(sku);
+            if (!idxs || !idxs.length) {
+                result.unmatched.push({
+                    orderId,
+                    sku: r.sku || '',
+                    titulo: r.titulo || '',
+                    reason: 'sin_lote',
+                });
+                return;
+            }
+            const lineKey = meliOrderLineKey(orderId, sku);
+            if (orderId && seenKeys.has(lineKey)) {
+                result.duplicates++;
+                return;
+            }
+            const lote = next[idxs[0]];
+            const title = String(r.titulo || '').slice(0, 80);
+            const notas = [`ML #${orderId}`, title].filter(Boolean).join(' · ');
+            addVenta(lote, {
+                fecha: r.fecha,
+                precio: r.precio,
+                unidades: r.unidades,
+                notas,
+                meliOrderId: orderId,
+                meliItemId: r.itemId || '',
+            });
+            if (orderId) seenKeys.add(lineKey);
+            result.imported++;
+        });
+
+        result.lotes = next.map(l => normalize(l, next, 'meli'));
+        return result;
+    }
+
     // Normaliza lote a schema v3 (+ campos Amazon MX).
     // `mp` debe ser el catálogo dueño del lote (nunca el marketplace “activo” por accidente).
     function normalize(l, siblings = [], mp = currentMarketplace()) {
         const market = normalizeMarketplace(mp);
         const defaultTipo = market === 'amazon' ? 'FBA' : 'Clasica';
-        const ventas = Array.isArray(l.ventas) ? l.ventas : [];
+        const ventas = Array.isArray(l.ventas) ? l.ventas.map(normalizeVenta) : [];
         const pesoRaw = l.pesoKg;
         const pesoKg = pesoRaw != null && pesoRaw !== '' && !isNaN(Number(pesoRaw))
             ? Number(pesoRaw)
@@ -219,7 +335,7 @@ const Data = (() => {
         const next = lotes.map(l => {
             const sku = String(l.sku || '').toUpperCase().trim();
             const name = String(l.producto || '').toLowerCase()
-                .normalize('NFD', [], 'amazon').replace(/[\u0300-\u036f]/g, '');
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
             const precio = Number(l.precio) || 0;
             const costo = Number(l.costo) || 0;
 
@@ -605,17 +721,28 @@ const Data = (() => {
     }
 
     // ---- Ventas individuales ------------------------------------------------
+    const ENVIO_ESTADOS = ['por_preparar', 'empaquetado', 'etiqueta', 'listo', 'enviado'];
+    /** Inbound a FBA (mandar inventario a Amazon). */
+    const FBA_INBOUND_ESTADOS = ['creando', 'por_enviar', 'en_transito', 'recibido'];
+
+    function normalizeEnvioEstado(v) {
+        const s = String(v || '').trim();
+        return ENVIO_ESTADOS.includes(s) ? s : '';
+    }
+
     function addVenta(lote, venta) {
-        const v = {
+        const v = normalizeVenta({
             id: newId(),
             fecha: venta.fecha || new Date().toISOString().slice(0, 10),
             precio: Number(venta.precio) || Number(lote.precio) || 0,
             unidades: Number(venta.unidades) || 1,
             notas: venta.notas || '',
             // Preparación de envío (FBM / Easy Ship): por_preparar → empaquetado → etiqueta → listo → enviado
-            envioEstado: normalizeEnvioEstado(venta.envioEstado),
+            envioEstado: venta.envioEstado,
             envioNota: venta.envioNota || '',
-        };
+            meliOrderId: venta.meliOrderId,
+            meliItemId: venta.meliItemId,
+        });
         lote.ventas = [...(lote.ventas || []), v];
         lote.vendidas = syncVendidasFromVentas(lote);
         lote.historial = [...(lote.historial || []), {
@@ -627,18 +754,10 @@ const Data = (() => {
                 unidades: v.unidades,
                 precio: v.precio,
                 envioEstado: v.envioEstado || '',
+                meliOrderId: v.meliOrderId || '',
             }
         }];
         return v;
-    }
-
-    const ENVIO_ESTADOS = ['por_preparar', 'empaquetado', 'etiqueta', 'listo', 'enviado'];
-    /** Inbound a FBA (mandar inventario a Amazon). */
-    const FBA_INBOUND_ESTADOS = ['creando', 'por_enviar', 'en_transito', 'recibido'];
-
-    function normalizeEnvioEstado(v) {
-        const s = String(v || '').trim();
-        return ENVIO_ESTADOS.includes(s) ? s : '';
     }
 
     function normalizeFbaInboundEstado(v) {
@@ -957,6 +1076,10 @@ const Data = (() => {
         countPendingShipments,
         ENVIO_ESTADOS,
         normalizeEnvioEstado,
+        normalizeSku,
+        normalizeVenta,
+        hasMeliOrderLine,
+        importMeliOrders,
         restockLote,
         writeOffLote,
         mergeBySku,

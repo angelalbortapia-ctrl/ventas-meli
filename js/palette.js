@@ -13,27 +13,20 @@ const Palette = (() => {
     const normalize = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
     function baseActions(App) {
-        return [
+        const enviosOn = !!window.EnviosView?.isEnabled?.();
+        const actions = [
             { section: 'Navegación', icon: '📦', title: 'Ir a Productos', keys: 'Lotes', run: () => App.switchTab('lotes') },
-            { section: 'Navegación', icon: '🚚', title: 'Ir a Envíos', keys: 'Amazon paquetes por enviar', run: () => App.switchTab('envios') },
             { section: 'Navegación', icon: '📊', title: 'Ir a Inicio', keys: 'Dashboard KPIs métricas', run: () => App.switchTab('dashboard') },
             { section: 'Navegación', icon: '💡', title: 'Ir a Insights', keys: 'Alertas recomendaciones', run: () => App.switchTab('insights') },
             { section: 'Navegación', icon: '⚙️', title: 'Ir a Ajustes', keys: 'Comisiones IVA umbral', run: () => App.switchTab('settings') },
             { section: 'Marketplace', icon: '🛒', title: 'Cambiar a Mercado Libre', keys: 'Meli', run: () => {
-                if (window.State.marketplace !== 'meli') {
-                    window.State.switchMarketplace('meli');
-                    App.refreshMarketplaceChrome?.();
-                    SettingsView.loadIntoForm();
-                    App.switchTab(window.State.view || 'dashboard');
-                }
+                App.applyMarketplaceView?.('meli');
             } },
             { section: 'Marketplace', icon: '📦', title: 'Cambiar a Amazon', keys: 'Amazon FBA FBM', run: () => {
-                if (window.State.marketplace !== 'amazon') {
-                    window.State.switchMarketplace('amazon');
-                    App.refreshMarketplaceChrome?.();
-                    SettingsView.loadIntoForm();
-                    App.switchTab(window.State.view || 'dashboard');
-                }
+                App.applyMarketplaceView?.('amazon');
+            } },
+            { section: 'Marketplace', icon: '◎', title: 'Ir a General', keys: 'Consola pulso negocio', run: () => {
+                App.applyMarketplaceView?.('general');
             } },
 
             { section: 'Acciones', icon: '➕', title: 'Nuevo lote', keys: 'Producto agregar crear', run: () => LotesView.openModal(null) },
@@ -42,6 +35,16 @@ const Palette = (() => {
             { section: 'Acciones', icon: '💾', title: 'Respaldo (exportar/importar JSON)', keys: 'Backup datos', run: () => App.openBackup() },
             { section: 'Acciones', icon: '↺', title: 'Restaurar ajustes por defecto', keys: 'Reset settings', run: () => App.resetSettings() },
         ];
+        if (enviosOn) {
+            actions.splice(1, 0, {
+                section: 'Navegación',
+                icon: '🚚',
+                title: 'Ir a Envíos',
+                keys: 'Amazon paquetes por enviar',
+                run: () => App.switchTab('envios'),
+            });
+        }
+        return actions;
     }
 
     function buildIndex(App) {

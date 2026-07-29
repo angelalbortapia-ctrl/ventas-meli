@@ -21,11 +21,12 @@ const App = (() => {
     function switchTab(tab) {
         if (!TAB_LABELS[tab]) return;
         // Envíos solo existe en Amazon con la función activa
-        if (tab === 'envios' && window.EnviosView && !EnviosView.isEnabled()) {
+        if (tab === 'envios' && (!window.EnviosView || !window.EnviosView.isEnabled())) {
             tab = 'settings';
         }
-        // General es solo resumen: al ir a catálogo/ajustes, vuelve al último MP real
-        if (['lotes', 'envios', 'insights', 'settings'].includes(tab)
+        // General es solo resumen: al ir a catálogo, vuelve al último MP real.
+        // Ajustes (Sync) sí se puede abrir desde General sin salir.
+        if (['lotes', 'envios', 'insights'].includes(tab)
             && window.State.ui?.mpView === 'general') {
             const real = Data.normalizeMarketplace(window.State.marketplace);
             window.State.ui = { ...window.State.ui, mpView: real };
@@ -581,7 +582,7 @@ const App = (() => {
 
         const themeMeta = document.querySelector('meta[name="theme-color"]');
         if (themeMeta) {
-            themeMeta.content = mpView === 'general' ? '#1a73e8'
+            themeMeta.content = mpView === 'general' ? '#2b2f36'
                 : (mpView === 'amazon' ? '#ff9900' : '#3483fa');
         }
 

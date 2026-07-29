@@ -22,13 +22,8 @@ const SettingsView = (() => {
 
     function loadIntoForm() {
         const s = window.State.settings;
-        const mp = window.State.marketplace === 'amazon' ? 'amazon' : 'meli';
-        document.querySelectorAll('[data-mp-only]').forEach(el => {
-            el.hidden = el.dataset.mpOnly !== mp;
-        });
-        document.querySelectorAll('[data-mp-field]').forEach(el => {
-            el.hidden = el.dataset.mpField !== mp;
-        });
+        // Visibilidad data-mp-only / data-feature la controla App.refreshMarketplaceChrome
+        // (no pisar aquí: rompe Envíos y el modo General).
 
         // Categorías Amazon en select de Ajustes
         const catSel = document.getElementById('set-amz-cat-default');
