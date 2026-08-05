@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Dashboard — vista única: P&G + Caja + Portafolio + Ranking
+   Dashboard — Progreso · P&G · flujo de caja · Asignación · Portafolio · Ranking
    ========================================================================== */
 
 const DashboardView = (() => {
@@ -16,6 +16,8 @@ const DashboardView = (() => {
         const lotes = window.State.lotes || [];
         const mpLabel = window.State.marketplace === 'amazon' ? 'Amazon' : 'Mercado Libre';
         persistAllocMigrations();
+        // Evita bolsitas fantasma (total > 0 con liberado $0 sin ventas en ledger)
+        try { reconcileAllocFromLedger(allocMpKey()); } catch { /* ignore */ }
 
         if (!lotes.length) {
             const emptyCtx = {
@@ -81,6 +83,7 @@ const DashboardView = (() => {
                             chartType,
                             fromDate: fromResolved.iso,
                             fromPreset: fromResolved.preset,
+                            cashMode: window.State.ui?.dashCashMode === 'vendido' ? 'vendido' : 'cobrado',
                         })}
                     </section>
                     <section class="dash-section">
@@ -197,13 +200,10 @@ const DashboardView = (() => {
             <div class="dash-shell dash-shell-general" id="dash-general-root">
                 <div class="dash-body dash-body-combined gx-body">
                     ${layGeneralExecutive(exec)}
-                    <section class="dash-section gx-block" id="gx-progreso">
-                        <div class="gx-block-head">
-                            <div>
-                                <p class="gx-block-kicker">05</p>
-                                <h2 class="gx-block-title">Progreso</h2>
-                            </div>
-                            <div class="dash-chart-toggles">
+                    <details class="gx-more" id="gx-progreso">
+                        <summary class="gx-more-summary">Progreso (gráficas)</summary>
+                        <div class="gx-more-body">
+                            <div class="dash-chart-toggles" style="margin-bottom:12px">
                                 <div class="dash-seg" role="group" aria-label="Granularidad">
                                     <button type="button" class="dash-seg-btn${chartPeriod === 'weeks' ? ' active' : ''}" data-dash-period="weeks">Semanas</button>
                                     <button type="button" class="dash-seg-btn${chartPeriod === 'months' ? ' active' : ''}" data-dash-period="months">Meses</button>
@@ -216,39 +216,36 @@ const DashboardView = (() => {
                                     <button type="button" class="dash-seg-btn${chartType === 'area' ? ' active' : ''}" data-dash-type="area">Área</button>
                                 </div>
                             </div>
+                            ${layProgreso(lotesAll, {
+                                period: chartPeriod,
+                                range: chartRange,
+                                showEmpty: chartShowEmpty,
+                                chartType,
+                                fromDate: fromResolved.iso,
+                                fromPreset: fromResolved.preset,
+                                cashMode: window.State.ui?.dashCashMode === 'vendido' ? 'vendido' : 'cobrado',
+                            })}
                         </div>
-                        ${layProgreso(lotesAll, {
-                            period: chartPeriod,
-                            range: chartRange,
-                            showEmpty: chartShowEmpty,
-                            chartType,
-                            fromDate: fromResolved.iso,
-                            fromPreset: fromResolved.preset,
-                        })}
-                    </section>
-                    <section class="dash-section gx-block" id="gx-finanzas">
-                        <div class="gx-block-head">
-                            <div>
-                                <p class="gx-block-kicker">06</p>
-                                <h2 class="gx-block-title">Finanzas</h2>
-                            </div>
-                            <p class="gx-block-lead">P&amp;G, caja y portafolio consolidado.</p>
-                        </div>
-                        <div class="gx-fin-stack">
-                            <div>
-                                <h3 class="gx-fin-h">P&amp;G</h3>
-                                ${layPyG(ctx)}
-                            </div>
-                            <div>
-                                <h3 class="gx-fin-h">Caja</h3>
-                                ${layCaja(ctx)}
-                            </div>
-                            <div>
-                                <h3 class="gx-fin-h">Portafolio</h3>
-                                ${layPortafolio(ctx)}
+                    </details>
+                    <details class="gx-more" id="gx-finanzas">
+                        <summary class="gx-more-summary">Finanzas (P&amp;G · caja · portafolio)</summary>
+                        <div class="gx-more-body">
+                            <div class="gx-fin-stack">
+                                <div>
+                                    <h3 class="gx-fin-h">P&amp;G</h3>
+                                    ${layPyG(ctx)}
+                                </div>
+                                <div>
+                                    <h3 class="gx-fin-h">Caja</h3>
+                                    ${layCaja(ctx)}
+                                </div>
+                                <div>
+                                    <h3 class="gx-fin-h">Portafolio</h3>
+                                    ${layPortafolio(ctx)}
+                                </div>
                             </div>
                         </div>
-                    </section>
+                    </details>
                 </div>
             </div>`;
         bind(root);
@@ -270,18 +267,72 @@ const DashboardView = (() => {
         return window.State.settings;
     }
 
+    /** Lote con costo + fees congelados de la venta (o valores actuales). */
+    function loteAtSaleCost(lote, venta) {
+        if (Data.loteForVentaCalc) return Data.loteForVentaCalc(lote, venta);
+        const costo = Data.ventaCostoUnitario
+            ? Data.ventaCostoUnitario(lote, venta)
+            : (() => {
+                const frozen = Number(venta?.costoUnitario);
+                return Number.isFinite(frozen) && frozen >= 0
+                    ? frozen
+                    : Math.max(0, Number(lote?.costo) || 0);
+            })();
+        return { ...lote, costo };
+    }
+
+    /** Fees unitarios (comisión + envío/FBA + retenciones + extras). */
+    function unitFeesFromUtil(u) {
+        if (!u) return 0;
+        return (Number(u.comisionVariable) || 0)
+            + (Number(u.cargoFijo) || 0)
+            + (Number(u.envio) || 0)
+            + (Number(u.almacenamiento) || 0)
+            + (Number(u.varios) || 0)
+            + (Number(u.retIVA) || 0)
+            + (Number(u.retISR) || 0);
+    }
+
+    /**
+     * Fees y COGS a precio real de cada venta (no precio de lista × vendidas).
+     * Legacy sin eventos: usa precio/costo de lista.
+     */
+    function sumFeesAndCogs(lote, settings) {
+        let fees = 0;
+        let costoVendido = 0;
+        const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
+        if (ventas.length) {
+            ventas.forEach(v => {
+                const uds = Math.max(0, Number(v.unidades) || 0);
+                if (!uds) return;
+                const precio = Number(v.precio) || 0;
+                const loteAt = loteAtSaleCost(lote, v);
+                const u = Calc.utilidadAtPrice(loteAt, precio, settings);
+                fees += unitFeesFromUtil(u) * uds;
+                costoVendido += (Number(loteAt.costo) || 0) * uds;
+            });
+            return { fees, costoVendido };
+        }
+        const vendidas = Math.max(0, Number(lote.vendidas) || 0);
+        if (vendidas) {
+            const precio = Number(lote.precio) || 0;
+            const u = Calc.utilidadAtPrice(lote, precio, settings);
+            fees += unitFeesFromUtil(u) * vendidas;
+            costoVendido += (Number(lote.costo) || 0) * vendidas;
+        }
+        return { fees, costoVendido };
+    }
+
     function channelHardMetrics(agg, lotes, isAmazon) {
         let fees = 0;
         let gastoAds = 0;
         let costoVendido = 0;
         let stockUds = 0;
         (agg.rows || []).forEach(({ lote, calc }) => {
-            const v = calc.vendidas || 0;
-            fees += (calc.comisionVariable + calc.cargoFijo + calc.retIVA + calc.retISR) * v;
-            fees += ((Number(calc.envio) || 0)
-                + (Number(calc.almacenamiento) || 0)
-                + (Number(calc.varios) || 0)) * v;
-            costoVendido += (Number(lote.costo) || 0) * v;
+            const settings = settingsForTaggedLote(lote);
+            const sum = sumFeesAndCogs(lote, settings);
+            fees += sum.fees;
+            costoVendido += sum.costoVendido;
             gastoAds += Number(calc.gastoAds) || 0;
             stockUds += Number(calc.inventarioRestante) || 0;
         });
@@ -341,7 +392,7 @@ const DashboardView = (() => {
                     const uds = Math.max(0, Number(v.unidades) || 0);
                     const precio = Number(v.precio) || 0;
                     cashIn += precio * uds;
-                    ganancia += Calc.utilidadAtPrice(lote, precio, settings).utilidad * uds;
+                    ganancia += Calc.utilidadAtPrice(loteAtSaleCost(lote, v), precio, settings).utilidad * uds;
                     unidades += uds;
                 });
                 return;
@@ -364,10 +415,11 @@ const DashboardView = (() => {
         const raw = window.State.ui?.generalGoals && typeof window.State.ui.generalGoals === 'object'
             ? window.State.ui.generalGoals
             : {};
+        const sameMonth = raw.monthKey === monthKey;
         return {
             monthKey,
-            utilidad: Math.max(0, Number(raw.monthKey === monthKey ? raw.utilidad : raw.utilidad) || 0),
-            cashIn: Math.max(0, Number(raw.monthKey === monthKey ? raw.cashIn : raw.cashIn) || 0),
+            utilidad: Math.max(0, Number(sameMonth ? raw.utilidad : 0) || 0),
+            cashIn: Math.max(0, Number(sameMonth ? raw.cashIn : 0) || 0),
         };
     }
 
@@ -803,7 +855,7 @@ const DashboardView = (() => {
 
     function layGeneralExecutive(exec) {
         const {
-            nMeli, nAmz, utilPot, aggCombined, hardMeli, hardAmz,
+            nMeli, nAmz, aggCombined, hardMeli, hardAmz,
             monthStats, goals, split, nextBuy, agenda, alerts, allocUnified,
         } = exec;
         const trapped = aggCombined.valorInventario || 0;
@@ -814,31 +866,27 @@ const DashboardView = (() => {
         const healthUtil = goalUtil > 0
             ? (monthStats.ganancia >= goalUtil ? 'ok' : (monthStats.projGain >= goalUtil ? 'warn' : 'bad'))
             : (monthStats.ganancia >= 0 ? 'ok' : 'bad');
-        const capital = aggCombined.capitalDesplegado || 0;
-        const roiBiz = capital > 0 ? (aggCombined.gananciaRealizada || 0) / capital : 0;
         const reinversion = allocUnified.buckets.reinversion || 0;
         const alertN = alerts.nEscLow + alerts.nLiq + alerts.nAgot + alerts.nAds;
-        const paceLabel = `Día ${monthStats.daysElapsed} de ${monthStats.daysInMonth}`;
         const monthCap = monthStats.monthLabel
             ? monthStats.monthLabel.charAt(0).toUpperCase() + monthStats.monthLabel.slice(1)
             : '';
         const healthLabel = healthUtil === 'ok' ? 'En ritmo' : (healthUtil === 'warn' ? 'Ajustar ritmo' : 'Fuera de meta');
+        const moreOpen = window.State.ui?.gxMoreOpen === true;
+        const checklist = readDailyChecklist();
 
         return `
-            <div class="gx-ticker-wrap" id="gx-ticker">
-                ${layDealsTicker()}
-            </div>
             <section class="dash-section dash-exec gx-exec" id="gx-pulso">
-                <div class="gx-hero">
+                <div class="gx-hero gx-hero-compact">
                     <div class="gx-hero-copy">
                         <p class="gx-brand">Ventas</p>
-                        <p class="gx-kicker">Consola ejecutiva · Meli + Amazon</p>
-                        <h2 class="gx-title">El pulso de tu capital</h2>
-                        <p class="gx-sub">${esc(monthCap)} · ${esc(paceLabel)} · ${nMeli + nAmz} productos activos</p>
+                        <h2 class="gx-title">Hoy</h2>
+                        <p class="gx-sub">${esc(monthCap)} · día ${monthStats.daysElapsed}/${monthStats.daysInMonth} · ${nMeli + nAmz} productos</p>
                         <div class="gx-hero-ctas">
-                            <button type="button" class="btn primary gx-btn-solid" data-general-snapshot>Exportar cierre</button>
+                            <button type="button" class="btn primary gx-btn-solid" data-lote-new>Nuevo lote</button>
                             <button type="button" class="btn gx-btn-ghost" data-dash-goto-mp="meli">Mercado Libre</button>
                             <button type="button" class="btn gx-btn-ghost" data-dash-goto-mp="amazon">Amazon</button>
+                            <button type="button" class="btn gx-btn-ghost" data-general-snapshot>Exportar cierre</button>
                         </div>
                     </div>
                     <div class="gx-hero-metric tone-${healthUtil}">
@@ -848,39 +896,24 @@ const DashboardView = (() => {
                             <span class="gx-chip tone-${healthUtil}">${esc(healthLabel)}</span>
                             <span>${goalUtil > 0 ? `${fmtGoalPct(pctUtil)} de meta` : 'Sin meta'}</span>
                         </div>
-                        <div class="gx-hero-metric-foot">Proyección de cierre · ${Calc.fmtMXN(monthStats.projGain)}</div>
                     </div>
                 </div>
 
-                <div class="gx-scoreboard" id="dash-pulse">
+                <div class="gx-scoreboard gx-scoreboard-3" id="dash-pulse">
                     ${layScoreMetric({
                         label: 'Cash in del mes',
                         value: Calc.fmtMXN(monthStats.cashIn),
                         tone: 'neutral',
                         hint: goalCash > 0 ? `${fmtGoalPct(pctCash)} de meta` : `${monthStats.unidades} uds`,
-                        foot: `Proyección ${Calc.fmtMXN(monthStats.projCash)}`,
+                        foot: `Proy. ${Calc.fmtMXN(monthStats.projCash)}`,
                         progress: goalCash > 0 ? Math.min(1, Math.max(0, pctCash)) : null,
                     })}
                     ${layScoreMetric({
-                        label: 'Capital en inventario',
+                        label: 'Capital atrapado',
                         value: Calc.fmtMXN(trapped),
                         tone: trapped > 0 ? 'warn' : 'ok',
-                        hint: 'Stock al costo',
-                        foot: `Potencial ${Calc.fmtMXN(utilPot)}`,
-                    })}
-                    ${layScoreMetric({
-                        label: 'Disponible para comprar',
-                        value: Calc.fmtMXN(reinversion),
-                        tone: reinversion > 0 ? 'ok' : 'neutral',
-                        hint: 'Reinversión',
-                        foot: `Bolsitas ${Calc.fmtMXN(allocUnified.total)}`,
-                    })}
-                    ${layScoreMetric({
-                        label: 'ROI del capital',
-                        value: Calc.fmtPct(roiBiz),
-                        tone: roiBiz >= 0.15 ? 'ok' : (roiBiz >= 0 ? 'neutral' : 'bad'),
-                        hint: 'Ganancia / capital',
-                        foot: Calc.fmtMXN(capital),
+                        hint: 'Inventario al costo',
+                        foot: `Disponible ${Calc.fmtMXN(reinversion)}`,
                     })}
                     ${layScoreMetric({
                         label: 'Atención',
@@ -892,69 +925,45 @@ const DashboardView = (() => {
                 </div>
             </section>
 
-            <section class="dash-section gx-block" id="gx-metas">
+            <section class="dash-section gx-block" id="gx-checklist">
                 <div class="gx-block-head">
                     <div>
                         <p class="gx-block-kicker">01</p>
-                        <h2 class="gx-block-title">Metas del mes</h2>
+                        <h2 class="gx-block-title">Checklist · 3 minutos</h2>
                     </div>
-                    <p class="gx-block-lead">Define el objetivo. El pulso y la proyección siguen el ritmo.</p>
+                    <p class="gx-block-lead">Ventas · stock crítico · una acción. Listo y listo.</p>
                 </div>
-                <div class="gx-goals">
-                    <div class="gx-goals-main">
-                        <div class="gx-goals-fields">
-                            <label class="gx-field">
-                                <span>Meta utilidad (MXN)</span>
-                                <input type="number" min="0" step="100" data-goal-utilidad value="${goalUtil || ''}" placeholder="0">
-                            </label>
-                            <label class="gx-field">
-                                <span>Meta cash in (MXN)</span>
-                                <input type="number" min="0" step="100" data-goal-cash value="${goalCash || ''}" placeholder="0">
-                            </label>
-                            <button type="button" class="btn primary gx-btn-solid" data-goal-save>Guardar metas</button>
-                        </div>
-                    </div>
-                    <div class="gx-goals-pace">
-                        ${layGoalBar('Utilidad', monthStats.ganancia, goalUtil, monthStats.projGain)}
-                        ${layGoalBar('Cash in', monthStats.cashIn, goalCash, monthStats.projCash)}
-                    </div>
-                </div>
-            </section>
-
-            <section class="dash-section gx-block" id="gx-canales">
-                <div class="gx-block-head">
-                    <div>
-                        <p class="gx-block-kicker">02</p>
-                        <h2 class="gx-block-title">Desempeño por canal</h2>
-                    </div>
-                    <p class="gx-block-lead">${esc(split.line)}</p>
-                </div>
-                <div class="gx-channels">
-                    <div class="gx-alloc-suggest" aria-label="Asignación sugerida de capital">
-                        <div class="gx-alloc-copy">
-                            <span class="gx-alloc-title">Próximo peso sugerido</span>
-                            <span class="muted small">Según ROI, rotación y carga de fees</span>
-                        </div>
-                        <div class="gx-alloc-track">
-                            <span class="gx-alloc-meli" style="width:${split.pctMeli}%"></span>
-                            <span class="gx-alloc-amz" style="width:${split.pctAmz}%"></span>
-                        </div>
-                        <div class="gx-alloc-meta">
-                            <span><i class="gx-dot meli"></i> Meli ${split.pctMeli}%</span>
-                            <span><i class="gx-dot amz"></i> Amazon ${split.pctAmz}%</span>
-                        </div>
-                    </div>
-                    ${layChannelMatrix(exec.aggMeli, exec.aggAmz, nMeli, nAmz, hardMeli, hardAmz)}
-                </div>
+                <ul class="gx-daily-check">
+                    <li class="${checklist.ventas ? 'is-done' : ''}">
+                        <label>
+                            <input type="checkbox" data-daily-check="ventas" ${checklist.ventas ? 'checked' : ''}>
+                            <span><strong>Ventas nuevas</strong><small>Registra o importa lo de hoy</small></span>
+                        </label>
+                        <button type="button" class="btn btn-sm" data-dash-goto-mp="meli">Ir a catálogo</button>
+                    </li>
+                    <li class="${checklist.stock ? 'is-done' : ''}">
+                        <label>
+                            <input type="checkbox" data-daily-check="stock" ${checklist.stock ? 'checked' : ''}>
+                            <span><strong>Stock crítico</strong><small>${alerts.nEscLow || 0} ESCALAR bajos · ${alerts.nAgot || 0} agotados</small></span>
+                        </label>
+                        <button type="button" class="btn btn-sm" data-goto-insights>Insights</button>
+                    </li>
+                    <li class="${checklist.agenda ? 'is-done' : ''}">
+                        <label>
+                            <input type="checkbox" data-daily-check="agenda" ${checklist.agenda ? 'checked' : ''}>
+                            <span><strong>1 acción de Agenda</strong><small>${esc(checklist.agendaHint || 'Marca un pendiente abajo')}</small></span>
+                        </label>
+                    </li>
+                </ul>
             </section>
 
             <section class="dash-section gx-block" id="gx-acciones">
                 <div class="gx-block-head">
                     <div>
-                        <p class="gx-block-kicker">03</p>
-                        <h2 class="gx-block-title">Acciones</h2>
+                        <p class="gx-block-kicker">02</p>
+                        <h2 class="gx-block-title">Agenda y prioridades</h2>
                     </div>
-                    <p class="gx-block-lead">Prioridades de capital y checklist del día.</p>
+                    <p class="gx-block-lead">Qué hacer hoy con el capital.</p>
                 </div>
                 <div class="gx-actions dash-split-2">
                     <div class="dash-panel gx-panel">
@@ -995,17 +1004,104 @@ const DashboardView = (() => {
                 </div>
             </section>
 
-            <section class="dash-section gx-block" id="gx-capital">
+            <section class="dash-section gx-block" id="gx-invmap">
+                <div class="gx-block-head">
+                    <div>
+                        <p class="gx-block-kicker">03</p>
+                        <h2 class="gx-block-title">Sano vs flojo</h2>
+                    </div>
+                    <p class="gx-block-lead">Cuánto capital está en margen sano (≥20%) vs flojo.</p>
+                </div>
+                ${layInvMarginMap(aggCombined.rows || [])}
+            </section>
+
+            <section class="dash-section gx-block" id="gx-metas">
                 <div class="gx-block-head">
                     <div>
                         <p class="gx-block-kicker">04</p>
-                        <h2 class="gx-block-title">Capital unificado</h2>
+                        <h2 class="gx-block-title">Metas del mes</h2>
                     </div>
-                    <p class="gx-block-lead">Bolsitas Meli + Amazon. Edita cada canal en su catálogo.</p>
+                    <p class="gx-block-lead">Objetivo simple. El pulso sigue el ritmo.</p>
                 </div>
-                ${layCapitalUnificado(allocUnified)}
+                <div class="gx-goals">
+                    <div class="gx-goals-main">
+                        <div class="gx-goals-fields">
+                            <label class="gx-field">
+                                <span>Meta utilidad (MXN)</span>
+                                <input type="number" min="0" step="100" data-goal-utilidad value="${goalUtil || ''}" placeholder="0">
+                            </label>
+                            <label class="gx-field">
+                                <span>Meta cash in (MXN)</span>
+                                <input type="number" min="0" step="100" data-goal-cash value="${goalCash || ''}" placeholder="0">
+                            </label>
+                            <button type="button" class="btn primary gx-btn-solid" data-goal-save>Guardar metas</button>
+                        </div>
+                    </div>
+                    <div class="gx-goals-pace">
+                        ${layGoalBar('Utilidad', monthStats.ganancia, goalUtil, monthStats.projGain)}
+                        ${layGoalBar('Cash in', monthStats.cashIn, goalCash, monthStats.projCash)}
+                    </div>
+                </div>
             </section>
+
+            <details class="gx-more" id="gx-canales" data-gx-more-persist ${moreOpen ? 'open' : ''}>
+                <summary class="gx-more-summary">Más detalle · canales, capital y ofertas Walmart/Costco</summary>
+                <div class="gx-more-body">
+                    <div class="gx-alloc-suggest" aria-label="Asignación sugerida de capital" style="margin-bottom:16px">
+                        <div class="gx-alloc-copy">
+                            <span class="gx-alloc-title">Peso sugerido</span>
+                            <span class="muted small">${esc(split.line)}</span>
+                        </div>
+                        <div class="gx-alloc-track">
+                            <span class="gx-alloc-meli" style="width:${split.pctMeli}%"></span>
+                            <span class="gx-alloc-amz" style="width:${split.pctAmz}%"></span>
+                        </div>
+                        <div class="gx-alloc-meta">
+                            <span><i class="gx-dot meli"></i> Meli ${split.pctMeli}%</span>
+                            <span><i class="gx-dot amz"></i> Amazon ${split.pctAmz}%</span>
+                        </div>
+                    </div>
+                    ${layChannelMatrix(exec.aggMeli, exec.aggAmz, nMeli, nAmz, hardMeli, hardAmz)}
+                    <div style="margin-top:18px">${layCapitalUnificado(allocUnified)}</div>
+                    <div class="gx-ticker-wrap" id="gx-ticker" style="margin-top:18px">
+                        ${layDealsTicker()}
+                    </div>
+                </div>
+            </details>
         `;
+    }
+
+    function readDailyChecklist() {
+        const key = agendaDayKey();
+        const store = window.State.ui?.dailyChecklist && typeof window.State.ui.dailyChecklist === 'object'
+            ? window.State.ui.dailyChecklist
+            : {};
+        const day = store[key] && typeof store[key] === 'object' ? store[key] : {};
+        const agenda = buildAgendaForChecklistHint();
+        return {
+            ventas: !!day.ventas,
+            stock: !!day.stock,
+            agenda: !!day.agenda,
+            agendaHint: agenda,
+        };
+    }
+
+    function buildAgendaForChecklistHint() {
+        try {
+            const { set } = readAgendaDone();
+            // hint from last render's agenda is rebuilt in bind; keep short
+            return set.size ? 'Marca un pendiente de la agenda' : 'Revisa prioridades o crea una acción';
+        } catch {
+            return 'Una acción concreta';
+        }
+    }
+
+    function saveDailyChecklist(patch) {
+        const key = agendaDayKey();
+        const store = { ...(window.State.ui?.dailyChecklist || {}) };
+        store[key] = { ...(store[key] || {}), ...patch };
+        window.State.ui = { ...window.State.ui, dailyChecklist: store };
+        window.State.saveUI();
     }
 
     function fmtGoalPct(ratio) {
@@ -1172,14 +1268,8 @@ const DashboardView = (() => {
             el.addEventListener('click', () => {
                 const mp = el.dataset.mp;
                 const loteId = el.dataset.lote;
-                if (loteId && window.LotesView?.selectAndGo) {
-                    if (mp && (mp === 'meli' || mp === 'amazon') && mp !== window.State.marketplace) {
-                        window.State.ui = { ...window.State.ui, mpView: mp };
-                        window.State.saveUI();
-                        window.State.switchMarketplace(mp);
-                        window.App?.refreshMarketplaceChrome?.();
-                    }
-                    LotesView.selectAndGo(loteId);
+                if (loteId) {
+                    openDashLote(loteId, mp);
                     return;
                 }
                 if (mp) {
@@ -1191,7 +1281,108 @@ const DashboardView = (() => {
         root.querySelectorAll('[data-general-snapshot]').forEach(btn => {
             btn.addEventListener('click', () => openGeneralSnapshot(exec));
         });
+        root.querySelectorAll('[data-daily-check]').forEach(input => {
+            input.addEventListener('change', () => {
+                const key = input.dataset.dailyCheck;
+                if (!key) return;
+                saveDailyChecklist({ [key]: !!input.checked });
+                input.closest('li')?.classList.toggle('is-done', input.checked);
+            });
+        });
+        root.querySelectorAll('[data-lote-new]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                window.LotesView?.openModal?.(null);
+            });
+        });
+        root.querySelectorAll('[data-goto-insights]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                window.App?.switchTab?.('insights');
+            });
+        });
+        root.querySelectorAll('[data-goto-caja]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const sub = btn.getAttribute('data-goto-caja') || 'cobrar';
+                window.CajaView?.open?.(sub);
+            });
+        });
+        root.querySelectorAll('details[data-gx-more-persist]').forEach(el => {
+            el.addEventListener('toggle', () => {
+                window.State.ui = { ...window.State.ui, gxMoreOpen: el.open };
+                window.State.saveUI();
+            });
+        });
         bindDealsTicker(root);
+    }
+
+    /** Inventario atrapado: sano (≥20% margen) vs flojo. */
+    function buildInvCapitalStats(rows) {
+        const total = { inv: 0, good: 0, weak: 0, margenW: 0 };
+        (rows || []).forEach(r => {
+            const inv = Math.max(0, Number(r.calc?.valorInventario) || 0);
+            const rest = Math.max(0, Number(r.calc?.inventarioRestante) || 0);
+            if (rest <= 0 || inv <= 0.009) return;
+            const margen = Number(r.calc?.margen) || 0;
+            total.inv += inv;
+            total.margenW += margen * inv;
+            if (margen >= 0.2) total.good += inv;
+            else total.weak += inv;
+        });
+        total.margen = total.inv > 0 ? total.margenW / total.inv : 0;
+        delete total.margenW;
+        return total;
+    }
+
+    function layInvMarginMap(rows) {
+        const stats = buildInvCapitalStats(rows);
+        const trapped = stats.inv;
+
+        if (trapped <= 0.009) {
+            return `
+                <div class="gx-invmap is-empty">
+                    <div class="gx-invmap-empty">
+                        <strong>Sin inventario con costo</strong>
+                        <p class="muted">Cuando haya stock valuado, aquí ves sano vs flojo.</p>
+                    </div>
+                </div>`;
+        }
+
+        return `
+            <div class="gx-invmap" data-invmap>
+                <div class="gx-invmap-toolbar">
+                    <div class="gx-invmap-insights">
+                        <span class="gx-invmap-pill">${Calc.fmtMXN(trapped)} atrapado</span>
+                        <span class="gx-invmap-pill">Margen ponderado ${Calc.fmtPct(stats.margen)}</span>
+                    </div>
+                </div>
+                <div class="gx-invmap-body">${layInvMargenSplit(stats)}</div>
+            </div>`;
+    }
+
+    function layInvMargenSplit(stats) {
+        const total = stats.inv || 1;
+        const good = stats.good;
+        const weak = stats.weak;
+        const wG = (good / total) * 100;
+        const wW = (weak / total) * 100;
+        return `
+            <div class="gx-invsplit">
+                <div class="gx-invsplit-bar" role="img" aria-label="Inventario sano versus flojo">
+                    <span class="good" style="width:${wG}%"></span>
+                    <span class="weak" style="width:${wW}%"></span>
+                </div>
+                <div class="gx-invsplit-grid">
+                    <div class="gx-invsplit-card is-good">
+                        <div class="k">Margen ≥ 20%</div>
+                        <div class="v">${Calc.fmtMXN(good)}</div>
+                        <div class="s">${Math.round(wG)}% del capital atrapado</div>
+                    </div>
+                    <div class="gx-invsplit-card is-weak">
+                        <div class="k">Margen &lt; 20%</div>
+                        <div class="v">${Calc.fmtMXN(weak)}</div>
+                        <div class="s">${Math.round(wW)}% del capital atrapado</div>
+                    </div>
+                </div>
+            </div>`;
     }
 
     function openGeneralSnapshot(exec) {
@@ -1365,6 +1556,11 @@ const DashboardView = (() => {
         return fmtDMY(d);
     }
 
+    /** Venta ya repartida en bolsitas (Caja). No cuenta cobrado-sin-asignar ni legacy suelto. */
+    function ventaIsCobrado(v) {
+        return !!(v && Data.hasAsignacion?.(v));
+    }
+
     function layProgreso(lotes, opts = {}) {
         const period = opts.period === 'years' ? 'years' : opts.period === 'weeks' ? 'weeks' : 'months';
         const range = [3, 6, 12, 24].includes(Number(opts.range)) ? Number(opts.range) : 12;
@@ -1372,12 +1568,19 @@ const DashboardView = (() => {
         const chartType = ['hero', 'bars', 'lines', 'area'].includes(opts.chartType) ? opts.chartType : 'hero';
         const fromDate = opts.fromDate || '';
         const fromPreset = opts.fromPreset || '';
-        const series = buildProgressSeries(lotes, period, range, fromDate);
+        const cashMode = opts.cashMode === 'vendido' ? 'vendido' : 'cobrado';
+        const seriesVendido = buildProgressSeries(lotes, period, range, fromDate, 'vendido');
+        const seriesCobrado = buildProgressSeries(lotes, period, range, fromDate, 'cobrado');
+        const series = cashMode === 'vendido' ? seriesVendido : seriesCobrado;
         const visible = showEmpty ? series : series.filter(b => b.cashIn > 0 || b.ganancia > 0 || b.unidades > 0);
         const chartSeries = visible.length ? visible : series.slice(-Math.min(range, series.length || range));
-        const totalCash = series.reduce((s, b) => s + b.cashIn, 0);
-        const totalGain = series.reduce((s, b) => s + b.ganancia, 0);
-        const totalUds = series.reduce((s, b) => s + b.unidades, 0);
+        const sum = (arr, key) => arr.reduce((s, b) => s + (b[key] || 0), 0);
+        const totalVendido = sum(seriesVendido, 'cashIn');
+        const totalCobrado = sum(seriesCobrado, 'cashIn');
+        const totalCash = cashMode === 'vendido' ? totalVendido : totalCobrado;
+        const totalGain = sum(series, 'ganancia');
+        const totalUds = sum(series, 'unidades');
+        const porCobrarAmt = round2(totalVendido - totalCobrado);
         const emptyHidden = !showEmpty && series.some(b => !(b.cashIn > 0 || b.ganancia > 0 || b.unidades > 0));
         const mpView = window.State.ui?.mpView;
         const mpLabel = mpView === 'general'
@@ -1392,12 +1595,39 @@ const DashboardView = (() => {
             : (period === 'years'
                 ? 'Últimos años con actividad'
                 : `Últimos ${range} ${period === 'weeks' ? 'semanas' : 'meses'}`);
+        const modeHint = cashMode === 'cobrado'
+            ? 'Solo marcado Cobrado en Caja'
+            : 'Todas las ventas registradas';
 
         return `
+            <div class="dash-prog-mode">
+                <div class="dash-seg" role="group" aria-label="Vendido o cobrado">
+                    <button type="button" class="dash-seg-btn${cashMode === 'cobrado' ? ' active' : ''}" data-dash-cash="cobrado">Cobrado</button>
+                    <button type="button" class="dash-seg-btn${cashMode === 'vendido' ? ' active' : ''}" data-dash-cash="vendido">Vendido</button>
+                </div>
+                <span class="muted small">${esc(modeHint)}</span>
+            </div>
             <div class="dash-grid-kpi dash-grid-kpi-3">
-                ${kpi('Cash in · periodo', Calc.fmtMXN(totalCash), '', rangeHint)}
-                ${kpi('Ganancia · periodo', Calc.fmtMXN(totalGain), tone(totalGain), 'Tras fees y costo')}
-                ${kpi('Unidades vendidas', String(totalUds), '', 'En el rango')}
+                ${kpi(
+                    'Cobrado · periodo',
+                    Calc.fmtMXN(totalCobrado),
+                    cashMode === 'cobrado' ? 'pos' : '',
+                    porCobrarAmt > 0.009
+                        ? `Por cobrar ${Calc.fmtMXN(porCobrarAmt)}`
+                        : rangeHint,
+                )}
+                ${kpi(
+                    'Vendido · periodo',
+                    Calc.fmtMXN(totalVendido),
+                    cashMode === 'vendido' ? 'pos' : '',
+                    rangeHint,
+                )}
+                ${kpi(
+                    cashMode === 'cobrado' ? 'Ganancia cobrada' : 'Ganancia vendida',
+                    Calc.fmtMXN(totalGain),
+                    tone(totalGain),
+                    `${totalUds} uds · ${esc(modeHint)}`,
+                )}
             </div>
             <div class="dash-panel dash-chart-panel">
                 <div class="dash-chart-filters">
@@ -1421,18 +1651,25 @@ const DashboardView = (() => {
                         ${showEmpty ? 'Ocultar vacíos' : 'Mostrar vacíos'}
                     </button>
                 </div>
-                ${renderProgressChart(chartType, chartSeries, { totalCash, totalGain, totalUds, period })}
+                ${renderProgressChart(chartType, chartSeries, {
+                    totalCash,
+                    totalGain,
+                    totalUds,
+                    period,
+                    cashMode,
+                })}
                 <p class="muted small dash-chart-note">
                     ${emptyHidden
-                        ? 'Periodos sin ventas ocultos. Activa «Mostrar vacíos» para ver el calendario completo.'
-                        : `Filtra por fecha exacta o usa Mes/Año actual · ${esc(mpLabel)}.`}
+                        ? 'Periodos vacíos ocultos. Activa «Mostrar vacíos» para ver el calendario completo.'
+                        : `Gráfica = ${cashMode === 'cobrado' ? 'Cobrado' : 'Vendido'} · ${esc(mpLabel)}.`}
                 </p>
             </div>
         `;
     }
 
-    function buildProgressSeries(lotes, period, range = 12, fromISO = '') {
+    function buildProgressSeries(lotes, period, range = 12, fromISO = '', cashMode = 'cobrado') {
         const fromDate = parseISODate(fromISO);
+        const mode = cashMode === 'vendido' ? 'vendido' : 'cobrado';
         const map = new Map();
         (lotes || []).forEach(lote => {
             const settings = settingsForTaggedLote(lote);
@@ -1440,7 +1677,11 @@ const DashboardView = (() => {
 
             if (ventas.length) {
                 ventas.forEach(v => {
-                    const d = parseSaleDate(v.fecha);
+                    if (mode === 'cobrado' && !ventaIsCobrado(v)) return;
+                    // Cobrado: fecha de cobro (cash-basis); Vendido: fecha de venta
+                    const d = mode === 'cobrado'
+                        ? (parseSaleDate(v.cobradoAt) || parseSaleDate(v.fecha))
+                        : parseSaleDate(v.fecha);
                     if (!d) return;
                     if (fromDate && d < fromDate) return;
                     const key = periodKey(d, period);
@@ -1448,7 +1689,8 @@ const DashboardView = (() => {
                     const b = map.get(key);
                     const uds = Math.max(0, Number(v.unidades) || 0);
                     const precio = Number(v.precio) || 0;
-                    const u = Calc.utilidadAtPrice(lote, precio, settings).utilidad;
+                    const loteAt = loteAtSaleCost(lote, v);
+                    const u = Calc.utilidadAtPrice(loteAt, precio, settings).utilidad;
                     b.cashIn += precio * uds;
                     b.ganancia += u * uds;
                     b.unidades += uds;
@@ -1457,7 +1699,7 @@ const DashboardView = (() => {
                 return;
             }
 
-            // Legacy: solo contador vendidas (sin eventos con fecha)
+            // Legacy sin eventos: cuenta en ambos modos (historial viejo = ya cobrado)
             const vendidas = Math.max(0, Number(lote.vendidas) || 0);
             if (!vendidas) return;
             const d = parseSaleDate(lote.fecha) || new Date();
@@ -1645,13 +1887,13 @@ const DashboardView = (() => {
                     <div class="dash-hero-value ${tone(ctx.totalGain)}">${Calc.fmtMXN(ctx.totalGain || 0)}</div>
                     ${deltaHtml}
                     <div class="dash-hero-sub muted">
-                        Cash in ${Calc.fmtMXN(ctx.totalCash || 0)} · ${ctx.totalUds || 0} uds
+                        ${ctx.cashMode === 'vendido' ? 'Vendido' : 'Cobrado'} ${Calc.fmtMXN(ctx.totalCash || 0)} · ${ctx.totalUds || 0} uds
                         · Último con datos: ${esc(cur.b.tip || cur.b.label || '—')}
                     </div>
                 </div>
                 <div class="dash-hero-spark" data-focus-index="${cur.i}">
                     ${spark}
-                    ${chartLegendAndDetail()}
+                    ${chartLegendAndDetail(ctx)}
                 </div>
             </div>`;
     }
@@ -1665,7 +1907,7 @@ const DashboardView = (() => {
             <div class="dash-chart-plain" data-focus-index="${focusIndex}">
                 ${deltaStrip(buckets, ctx)}
                 ${progressSpark(buckets, { focusIndex, areaMode: opts.areaMode || 'none' })}
-                ${chartLegendAndDetail()}
+                ${chartLegendAndDetail(ctx)}
             </div>`;
     }
 
@@ -1678,7 +1920,7 @@ const DashboardView = (() => {
         return `
             <div class="dash-chart-plain" data-focus-index="${focusIndex}">
                 ${deltaStrip(buckets, ctx)}
-                <div class="dash-progress-chart" role="img" aria-label="Barras cash y ganancia">
+                <div class="dash-progress-chart" role="img" aria-label="Barras ${ctx.cashMode === 'vendido' ? 'vendido' : 'cobrado'} y ganancia">
                     <div class="dash-progress-y">
                         <span>${shortMoney(maxV)}</span>
                         <span>${shortMoney(maxV / 2)}</span>
@@ -1710,7 +1952,7 @@ const DashboardView = (() => {
                         </div>
                     </div>
                 </div>
-                ${chartLegendAndDetail()}
+                ${chartLegendAndDetail(ctx)}
             </div>`;
     }
 
@@ -1731,15 +1973,16 @@ const DashboardView = (() => {
         const periodWord = ctx.period === 'weeks' ? 'semana' : ctx.period === 'years' ? 'año' : 'periodo';
         return `<div class="dash-delta-strip">
             <span class="dash-hero-delta ${tone(deltaGain)}">${deltaGain >= 0 ? '▲' : '▼'} ${Math.abs(deltaPct).toFixed(0)}% vs ${esc(periodWord)} anterior</span>
-            <span class="muted small">Total ganancia ${Calc.fmtMXN(ctx.totalGain || 0)} · Cash ${Calc.fmtMXN(ctx.totalCash || 0)}</span>
+            <span class="muted small">Total ganancia ${Calc.fmtMXN(ctx.totalGain || 0)} · ${ctx.cashMode === 'vendido' ? 'Vendido' : 'Cobrado'} ${Calc.fmtMXN(ctx.totalCash || 0)}</span>
         </div>`;
     }
 
-    function chartLegendAndDetail() {
+    function chartLegendAndDetail(ctx = {}) {
+        const cashLabel = ctx.cashMode === 'vendido' ? 'Vendido' : 'Cobrado';
         return `
             <div class="dash-chart-legend">
                 <span class="leg-gain">Ganancia</span>
-                <span class="leg-cash">Cash in</span>
+                <span class="leg-cash">${cashLabel}</span>
             </div>
             <div class="dash-spark-detail muted small" data-dash-spark-detail>
                 Pasa el cursor o toca un punto del gráfico.
@@ -1800,7 +2043,7 @@ const DashboardView = (() => {
         }).join('');
 
         return `
-            <div class="dash-progress-chart dash-progress-line" role="img" aria-label="Tendencia de ganancia y cash in">
+            <div class="dash-progress-chart dash-progress-line" role="img" aria-label="Tendencia de ganancia y cobrado/vendido">
                 <div class="dash-progress-y">
                     <span>${shortMoney(maxV)}</span>
                     <span>${shortMoney(maxV / 2)}</span>
@@ -1828,7 +2071,30 @@ const DashboardView = (() => {
         const gain = Number(el.dataset.gain) || 0;
         const uds = Number(el.dataset.uds) || 0;
         const pedidos = Number(el.dataset.pedidos) || 0;
-        return `<strong>${esc(tip)}</strong> · Cash ${Calc.fmtMXN(cash)} · Ganancia <span class="${tone(gain)}">${Calc.fmtMXN(gain)}</span> · ${uds} uds · ${pedidos} venta${pedidos === 1 ? '' : 's'}`;
+        const cashLabel = window.State.ui?.dashCashMode === 'vendido' ? 'Vendido' : 'Cobrado';
+        return `<strong>${esc(tip)}</strong> · ${cashLabel} ${Calc.fmtMXN(cash)} · Ganancia <span class="${tone(gain)}">${Calc.fmtMXN(gain)}</span> · ${uds} uds · ${pedidos} venta${pedidos === 1 ? '' : 's'}`;
+    }
+
+    /** Abre un lote cambiando marketplace con chrome completo (no solo switchMarketplace). */
+    function openDashLote(id, mp) {
+        if (!id || !window.LotesView?.selectAndGo) return;
+        if (mp && (mp === 'meli' || mp === 'amazon')) {
+            const curView = Data.normalizeMpView?.(
+                window.State.ui?.mpView === 'general'
+                    ? 'general'
+                    : (window.State.ui?.mpView || window.State.marketplace)
+            ) || window.State.marketplace;
+            if (mp !== curView || mp !== window.State.marketplace) {
+                if (window.App?.applyMarketplaceView) window.App.applyMarketplaceView(mp, { toast: false });
+                else {
+                    window.State.ui = { ...window.State.ui, mpView: mp };
+                    window.State.saveUI();
+                    window.State.switchMarketplace(mp);
+                    window.App?.refreshMarketplaceChrome?.();
+                }
+            }
+        }
+        LotesView.selectAndGo(id);
     }
 
     function shortMoney(n) {
@@ -1846,13 +2112,9 @@ const DashboardView = (() => {
         let costoVendido = 0;
         let gastoAds = 0;
         rows.forEach(({ lote, calc }) => {
-            const v = calc.vendidas;
-            fees += (calc.comisionVariable + calc.cargoFijo + calc.retIVA + calc.retISR) * v;
-            // Envío / FBA / varios siempre entran en fees del canal (Meli y Amazon)
-            fees += ((Number(calc.envio) || 0)
-                + (Number(calc.almacenamiento) || 0)
-                + (Number(calc.varios) || 0)) * v;
-            costoVendido += (Number(lote.costo) || 0) * v;
+            const sum = sumFeesAndCogs(lote, settingsForTaggedLote(lote));
+            fees += sum.fees;
+            costoVendido += sum.costoVendido;
             gastoAds += calc.gastoAds;
         });
         return { agg, rows, fees, costoVendido, gastoAds, isAmazon, isGeneral };
@@ -1871,8 +2133,8 @@ const DashboardView = (() => {
             { label: '− Costo de lo vendido', value: -costoVendido },
             { label: '= Utilidad bruta est.', value: bruto, bold: true },
             { label: feeLabel, value: -fees },
-            { label: '− Gasto Ads', value: -gastoAds },
             { label: '= Ganancia realizada', value: neto, bold: true },
+            { label: 'Gasto Ads (referencia, no restado arriba)', value: -gastoAds },
         ];
         return `
             <div class="dash-split-2">
@@ -1889,17 +2151,34 @@ const DashboardView = (() => {
                         </tbody>
                     </table>
                     <p class="muted small" style="margin-top:12px">
-                        Fees estimados con precio de venta; Ads es el gasto registrado por lote.
+                        Fees y costo al precio real de cada venta. Ganancia realizada = utilidad por venta. Ads del lote aparte.
                     </p>
                 </div>
                 <div class="dash-panel">
                     <h3>Composición del cash in</h3>
-                    ${stackBars([
-                        { label: 'Costo vendido', value: costoVendido, cls: 'c-cost' },
-                        { label: 'Fees est.', value: Math.max(0, fees), cls: 'c-fee' },
-                        { label: 'Ads', value: gastoAds, cls: 'c-ads' },
-                        { label: 'Ganancia', value: Math.max(0, neto), cls: 'c-gain' },
-                    ], agg.cashIn)}
+                    ${(() => {
+                        const feePart = Math.max(0, fees);
+                        const parts = neto >= 0
+                            ? [
+                                { label: 'Costo vendido', value: costoVendido, cls: 'c-cost' },
+                                { label: 'Fees est.', value: feePart, cls: 'c-fee' },
+                                { label: 'Ganancia', value: Math.max(0, neto), cls: 'c-gain' },
+                            ]
+                            : [
+                                { label: 'Costo vendido', value: costoVendido, cls: 'c-cost' },
+                                { label: 'Fees est.', value: feePart, cls: 'c-fee' },
+                            ];
+                        const total = neto >= 0
+                            ? Math.max(agg.cashIn, 1)
+                            : Math.max(costoVendido + feePart, 1);
+                        return stackBars(parts, total);
+                    })()}
+                    ${neto < -0.009
+                        ? `<p class="muted small" style="margin-top:8px">Pérdida <span class="neg">${Calc.fmtMXN(neto)}</span> (fees + costo &gt; ingresos).</p>`
+                        : ''}
+                    <p class="muted small" style="margin-top:10px">
+                        Ads del lote (referencia, fuera del cash in): ${Calc.fmtMXN(gastoAds)}
+                    </p>
                     <div class="dash-mini-kpis">
                         ${mini('Margen lista', Calc.fmtPct(agg.margenPonderado))}
                         ${mini('Uds vendidas', String(agg.totalVendidas))}
@@ -1910,6 +2189,25 @@ const DashboardView = (() => {
         `;
     }
 
+    /** Cash de ventas marcadas Cobrado en Caja (o legacy sin eventos). */
+    function sumCashCobrado(rows) {
+        let cash = 0;
+        (rows || []).forEach(({ lote }) => {
+            const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
+            if (ventas.length) {
+                ventas.forEach(v => {
+                    if (!ventaIsCobrado(v)) return;
+                    cash += (Number(v.precio) || 0) * Math.max(0, Number(v.unidades) || 0);
+                });
+                return;
+            }
+            // Legacy: vendidas sin eventos → se trata como ya cobrado
+            const vendidas = Math.max(0, Number(lote.vendidas) || 0);
+            if (vendidas > 0) cash += (Number(lote.precio) || 0) * vendidas;
+        });
+        return round2(cash);
+    }
+
     function layCaja({ agg, rows }) {
         const trapped = rows
             .filter(r => r.calc.inventarioRestante > 0)
@@ -1917,21 +2215,24 @@ const DashboardView = (() => {
         const liberable = rows
             .filter(r => r.calc.estrategia === 'LIQUIDAR')
             .reduce((s, r) => s + r.calc.valorInventario, 0);
+        const cashCobrado = sumCashCobrado(rows);
+        const porCobrar = Math.max(0, round2((agg.cashIn || 0) - cashCobrado));
         return `
             <div class="dash-grid-kpi dash-grid-kpi-4">
                 ${kpi('Capital en juego', Calc.fmtMXN(agg.capitalDesplegado), '', 'Costo × unidades compradas')}
-                ${kpi('Cash in cobrado', Calc.fmtMXN(agg.cashIn), 'pos', 'Dinero que ya entró')}
+                ${kpi('Cash vendido', Calc.fmtMXN(agg.cashIn), 'pos', 'Todas las ventas registradas')}
+                ${kpi('Cash cobrado', Calc.fmtMXN(cashCobrado), 'pos', porCobrar > 0 ? `Por cobrar ${Calc.fmtMXN(porCobrar)}` : 'Todo marcado en Caja')}
                 ${kpi('En inventario', Calc.fmtMXN(agg.valorInventario), '', `${Calc.fmtPct(agg.capitalDesplegado ? agg.valorInventario / agg.capitalDesplegado : 0)} del capital`)}
-                ${kpi('A liquidar (stock)', Calc.fmtMXN(liberable), liberable > 0 ? 'neg' : '', 'Capital en estrategia LIQUIDAR')}
             </div>
             <div class="dash-split-2">
                 <div class="dash-panel">
                     <h3>Flujo: dónde está el dinero</h3>
                     ${stackBars([
-                        { label: 'Ya cobrado (cash in)', value: agg.cashIn, cls: 'c-gain' },
+                        { label: 'Cobrado', value: cashCobrado, cls: 'c-gain' },
+                        { label: 'Por cobrar', value: porCobrar, cls: 'c-ads' },
                         { label: 'Atrapado en stock', value: trapped, cls: 'c-cost' },
-                        { label: 'Ganancia realizada', value: Math.max(0, agg.gananciaRealizada), cls: 'c-fee' },
-                    ], Math.max(agg.cashIn + trapped, 1))}
+                    ], Math.max((agg.cashIn || 0) + trapped, 1))}
+                    ${liberable > 0 ? `<p class="muted small" style="margin-top:10px">Stock en LIQUIDAR: ${Calc.fmtMXN(liberable)}</p>` : ''}
                 </div>
                 <div class="dash-panel">
                     <h3>Capital por lote (top 10)</h3>
@@ -1982,11 +2283,6 @@ const DashboardView = (() => {
         if (meta?.bucket === 'retiro') meta = { ...meta, bucket: 'utilidad' };
         if (meta?.bucket === 'fondo') meta = { ...meta, bucket: 'reserva' };
         return { ...entry, splits, meta };
-    }
-
-    function formatSplitLine(splits) {
-        const s = migrateLegacyAllocMaps(splits || {});
-        return `→ R ${Calc.fmtMXN(s.reinversion || 0)} · S ${Calc.fmtMXN(s.reserva || 0)} · A ${Calc.fmtMXN(s.ads || 0)} · I ${Calc.fmtMXN(s.insumos || 0)} · U ${Calc.fmtMXN(s.utilidad || 0)}`;
     }
 
     function round2(n) {
@@ -2166,7 +2462,6 @@ const DashboardView = (() => {
         ['meli', 'amazon'].forEach(mp => {
             const raw = prev[mp];
             if (!allocHasLegacyKeys(raw)) return;
-            const active = allocMpKey();
             // Lee estado migrado sin pisar el marketplace activo del State
             const buckets = emptyAllocBuckets();
             const src = migrateLegacyAllocMaps(raw.buckets && typeof raw.buckets === 'object' ? raw.buckets : {});
@@ -2180,11 +2475,11 @@ const DashboardView = (() => {
                 buckets,
                 injected: round2(Number(raw.injected) || 0),
                 liberated: round2(Number(raw.liberated) || 0),
-                injections: Array.isArray(raw.injections) ? raw.injections.slice(-40) : [],
-                ledger: (Array.isArray(raw.ledger) ? raw.ledger : []).map(migrateLedgerEntry).slice(-80),
+                // Injections/ledger reconstruyen bolsitas: no truncar (borra dinero)
+                injections: Array.isArray(raw.injections) ? raw.injections : [],
+                ledger: (Array.isArray(raw.ledger) ? raw.ledger : []).map(migrateLedgerEntry),
             };
             changed = true;
-            void active;
         });
         if (!changed) return;
         window.State.ui = { ...window.State.ui, capitalAlloc: nextStore };
@@ -2206,126 +2501,73 @@ const DashboardView = (() => {
                     buckets: { ...emptyAllocBuckets(), ...migrateLegacyAllocMaps(cur.buckets) },
                     injected: round2(cur.injected),
                     liberated: round2(cur.liberated),
-                    injections: Array.isArray(cur.injections) ? cur.injections.slice(-40) : [],
-                    ledger: Array.isArray(cur.ledger) ? cur.ledger.map(migrateLedgerEntry).slice(-80) : [],
+                    injections: Array.isArray(cur.injections) ? cur.injections : [],
+                    ledger: Array.isArray(cur.ledger) ? cur.ledger.map(migrateLedgerEntry) : [],
                 },
             },
         };
         window.State.saveUI();
     }
 
-    function distributeAmount(amount, { type, meta = {} } = {}) {
+    /** Libera a bolsitas con splits explícitos (flujo Caja). */
+    function applySaleLiberationWithSplits(amount, splits, meta = {}) {
         const amt = round2(amount);
         if (amt <= 0) return null;
         const state = readAllocState();
-        const splits = splitByPercents(amt, state.percents);
-        const entry = {
-            id: `al-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-            type: type || 'manual',
-            amount: amt,
-            at: Date.now(),
-            splits,
-            meta,
-        };
-        const patch = {
-            buckets: addSplits(state.buckets, splits, 1),
-            ledger: [...state.ledger, entry],
-        };
-        if (type === 'sale') patch.liberated = round2(state.liberated + amt);
-        writeAllocState(patch);
-        return entry;
-    }
-
-    function applySaleLiberation(amount, meta = {}) {
-        const state = readAllocState();
-        // Evita duplicar la misma venta
         if (meta?.ventaId && state.ledger.some(x => x.type === 'sale' && x.meta?.ventaId === meta.ventaId)) {
             return null;
         }
-        return distributeAmount(amount, { type: 'sale', meta });
+        const cleaned = emptyAllocBuckets();
+        ALLOC_BUCKETS.forEach(({ key }) => {
+            const n = Number(splits?.[key]);
+            cleaned[key] = Number.isFinite(n) && n > 0 ? round2(n) : 0;
+        });
+        const entry = {
+            id: `al-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+            type: 'sale',
+            amount: amt,
+            at: Date.now(),
+            splits: cleaned,
+            meta,
+        };
+        writeAllocState({
+            buckets: addSplits(state.buckets, cleaned, 1),
+            liberated: round2(state.liberated + amt),
+            ledger: [...state.ledger, entry],
+        });
+        return entry;
     }
 
+    /** Cobrado sin bolsitas (rescate). Pendientes de cobro no entran aquí. */
     function listUnassignedVentas() {
         const state = readAllocState();
         const assigned = new Set(
             state.ledger.filter(x => x.type === 'sale' && x.meta?.ventaId).map(x => x.meta.ventaId),
         );
-        const out = [];
-        (window.State.lotes || []).forEach(lote => {
-            (lote.ventas || []).forEach(v => {
-                if (!v?.id || assigned.has(v.id)) return;
-                const uds = Math.max(0, Number(v.unidades) || 0);
-                const precio = Number(v.precio) || 0;
-                if (uds <= 0 || precio <= 0) return;
-                let utilidad = 0;
-                try {
-                    utilidad = Number(Calc.utilidadAtPrice(lote, precio, window.State.settings).utilidad) || 0;
-                } catch { utilidad = 0; }
-                const amount = round2((Math.max(0, Number(lote.costo) || 0) + utilidad) * uds);
-                if (amount <= 0) return;
-                out.push({
-                    ventaId: v.id,
-                    loteId: lote.id,
-                    fecha: v.fecha,
-                    producto: lote.producto || lote.sku || 'Producto',
-                    unidades: uds,
-                    precio,
-                    amount,
-                });
-            });
-        });
-        out.sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')));
-        return out;
+        const lists = Data.listVentasCobro?.(window.State.lotes, window.State.settings);
+        const rows = lists?.porAsignar || [];
+        return rows
+            .filter(r => r.ventaId && !assigned.has(r.ventaId) && (r.amount || 0) > 0)
+            .map(r => ({
+                ventaId: r.ventaId,
+                loteId: r.loteId,
+                fecha: r.fecha,
+                producto: r.producto,
+                unidades: r.unidades,
+                precio: r.precio,
+                amount: r.amount,
+            }));
     }
 
-    function syncMissingSalesToAlloc() {
-        const pending = listUnassignedVentas();
-        let n = 0;
-        let total = 0;
-        pending.forEach(p => {
-            const entry = applySaleLiberation(p.amount, {
-                ventaId: p.ventaId,
-                loteId: p.loteId,
-                unidades: p.unidades,
-                precio: p.precio,
-                fecha: p.fecha,
-                backfill: true,
-            });
-            if (entry) {
-                n += 1;
-                total = round2(total + p.amount);
-            }
-        });
-        return { n, total, pending: pending.length };
+    function readRawAlloc(mp) {
+        const store = window.State.ui?.capitalAlloc && typeof window.State.ui.capitalAlloc === 'object'
+            ? window.State.ui.capitalAlloc
+            : {};
+        const raw = store[mp] && typeof store[mp] === 'object' ? store[mp] : null;
+        return raw || null;
     }
 
-    function reverseSaleLiberation(ventaId) {
-        if (!ventaId) return false;
-        // Busca en el marketplace activo; si no, en el otro (por si cambiaste de tab).
-        const tryMp = (mp) => {
-            const store = window.State.ui?.capitalAlloc && typeof window.State.ui.capitalAlloc === 'object'
-                ? window.State.ui.capitalAlloc
-                : {};
-            const raw = store[mp] && typeof store[mp] === 'object' ? store[mp] : null;
-            if (!raw || !Array.isArray(raw.ledger)) return null;
-            const idx = raw.ledger.findIndex(x => x.type === 'sale' && x.meta?.ventaId === ventaId);
-            if (idx < 0) return null;
-            return { mp, raw, idx, entry: raw.ledger[idx] };
-        };
-        const hit = tryMp(allocMpKey()) || tryMp(allocMpKey() === 'amazon' ? 'meli' : 'amazon');
-        if (!hit) return false;
-
-        const { mp, raw, idx, entry } = hit;
-        const ledger = raw.ledger.slice();
-        ledger.splice(idx, 1);
-        const buckets = emptyAllocBuckets();
-        const src = migrateLegacyAllocMaps(raw.buckets && typeof raw.buckets === 'object' ? raw.buckets : {});
-        ALLOC_BUCKETS.forEach(({ key }) => {
-            const n = Number(src[key]);
-            buckets[key] = Number.isFinite(n) && n > 0 ? round2(n) : 0;
-        });
-        const splits = migrateLegacyAllocMaps(entry.splits || {});
-        const liberated = Math.max(0, round2((Number(raw.liberated) || 0) - (Number(entry.amount) || 0)));
+    function writeRawAlloc(mp, nextRaw) {
         const prev = window.State.ui?.capitalAlloc && typeof window.State.ui.capitalAlloc === 'object'
             ? window.State.ui.capitalAlloc
             : {};
@@ -2333,16 +2575,219 @@ const DashboardView = (() => {
             ...window.State.ui,
             capitalAlloc: {
                 ...prev,
-                [mp]: {
-                    ...raw,
-                    buckets: addSplits(buckets, splits, -1),
-                    liberated,
-                    ledger,
-                },
+                [mp]: nextRaw,
             },
         };
         window.State.saveUI();
-        return true;
+    }
+
+    function bucketsFromRaw(raw) {
+        const buckets = emptyAllocBuckets();
+        const src = migrateLegacyAllocMaps(raw?.buckets && typeof raw.buckets === 'object' ? raw.buckets : {});
+        ALLOC_BUCKETS.forEach(({ key }) => {
+            const n = Number(src[key]);
+            buckets[key] = Number.isFinite(n) && n > 0 ? round2(n) : 0;
+        });
+        return buckets;
+    }
+
+    function sumSplits(splits) {
+        const s = migrateLegacyAllocMaps(splits || {});
+        return round2(ALLOC_BUCKETS.reduce((acc, b) => acc + (Number(s[b.key]) || 0), 0));
+    }
+
+    /** Si splits vienen vacíos pero hay monto, reparte con % (evita fantasmas en bolsitas). */
+    function resolveSplits(amount, splits, percents) {
+        const cleaned = migrateLegacyAllocMaps(splits || {});
+        const sum = sumSplits(cleaned);
+        const amt = round2(amount);
+        if (sum > 0.009) {
+            // Si el desglose no cuadra con el monto, escala al monto
+            if (amt > 0 && Math.abs(sum - amt) > 0.05) {
+                const scale = amt / sum;
+                const out = emptyAllocBuckets();
+                let used = 0;
+                ALLOC_BUCKETS.forEach(({ key }, i) => {
+                    if (i === ALLOC_BUCKETS.length - 1) out[key] = round2(amt - used);
+                    else {
+                        out[key] = round2((Number(cleaned[key]) || 0) * scale);
+                        used = round2(used + out[key]);
+                    }
+                });
+                return out;
+            }
+            return { ...emptyAllocBuckets(), ...cleaned };
+        }
+        if (amt > 0) return splitByPercents(amt, percents || defaultAllocPercents());
+        return emptyAllocBuckets();
+    }
+
+    /**
+     * Reconstruye buckets + liberated desde el ledger (fuente de verdad).
+     * Mata fantasmas: buckets con dinero y liberated $0 sin ventas en ledger.
+     */
+    function reconcileAllocFromLedger(mp = allocMpKey()) {
+        const raw = readRawAlloc(mp);
+        if (!raw) return { changed: false, total: 0 };
+        const percents = normalizePercents(raw.percents);
+        const ledger = Array.isArray(raw.ledger) ? raw.ledger.map(migrateLedgerEntry) : [];
+        let buckets = emptyAllocBuckets();
+        let liberated = 0;
+        ledger.forEach(entry => {
+            if (!entry || typeof entry !== 'object') return;
+            const amt = round2(entry.amount);
+            const splits = resolveSplits(amt, entry.splits, percents);
+            if (entry.type === 'sale') {
+                buckets = addSplits(buckets, splits, 1);
+                liberated = round2(liberated + (amt > 0 ? amt : sumSplits(splits)));
+            } else if (entry.type === 'manual') {
+                buckets = addSplits(buckets, splits, 1);
+            } else if (entry.type === 'spend') {
+                buckets = addSplits(buckets, splits, -1);
+            }
+        });
+        // Inyecciones históricas (si existían fuera del ledger)
+        const injections = Array.isArray(raw.injections) ? raw.injections : [];
+        injections.forEach(inj => {
+            const amt = round2(inj?.amount);
+            if (!(amt > 0)) return;
+            const splits = resolveSplits(amt, inj.splits, percents);
+            buckets = addSplits(buckets, splits, 1);
+        });
+
+        const prevBuckets = bucketsFromRaw(raw);
+        const prevLib = round2(Number(raw.liberated) || 0);
+        const sameBuckets = ALLOC_BUCKETS.every(({ key }) =>
+            round2(prevBuckets[key] || 0) === round2(buckets[key] || 0)
+        );
+        if (sameBuckets && prevLib === liberated) {
+            return {
+                changed: false,
+                total: round2(ALLOC_BUCKETS.reduce((s, b) => s + (buckets[b.key] || 0), 0)),
+            };
+        }
+        writeRawAlloc(mp, {
+            ...raw,
+            percents,
+            buckets,
+            liberated,
+            ledger,
+            injections,
+            injected: round2(Number(raw.injected) || injections.reduce((s, x) => s + (Number(x.amount) || 0), 0)),
+        });
+        return {
+            changed: true,
+            total: round2(ALLOC_BUCKETS.reduce((s, b) => s + (buckets[b.key] || 0), 0)),
+            liberated,
+        };
+    }
+
+    /**
+     * Quita de bolsitas el dinero de una venta.
+     * 1) Busca en ledger por ventaId (string-safe)
+     * 2) Si no hay entry, usa fallbackSplits (p.ej. venta.asignacion)
+     * 3) Reconcilia buckets desde ledger para no dejar fantasmas
+     */
+    function reverseSaleLiberation(ventaId, fallbackSplits = null) {
+        if (!ventaId && !fallbackSplits) return false;
+        const vid = ventaId != null ? String(ventaId) : '';
+
+        const tryMp = (mp) => {
+            const raw = readRawAlloc(mp);
+            if (!raw || !Array.isArray(raw.ledger)) return null;
+            const idx = raw.ledger.findIndex(x =>
+                x.type === 'sale' && x.meta?.ventaId != null && String(x.meta.ventaId) === vid
+            );
+            if (idx < 0) return null;
+            return { mp, raw, idx, entry: raw.ledger[idx] };
+        };
+
+        const hit = vid
+            ? (tryMp(allocMpKey()) || tryMp(allocMpKey() === 'amazon' ? 'meli' : 'amazon'))
+            : null;
+
+        if (hit) {
+            const { mp, raw, idx } = hit;
+            const ledger = raw.ledger.slice();
+            ledger.splice(idx, 1);
+            writeRawAlloc(mp, { ...raw, ledger });
+            reconcileAllocFromLedger(mp);
+            return true;
+        }
+
+        // Fallback: sin entry en ledger → reconstruir bolsitas (mata fantasmas)
+        const mp = allocMpKey();
+        const raw = readRawAlloc(mp);
+        if (raw && Array.isArray(raw.ledger) && vid) {
+            const filtered = raw.ledger.filter(x =>
+                !(x.type === 'sale' && x.meta?.ventaId != null && String(x.meta.ventaId) === vid)
+            );
+            if (filtered.length !== raw.ledger.length) {
+                writeRawAlloc(mp, { ...raw, ledger: filtered });
+            }
+        }
+        const before = bucketsFromRaw(raw || {});
+        const beforeTotal = round2(ALLOC_BUCKETS.reduce((s, b) => s + (before[b.key] || 0), 0));
+        const rec = reconcileAllocFromLedger(mp);
+        const afterTotal = rec.total || 0;
+        // Si había asignacion de respaldo y el fantasma sigue (ledger vacío no bastó), resta splits
+        const fallbackAmt = sumSplits(fallbackSplits);
+        if (fallbackAmt > 0 && afterTotal >= beforeTotal - 0.02) {
+            const cur = readRawAlloc(mp) || raw;
+            const splits = resolveSplits(fallbackAmt, fallbackSplits, normalizePercents(cur?.percents));
+            writeRawAlloc(mp, {
+                ...cur,
+                buckets: addSplits(bucketsFromRaw(cur), splits, -1),
+                liberated: Math.max(0, round2((Number(cur?.liberated) || 0) - fallbackAmt)),
+            });
+            return true;
+        }
+        return !!(rec.changed || fallbackAmt > 0 || beforeTotal > afterTotal);
+    }
+
+    /**
+     * Limpia entradas de ledger cuya venta ya no existe y reconcilia bolsitas.
+     * mpLotes: { meli: lote[], amazon: lote[] } — si omites, solo limpia el MP activo.
+     */
+    function purgeOrphanSaleLiberations(mpLotes = null) {
+        const targets = mpLotes && typeof mpLotes === 'object'
+            ? mpLotes
+            : { [allocMpKey()]: window.State.lotes };
+        let n = 0;
+        let total = 0;
+        Object.keys(targets).forEach(mp => {
+            const lotes = targets[mp];
+            const alive = new Set();
+            (lotes || []).forEach(l => (l.ventas || []).forEach(v => {
+                if (v?.id) alive.add(String(v.id));
+            }));
+            const raw = readRawAlloc(mp);
+            if (!raw) {
+                return;
+            }
+            const ledger = Array.isArray(raw.ledger) ? raw.ledger : [];
+            const keep = [];
+            let localN = 0;
+            ledger.forEach(entry => {
+                if (entry?.type !== 'sale' || entry.meta?.ventaId == null) {
+                    keep.push(entry);
+                    return;
+                }
+                if (alive.has(String(entry.meta.ventaId))) {
+                    keep.push(entry);
+                    return;
+                }
+                localN += 1;
+                total = round2(total + (Number(entry.amount) || sumSplits(entry.splits)));
+            });
+            if (localN > 0) {
+                writeRawAlloc(mp, { ...raw, ledger: keep });
+                n += localN;
+            }
+            // Siempre reconcilia: arregla fantasmas (buckets>0, liberated 0, sin sales)
+            reconcileAllocFromLedger(mp);
+        });
+        return { n, total };
     }
 
     function spendFromBucket(key, amount, note = '') {
@@ -2375,6 +2820,21 @@ const DashboardView = (() => {
         return { entry, remaining: nextBuckets[key], spent, available };
     }
 
+    /** Deshace un uso (spend): lo saca del ledger y reconstruye bolsitas. */
+    function reverseSpend(entryId) {
+        if (!entryId) return false;
+        const mp = allocMpKey();
+        const raw = readRawAlloc(mp);
+        if (!raw || !Array.isArray(raw.ledger)) return false;
+        const idx = raw.ledger.findIndex(x => x.type === 'spend' && String(x.id) === String(entryId));
+        if (idx < 0) return false;
+        const ledger = raw.ledger.slice();
+        ledger.splice(idx, 1);
+        writeRawAlloc(mp, { ...raw, ledger });
+        reconcileAllocFromLedger(mp);
+        return true;
+    }
+
     function layAsignacion(ctx) {
         const state = readAllocState();
         const { buckets, percents, injected, liberated } = state;
@@ -2384,8 +2844,6 @@ const DashboardView = (() => {
         const reinvestUds = unitCost > 0 ? buckets.reinversion / unitCost : 0;
         const pctSum = round2(ALLOC_BUCKETS.reduce((s, b) => s + (percents[b.key] || 0), 0));
         const pendingSales = listUnassignedVentas();
-        const recentSales = [...state.ledger].filter(x => x.type === 'sale').reverse().slice(0, 5);
-        const recentSpends = [...state.ledger].filter(x => x.type === 'spend').reverse().slice(0, 5);
         const shareOf = (val) => totalBuckets > 0 ? Math.round((val / totalBuckets) * 1000) / 10 : 0;
 
         const bolsitasCards = ALLOC_BUCKETS.map(b => {
@@ -2451,7 +2909,7 @@ const DashboardView = (() => {
                     <div>
                         <h3>Mis bolsitas</h3>
                         <p class="muted small">
-                            Cada venta se reparte sola. Si eliminas una venta (devolución), se resta.
+                            El cobro se reparte en Caja. Si eliminas una venta, se resta de aquí.
                             Toca el % para ajustarlo · <em>usar</em> para restar lo que ya gastaste.
                         </p>
                     </div>
@@ -2486,50 +2944,95 @@ const DashboardView = (() => {
                 ${pendingSales.length ? `
                     <div class="dash-alloc-pending">
                         <div>
-                            <strong>${pendingSales.length} venta${pendingSales.length === 1 ? '' : 's'} sin asignar</strong>
+                            <strong>${pendingSales.length} cobro${pendingSales.length === 1 ? '' : 's'} sin bolsitas</strong>
                             <p class="muted small">
-                                Se registraron antes del auto-reparto.
-                                Total pendiente ≈ ${Calc.fmtMXN(pendingSales.reduce((s, p) => s + p.amount, 0))}.
+                                Marcados cobrado sin repartir a bolsitas.
+                                Total ≈ ${Calc.fmtMXN(pendingSales.reduce((s, p) => s + p.amount, 0))}.
                             </p>
                         </div>
-                        <button type="button" class="btn primary btn-sm" data-alloc-sync-sales>
-                            Asignar a bolsitas
+                        <button type="button" class="btn primary btn-sm" data-goto-caja="asignar">
+                            Ir a Caja
                         </button>
                     </div>
                 ` : ''}
 
-                ${recentSpends.length ? `
-                    <div class="dash-alloc-history dash-alloc-spend-log">
-                        <h4>Últimos usos</h4>
-                        <ul>
-                            ${recentSpends.map(e => {
-                                const bLabel = ALLOC_BUCKETS.find(b => b.key === e.meta?.bucket)?.label || e.meta?.bucket || '';
-                                return `
-                                <li>
-                                    <span>${esc(new Date(e.at).toLocaleDateString('es-MX'))}</span>
-                                    <strong class="neg">−${Calc.fmtMXN(e.amount)}</strong>
-                                    <span class="muted">${esc(bLabel)}${e.meta?.note ? ` · ${esc(e.meta.note)}` : ''} · quedan ${Calc.fmtMXN(e.meta?.remaining || 0)}</span>
-                                </li>`;
-                            }).join('')}
-                        </ul>
-                    </div>
-                ` : ''}
-
-                ${recentSales.length ? `
-                    <div class="dash-alloc-history dash-alloc-sales-log">
-                        <h4>Últimas ventas en bolsitas</h4>
-                        <ul>
-                            ${recentSales.map(e => `
-                                <li>
-                                    <span>${esc(e.meta?.fecha || new Date(e.at).toLocaleDateString('es-MX'))}</span>
-                                    <strong class="pos">+${Calc.fmtMXN(e.amount)}</strong>
-                                    <span class="muted">${esc(formatSplitLine(e.splits))}</span>
-                                </li>
-                            `).join('')}
-                        </ul>
-                    </div>
-                ` : ''}
+                ${layAllocMovimientos(state)}
             </div>
+        `;
+    }
+
+    /**
+     * Movimientos compactos: solo últimos usos en dashboard (colapsado).
+     * Los cobros viven en Caja → Historial (no llenan el panel visual).
+     */
+    function layAllocMovimientos(state) {
+        const ledger = Array.isArray(state?.ledger) ? state.ledger : [];
+        const spends = ledger
+            .filter(e => e && e.type === 'spend')
+            .map(e => {
+                const at = Number(e.at) || 0;
+                const bLabel = ALLOC_BUCKETS.find(b => b.key === e.meta?.bucket)?.label
+                    || e.meta?.bucket
+                    || 'Bolsita';
+                const detail = [
+                    bLabel,
+                    e.meta?.note ? String(e.meta.note) : '',
+                    `quedan ${Calc.fmtMXN(e.meta?.remaining || 0)}`,
+                ].filter(Boolean).join(' · ');
+                return {
+                    id: e.id,
+                    at,
+                    fecha: new Date(at || Date.now()).toLocaleDateString('es-MX'),
+                    amount: Number(e.amount) || 0,
+                    detail,
+                };
+            })
+            .sort((a, b) => b.at - a.at);
+        const cobrosN = ledger.filter(e => e && e.type === 'sale').length;
+        const rows = spends.slice(0, 4);
+        if (!rows.length && cobrosN === 0) return '';
+
+        const last = rows[0];
+        const summary = last
+            ? `Último uso −${Calc.fmtMXN(last.amount)} · ${last.detail}`
+            : `${cobrosN} cobro${cobrosN === 1 ? '' : 's'} en bolsitas`;
+
+        return `
+            <details class="dash-alloc-movs">
+                <summary class="dash-alloc-movs-summary">
+                    <span class="dash-alloc-movs-summary-title">Movimientos</span>
+                    <span class="dash-alloc-movs-summary-meta muted">${esc(summary)}</span>
+                </summary>
+                ${rows.length ? `
+                    <div class="dash-alloc-movs-head" aria-hidden="true">
+                        <span>Fecha</span>
+                        <span>Tipo</span>
+                        <span>Monto</span>
+                        <span>Detalle</span>
+                        <span></span>
+                    </div>
+                    <ul class="dash-alloc-movs-list">
+                        ${rows.map(r => `
+                            <li class="dash-alloc-movs-row is-uso">
+                                <span class="dash-alloc-movs-fecha">${esc(r.fecha)}</span>
+                                <span class="dash-alloc-movs-tipo">Uso</span>
+                                <strong class="dash-alloc-movs-amt">−${Calc.fmtMXN(r.amount)}</strong>
+                                <span class="dash-alloc-movs-detail">${esc(r.detail)}</span>
+                                <button type="button" class="dash-alloc-movs-undo" data-alloc-undo-spend="${esc(r.id)}"
+                                    title="Deshacer uso">Deshacer</button>
+                            </li>
+                        `).join('')}
+                    </ul>
+                ` : `
+                    <p class="dash-alloc-movs-empty muted small">Sin usos registrados todavía.</p>
+                `}
+                <div class="dash-alloc-movs-foot">
+                    <span class="muted small">${cobrosN
+                        ? `${cobrosN} cobro${cobrosN === 1 ? '' : 's'} → historial en Caja`
+                        : 'Los cobros se ven en Caja'}</span>
+                    <button type="button" class="btn ghost btn-sm" data-goto-caja="hecho">Ver en Caja</button>
+                </div>
+            </details>
         `;
     }
 
@@ -2583,7 +3086,7 @@ const DashboardView = (() => {
             <div class="dash-split-3">
                 ${rankCol('Por utilidad / ud', byUtil, r => Calc.fmtMXN(r.calc.utilidad), r => tone(r.calc.utilidad))}
                 ${rankCol('Por margen', byMargen, r => Calc.fmtPct(r.calc.margen), r => tone(r.calc.margen))}
-                ${rankCol('Por ROI', byRoi, r => Calc.fmtPct(r.calc.roi), r => tone(r.calc.roi))}
+                ${rankCol('Por ROI', byRoi, r => (Number(r.lote.costo) > 0 ? Calc.fmtPct(r.calc.roi) : '—'), r => (Number(r.lote.costo) > 0 ? tone(r.calc.roi) : ''))}
             </div>
         `;
     }
@@ -2721,6 +3224,12 @@ const DashboardView = (() => {
                 LotesView.openModal(null);
             });
         });
+        root.querySelectorAll('[data-goto-caja]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const sub = btn.getAttribute('data-goto-caja') || 'cobrar';
+                window.CajaView?.open?.(sub);
+            });
+        });
         root.querySelectorAll('[data-dash-goto-mp]').forEach(btn => {
             btn.addEventListener('click', () => {
                 const mp = btn.dataset.dashGotoMp;
@@ -2730,18 +3239,7 @@ const DashboardView = (() => {
             });
         });
         root.querySelectorAll('[data-dash-lote]').forEach(el => {
-            el.addEventListener('click', () => {
-                const id = el.dataset.dashLote;
-                const mp = el.dataset.dashMp;
-                if (!id || !window.LotesView?.selectAndGo) return;
-                if (mp && (mp === 'meli' || mp === 'amazon') && mp !== window.State.marketplace) {
-                    window.State.ui = { ...window.State.ui, mpView: mp };
-                    window.State.saveUI();
-                    window.State.switchMarketplace(mp);
-                    window.App?.refreshMarketplaceChrome?.();
-                }
-                LotesView.selectAndGo(id);
-            });
+            el.addEventListener('click', () => openDashLote(el.dataset.dashLote, el.dataset.dashMp));
         });
         const setChartUI = (patch) => {
             window.State.ui = { ...window.State.ui, ...patch };
@@ -2790,6 +3288,14 @@ const DashboardView = (() => {
                 setChartUI({ dashChartType: type });
             });
         });
+        root.querySelectorAll('[data-dash-cash]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mode = btn.dataset.dashCash === 'vendido' ? 'vendido' : 'cobrado';
+                const cur = window.State.ui?.dashCashMode === 'vendido' ? 'vendido' : 'cobrado';
+                if (mode === cur) return;
+                setChartUI({ dashCashMode: mode });
+            });
+        });
         root.querySelectorAll('[data-dash-from]').forEach(input => {
             const commit = () => {
                 const raw = input.value;
@@ -2825,9 +3331,14 @@ const DashboardView = (() => {
                 const total = round2(ALLOC_BUCKETS.reduce((sum, b) => sum + (s.buckets[b.key] || 0), 0));
                 let unitCost = 0;
                 try {
-                    const agg = Calc.aggregate(window.State.lotes || [], window.State.settings);
-                    const vendidas = Math.max(0, Number(agg.totalVendidas) || 0);
-                    const costo = Number(agg.costoVendido) || 0;
+                    const lotes = window.State.lotes || [];
+                    let costo = 0;
+                    let vendidas = 0;
+                    lotes.forEach(lote => {
+                        const sum = sumFeesAndCogs(lote, window.State.settings);
+                        costo += sum.costoVendido;
+                        vendidas += Calc.syncVendidas(lote);
+                    });
                     unitCost = vendidas > 0 ? costo / vendidas : 0;
                 } catch { /* ignore */ }
                 return {
@@ -3041,15 +3552,25 @@ const DashboardView = (() => {
                 });
                 renderPreservingScroll('.dash-alloc-panel');
             });
-            allocPanel.querySelector('[data-alloc-sync-sales]')?.addEventListener('click', (e) => {
-                e.preventDefault();
-                const res = syncMissingSalesToAlloc();
-                renderPreservingScroll('.dash-alloc-panel');
-                if (res.n > 0) {
-                    UI.toast?.(`${res.n} venta${res.n === 1 ? '' : 's'} → bolsitas (${Calc.fmtMXN(res.total)})`);
-                } else {
-                    UI.toast?.('No había ventas pendientes', 'error');
-                }
+            allocPanel.querySelectorAll('[data-goto-caja]').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const sub = btn.getAttribute('data-goto-caja') || 'asignar';
+                    window.CajaView?.open?.(sub);
+                });
+            });
+            allocPanel.querySelectorAll('[data-alloc-undo-spend]').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const id = btn.getAttribute('data-alloc-undo-spend');
+                    if (reverseSpend(id)) {
+                        renderPreservingScroll('.dash-alloc-panel');
+                        UI.toast?.('Uso deshecho · vuelvió a la bolsita');
+                    } else {
+                        UI.toast?.('No encontré ese uso', 'error');
+                    }
+                });
             });
         }
 
@@ -3089,11 +3610,19 @@ const DashboardView = (() => {
     return {
         init,
         render,
-        applySaleLiberation,
+        applySaleLiberationWithSplits,
         reverseSaleLiberation,
+        purgeOrphanSaleLiberations,
+        reconcileAllocFromLedger,
         spendFromBucket,
-        syncMissingSalesToAlloc,
         listUnassignedVentas,
+        ALLOC_BUCKETS,
+        emptyAllocBuckets,
+        defaultAllocPercents,
+        normalizePercents,
+        splitByPercents,
+        readAllocState,
+        round2,
     };
 })();
 window.DashboardView = DashboardView;

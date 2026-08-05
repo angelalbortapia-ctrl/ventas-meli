@@ -21,13 +21,11 @@ const ExcelIO = (() => {
         'Costo', 'Unidades', 'Inversión Total Lote (MXN)',
         'Precio Competencia', 'Precio de Venta (MXN)',
         '% Referido Amazon', 'Comisión Referido (MXN)', 'Tarifa mín. referido',
-        'FBA / Envío (MXN)', 'Almacenamiento FBA (MXN)', 'Peso kg', 'Tamaño FBA',
+        'FBA / Envío (MXN)', 'Almacenamiento FBA (MXN)', 'Varios (MXN)', 'Peso kg', 'Tamaño FBA',
         'Utilidad Neta Real', 'Margen Neto %', 'ROI Unitario %',
         'Inventario Restante', 'Unidades Vendidas', 'Estatus Publicación',
         'Estrategia', 'Tope Máximo CPA (Ads)', 'Gasto Ads (MXN)',
     ];
-
-    const HEADERS = HEADERS_MELI;
 
     function headersFor(settings) {
         return (settings?.marketplace === 'amazon') ? HEADERS_AMAZON : HEADERS_MELI;
@@ -125,6 +123,7 @@ const ExcelIO = (() => {
             pesoKg: num('Peso kg'),
             tamanoFba: (r['Tamaño FBA'] || '').toString().trim() || '',
             almacenamiento: num('Almacenamiento FBA (MXN)') ?? 0,
+            varios: num('Varios (MXN)') ?? 0,
         };
     }
 
@@ -154,8 +153,10 @@ const ExcelIO = (() => {
                     c.pctComision,
                     c.comisionVariable,
                     c.referidoMinimo ?? 8,
-                    c.envio,
-                    c.almacenamiento ?? Number(l.almacenamiento) || 0,
+                    // Vacío si viene de tabla FBA: reimportar no debe congelar el fee como override
+                    (c.fbaMeta?.source === 'tabla' ? '' : c.envio),
+                    (c.almacenamiento ?? Number(l.almacenamiento)) || 0,
+                    (c.varios ?? Number(l.varios)) || 0,
                     l.pesoKg ?? '',
                     l.tamanoFba || c.fbaMeta?.tamano || '',
                     c.utilidad,
@@ -252,6 +253,6 @@ const ExcelIO = (() => {
         }[s] || s;
     }
 
-    return { HEADERS, importFile, exportFile };
+    return { importFile, exportFile };
 })();
 window.ExcelIO = ExcelIO;

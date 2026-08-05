@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#3483fa">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23ffe600'/%3E%3Ctext x='50' y='68' text-anchor='middle' font-size='60' fill='%231a1a1a' font-family='Calibri,sans-serif' font-weight='bold'%3EM%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="css/styles.css?v=89">
+    <link rel="stylesheet" href="css/styles.css?v=137">
 </head>
 <body>
 
@@ -21,7 +21,7 @@
         <span class="sb-brand-dot"></span>
         <div class="sb-brand-text">
             <div class="name">Ventas Meli</div>
-            <div class="sub">Mercado Libre · rentabilidad</div>
+            <div class="sub">Catálogo Mercado Libre</div>
         </div>
     </div>
 
@@ -32,17 +32,18 @@
             <button type="button" class="sb-mp-btn" data-marketplace="amazon" role="tab" aria-selected="false">Amazon</button>
             <button type="button" class="sb-mp-btn" data-marketplace="general" role="tab" aria-selected="false">General</button>
         </div>
-        <p class="sb-mp-hint muted small">General = corazón del negocio. Productos siguen por catálogo.</p>
+        <p class="sb-mp-hint muted small">General = pulso del día. Productos viven en cada catálogo.</p>
     </div>
 
     <div class="sb-section sb-general-panel" data-show-on-general hidden>
         <h5>Navegación</h5>
         <nav class="sb-gx-nav" aria-label="Secciones General">
-            <button type="button" class="sb-gx-link" data-gx-jump="gx-pulso">Pulso</button>
+            <button type="button" class="sb-gx-link" data-gx-jump="gx-pulso">Hoy</button>
+            <button type="button" class="sb-gx-link" data-gx-jump="gx-checklist">Checklist</button>
+            <button type="button" class="sb-gx-link" data-gx-jump="gx-acciones">Agenda</button>
+            <button type="button" class="sb-gx-link" data-gx-jump="gx-invmap">Sano vs flojo</button>
             <button type="button" class="sb-gx-link" data-gx-jump="gx-metas">Metas</button>
-            <button type="button" class="sb-gx-link" data-gx-jump="gx-canales">Canales</button>
-            <button type="button" class="sb-gx-link" data-gx-jump="gx-acciones">Acciones</button>
-            <button type="button" class="sb-gx-link" data-gx-jump="gx-capital">Capital</button>
+            <button type="button" class="sb-gx-link" data-gx-jump="gx-canales">Más</button>
             <button type="button" class="sb-gx-link" data-gx-jump="gx-progreso">Progreso</button>
             <button type="button" class="sb-gx-link" data-gx-jump="gx-finanzas">Finanzas</button>
         </nav>
@@ -53,7 +54,7 @@
         <nav class="sb-nav" role="tablist">
             <button class="sb-item active" data-tab="dashboard" role="tab" aria-selected="true">
                 <span class="sb-icon">📊</span>
-                <span>Dashboard</span>
+                <span>Inicio</span>
             </button>
             <button class="sb-item" data-tab="lotes" role="tab" aria-selected="false">
                 <span class="sb-icon">📦</span>
@@ -64,6 +65,20 @@
                 <span class="sb-icon">🚚</span>
                 <span>Envíos</span>
                 <span class="badge-count" id="sb-count-envios" hidden>0</span>
+            </button>
+            <button class="sb-item" data-tab="wishlist" role="tab" aria-selected="false" data-mp-only="amazon" hidden>
+                <span class="sb-icon">🎯</span>
+                <span>Wishlist</span>
+                <span class="badge-count" id="sb-count-wishlist" hidden>0</span>
+            </button>
+            <button class="sb-item" data-tab="keepa" role="tab" aria-selected="false" data-mp-only="amazon" hidden>
+                <span class="sb-icon">📈</span>
+                <span>Keepa Lab</span>
+            </button>
+            <button class="sb-item" data-tab="caja" role="tab" aria-selected="false">
+                <span class="sb-icon">💵</span>
+                <span>Caja</span>
+                <span class="badge-count" id="sb-count-caja" hidden>0</span>
             </button>
             <button class="sb-item" data-tab="insights" role="tab" aria-selected="false">
                 <span class="sb-icon">💡</span>
@@ -128,8 +143,7 @@
                 <span class="curr" id="tb-current">Inicio</span>
             </div>
             <div class="tb-gx-status" data-show-on-general hidden>
-                <span class="tb-gx-pill">Consola ejecutiva</span>
-                <span class="tb-gx-live"><span class="tb-gx-live-dot"></span> En vivo</span>
+                <span class="tb-gx-pill">Vista negocio</span>
             </div>
         </div>
         <div class="topbar-right">
@@ -157,6 +171,15 @@
 
         <!-- ============ ENVÍOS (Amazon) ============ -->
         <section class="view" id="view-envios" hidden aria-label="Envíos"></section>
+
+        <!-- ============ WISHLIST (Amazon arbitraje) ============ -->
+        <section class="view" id="view-wishlist" hidden aria-label="Wishlist"></section>
+
+        <!-- ============ KEEPA LAB (Amazon research) ============ -->
+        <section class="view" id="view-keepa" hidden aria-label="Keepa Lab"></section>
+
+        <!-- ============ CAJA (cobro + bolsitas) ============ -->
+        <section class="view" id="view-caja" hidden aria-label="Caja"></section>
 
         <!-- ============ INSIGHTS ============ -->
         <section class="view" id="view-insights" hidden aria-label="Insights"></section>
@@ -243,6 +266,31 @@
                 </div>
 
                 <div class="card" data-mp-only="amazon" hidden>
+                    <h3>Keepa (Amazon MX)</h3>
+                    <label><span>API key</span>
+                        <input type="password" id="set-keepa-key" name="keepa-api-key"
+                            placeholder="Pégala desde keepa.com/#!api"
+                            autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+                            data-lpignore="true" data-1p-ignore data-bwignore>
+                    </label>
+                    <div class="row-actions" style="gap:8px;margin-top:8px;flex-wrap:wrap">
+                        <button type="button" class="btn" id="btn-keepa-save">Guardar key</button>
+                        <button type="button" class="btn ghost" id="btn-keepa-test">Probar conexión</button>
+                    </div>
+                    <p class="muted small" id="keepa-status" style="margin-top:8px">Sin configurar.</p>
+                    <label class="check-row">
+                        <input type="checkbox" id="set-keepa-panel">
+                        <span>Mostrar «Inteligencia Keepa» en la ficha de Productos</span>
+                    </label>
+                    <p class="muted small">Si lo apagas, la ficha no consulta Keepa. Puedes seguir investigando cualquier ASIN desde Keepa Lab.</p>
+                    <p class="muted small">
+                        La extensión Premium de Keepa <strong>no incluye</strong> la API: necesitas la key en
+                        <a href="https://keepa.com/#!api" target="_blank" rel="noopener">keepa.com/#!api</a>.
+                        Corre la app con <code>python3 serve.py</code> (proxy CORS). Con ASIN, verás precio/BSR en Wishlist y Productos.
+                    </p>
+                </div>
+
+                <div class="card" data-mp-only="amazon" hidden>
                     <h3>Tarifas Amazon México</h3>
                     <label class="check-row">
                         <input type="checkbox" id="set-amz-tabla-cat" checked>
@@ -310,6 +358,11 @@
         <span>Productos</span>
         <span class="mobile-tab-badge" id="m-tab-lotes" hidden>0</span>
     </button>
+    <button type="button" class="mobile-tab" data-tab="caja">
+        <span class="mobile-tab-icon">💵</span>
+        <span>Caja</span>
+        <span class="mobile-tab-badge" id="m-tab-caja" hidden>0</span>
+    </button>
     <button type="button" class="mobile-tab" data-tab="insights">
         <span class="mobile-tab-icon">💡</span>
         <span>Insights</span>
@@ -356,6 +409,18 @@
                         <span>Categoría Amazon</span>
                         <select id="f-amz-categoria"></select>
                     </label>
+                    <label data-mp-field="amazon" hidden>
+                        <span>ASIN</span>
+                        <input type="text" id="f-asin" maxlength="10" placeholder="B0XXXXXXXX" autocomplete="off">
+                    </label>
+                    <label data-mp-field="amazon" hidden class="wide">
+                        <span>Link compra</span>
+                        <input type="text" id="f-link-compra" inputmode="url" placeholder="Costco, Sam's…">
+                    </label>
+                    <label data-mp-field="amazon" hidden class="wide">
+                        <span>Link Amazon</span>
+                        <input type="text" id="f-link-amazon" inputmode="url" placeholder="amazon.com.mx/dp/…">
+                    </label>
                     <label>
                         <span>Tipo Publicación</span>
                         <select id="f-tipo">
@@ -391,7 +456,7 @@
                     </label>
                     <label data-mp-field="amazon" hidden>
                         <span>Peso (kg)</span>
-                        <input type="number" step="0.01" min="0" id="f-peso-kg" placeholder="0.30">
+                        <input type="number" step="0.01" min="0" id="f-peso-kg" placeholder="0.907 · no gramos">
                     </label>
                     <label data-mp-field="amazon" hidden>
                         <span>Almacenamiento FBA (MXN / ud)</span>
@@ -408,6 +473,7 @@
                 <p class="muted small" style="margin-top:8px" data-mp-field="amazon" hidden>
                     Fulfillment FBA: deja el override vacío para usar la tabla (categoría × tamaño × peso × precio).
                     Si pones un monto, se usa como override. En FBM, ese campo es tu costo real de envío.
+                    <strong>Peso en kg</strong> (907 g → 0.907; si pones &gt;50 se asume gramos).
                     <strong>Almacenamiento</strong> y <strong>Varios</strong>: copia los montos de la Calculadora de ingresos.
                 </p>
                 <div class="calc-preview" id="calc-preview"></div>
@@ -439,18 +505,22 @@
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/calc.js?v=17"></script>
-<script src="js/data.js?v=36"></script>
-<script src="js/excel.js?v=6"></script>
-<script src="js/ui.js?v=5"></script>
-<script src="js/palette.js?v=8"></script>
-<script src="js/insights.js?v=9"></script>
-<script src="js/envios.js?v=7"></script>
-<script src="js/lotes.js?v=46"></script>
-<script src="js/dashboard.js?v=55"></script>
-<script src="js/sync.js?v=11"></script>
-<script src="js/settings.js?v=18"></script>
-<script src="js/app.js?v=42"></script>
+<script src="js/calc.js?v=22"></script>
+<script src="js/data.js?v=52"></script>
+<script src="js/excel.js?v=8"></script>
+<script src="js/ui.js?v=6"></script>
+<script src="js/keepa.js?v=13"></script>
+<script src="js/keepa-view.js?v=11"></script>
+<script src="js/palette.js?v=13"></script>
+<script src="js/insights.js?v=10"></script>
+<script src="js/lotes.js?v=70"></script>
+<script src="js/envios.js?v=8"></script>
+<script src="js/wishlist.js?v=9"></script>
+<script src="js/dashboard.js?v=76"></script>
+<script src="js/caja.js?v=15"></script>
+<script src="js/sync.js?v=17"></script>
+<script src="js/settings.js?v=21"></script>
+<script src="js/app.js?v=57"></script>
 
 </body>
 </html>

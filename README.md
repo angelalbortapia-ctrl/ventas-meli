@@ -22,17 +22,26 @@ Espeja y automatiza tu Excel `Negocio.xlsx` (pestañas `Lotes_Operaciones` + `Re
 
 ## Cómo usar
 
-1. Abre `index.html` en Chrome, Safari o Firefox — no requiere servidor.
+1. Abre la app con el servidor local (recomendado, necesario para Keepa):
+
+```bash
+python3 serve.py
+# → http://127.0.0.1:8877/
+```
+
+   Sin Keepa también sirve `python3 -m http.server 8080` o abrir `index.html` directo.
 2. La primera vez viene precargada con los 9 productos de tu Excel.
 3. Para importar tu Excel: botón **Importar Excel** → selecciona `Negocio.xlsx` (wizard).
 4. Para llevártelo al Excel de siempre: botón **Exportar Excel**.
 
-Si algún navegador bloquea archivos locales:
+### Keepa (Amazon MX)
 
-```bash
-python3 -m http.server 8080
-# abre http://localhost:8080
-```
+La extensión Premium de Keepa **no incluye** la Data API. Necesitas la key en [keepa.com/#!api](https://keepa.com/#!api).
+
+1. Corre `python3 serve.py` (proxy CORS en `/api/keepa/*`).
+2. En la app: modo **Amazon** → **Ajustes** → pega la API key → **Probar conexión**.
+3. Abre **Keepa Lab** para investigar un ASIN con gráfica, precio, BSR, ventas/mes, Buy Box y ofertas.
+4. La misma pestaña incluye Product Finder, búsqueda de Deals y consulta de vendedores con avisos de consumo antes de las operaciones costosas.
 
 También puedes **instalarla como PWA** (Chrome: menú → Instalar Ventas Meli).
 

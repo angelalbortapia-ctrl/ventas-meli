@@ -102,15 +102,6 @@ const UI = (() => {
         return result === true;
     }
 
-    async function alert({ title = 'Aviso', message = '', kind = 'info' } = {}) {
-        await dialog({
-            title,
-            body: `<p class="dlg-msg dlg-msg-${kind}">${message}</p>`,
-            size: 'sm',
-            actions: [{ label: 'Entendido', variant: 'primary', value: true }],
-        });
-    }
-
     async function prompt({ title = 'Introduce un valor', message = '', defaultValue = '', placeholder = '', primaryLabel = 'Aceptar', cancelLabel = 'Cancelar' } = {}) {
         let inputRef = null;
         const result = await dialog({
@@ -231,7 +222,6 @@ const UI = (() => {
     return {
         dialog,
         confirm,
-        alert,
         prompt,
         importWizard,
         backupChoice,

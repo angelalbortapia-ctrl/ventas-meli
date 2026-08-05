@@ -76,10 +76,14 @@ const InsightsView = (() => {
         },
         ({ lote, calc }) => {
             if (calc.estrategia !== 'AGOTADO') return null;
+            const hadDemand = (calc.vendidas || 0) > 0 || (Array.isArray(lote.ventas) && lote.ventas.length > 0);
             return {
-                severity: 'low', kind: 'agotado',
-                title: `Agotado: ${lote.producto}`,
-                text: calc.utilidad >= 0 ? 'Candidato a recompra si sigue la demanda.' : 'No recomprar (utilidad negativa).',
+                severity: hadDemand ? 'high' : 'low',
+                kind: 'stockout',
+                title: `Stockout: ${lote.producto}`,
+                text: calc.utilidad >= 0
+                    ? (hadDemand ? 'Sin piezas y hubo demanda — recompra o pausa Ads.' : 'Candidato a recompra si sigue la demanda.')
+                    : 'No recomprar (utilidad negativa).',
                 lote, calc,
             };
         },

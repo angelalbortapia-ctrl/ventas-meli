@@ -1,6 +1,7 @@
 /* ==========================================================================
    Bootstrap + orquestación:
-     - navegación sidebar (4 vistas: lotes, dashboard, insights, settings)
+     - navegación sidebar (dashboard, productos, envíos, caja, insights, ajustes)
+     - marketplace Meli / Amazon / General
      - importar/exportar Excel (con wizard)
      - respaldo JSON (con dialog propio)
      - command palette (⌘K)
@@ -14,6 +15,9 @@ const App = (() => {
         dashboard: 'Inicio',
         lotes: 'Productos',
         envios: 'Envíos',
+        wishlist: 'Wishlist',
+        keepa: 'Keepa Lab',
+        caja: 'Caja',
         insights: 'Insights',
         settings: 'Ajustes',
     };
@@ -24,9 +28,12 @@ const App = (() => {
         if (tab === 'envios' && (!window.EnviosView || !window.EnviosView.isEnabled())) {
             tab = 'settings';
         }
+        if (['wishlist', 'keepa'].includes(tab) && window.State.marketplace !== 'amazon') {
+            tab = 'lotes';
+        }
         // General es solo resumen: al ir a catálogo, vuelve al último MP real.
-        // Ajustes (Sync) sí se puede abrir desde General sin salir.
-        if (['lotes', 'envios', 'insights'].includes(tab)
+        // Ajustes (Sync) sí. Caja está oculta en el menú General; si se abre, su vista pide catálogo.
+        if (['lotes', 'envios', 'wishlist', 'keepa', 'insights'].includes(tab)
             && window.State.ui?.mpView === 'general') {
             const real = Data.normalizeMarketplace(window.State.marketplace);
             window.State.ui = { ...window.State.ui, mpView: real };
@@ -56,6 +63,10 @@ const App = (() => {
         else if (tab === 'insights') InsightsView.render();
         else if (tab === 'lotes') LotesView.render();
         else if (tab === 'envios') EnviosView.render();
+        else if (tab === 'wishlist') WishlistView.render();
+        else if (tab === 'keepa') KeepaView.render();
+        else if (tab === 'caja') CajaView.render();
+        else if (tab === 'settings') SettingsView.loadIntoForm();
         refreshNavCounts();
     }
 
@@ -96,9 +107,18 @@ const App = (() => {
             });
             date.textContent = fmt.format(now);
         }
-        // Alerts bell
+        // Alerts bell — Insights + opcional permiso push
         const bell = document.getElementById('tb-bell');
-        if (bell) bell.addEventListener('click', () => switchTab('insights'));
+        if (bell) {
+            bell.addEventListener('click', async () => {
+                if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+                    await requestOpsNotifyPermission();
+                } else {
+                    await maybeNotifyOpsAlerts();
+                }
+                switchTab('insights');
+            });
+        }
         refreshNavCounts();
         window.State.subscribe(refreshNavCounts);
 
@@ -162,6 +182,26 @@ const App = (() => {
             sbEnv.textContent = pendingShip;
             sbEnv.hidden = pendingShip === 0;
             sbEnv.classList.toggle('badge-alert', pendingShip > 0);
+        }
+
+        const pendingWish = window.WishlistView?.pendingCount?.() || 0;
+        const sbWish = document.getElementById('sb-count-wishlist');
+        if (sbWish) {
+            sbWish.textContent = pendingWish;
+            sbWish.hidden = pendingWish === 0;
+        }
+
+        const pendingCaja = window.CajaView?.pendingCount?.() || 0;
+        const sbCaja = document.getElementById('sb-count-caja');
+        if (sbCaja) {
+            sbCaja.textContent = pendingCaja;
+            sbCaja.hidden = pendingCaja === 0;
+            sbCaja.classList.toggle('badge-alert', pendingCaja > 0);
+        }
+        const mCaja = document.getElementById('m-tab-caja');
+        if (mCaja) {
+            mCaja.textContent = pendingCaja;
+            mCaja.hidden = pendingCaja === 0;
         }
     }
 
@@ -238,7 +278,17 @@ const App = (() => {
             return;
         }
         window.State.ui = { ...window.State.ui, backupDirty: true };
-        window.State.saveUI();
+        // Persistir el flag sin reentrar al wrapper de saveUI.
+        const prevBackupSkip = window.__skipBackupDirty;
+        const prevSyncSkip = window.__skipSync;
+        window.__skipBackupDirty = true;
+        window.__skipSync = true;
+        try {
+            window.State.saveUI();
+        } finally {
+            window.__skipBackupDirty = prevBackupSkip;
+            window.__skipSync = prevSyncSkip;
+        }
         refreshBackupHint();
     }
 
@@ -248,7 +298,18 @@ const App = (() => {
             backupDirty: false,
             lastBackupAt: new Date().toISOString(),
         };
-        window.State.saveUI();
+        // Este guardado solo actualiza metadatos del respaldo; no debe disparar
+        // otro auto-respaldo ni otro push de Sync.
+        const prevBackupSkip = window.__skipBackupDirty;
+        const prevSyncSkip = window.__skipSync;
+        window.__skipBackupDirty = true;
+        window.__skipSync = true;
+        try {
+            window.State.saveUI();
+        } finally {
+            window.__skipBackupDirty = prevBackupSkip;
+            window.__skipSync = prevSyncSkip;
+        }
         refreshBackupHint();
     }
 
@@ -314,27 +375,59 @@ const App = (() => {
                 });
                 if (!ok) return;
                 if (data.stores?.meli || data.stores?.amazon) {
-                    const m = data.stores.meli || { lotes: [], settings: {} };
-                    const a = data.stores.amazon || { lotes: [], settings: {} };
-                    Data.saveLotes((m.lotes || []).map(l => Data.normalize(l, [], 'meli')), 'meli');
-                    Data.saveSettings({ ...Calc.defaultsFor('meli'), ...(m.settings || {}), marketplace: 'meli' }, 'meli');
-                    Data.saveLotes((a.lotes || []).map(l => Data.normalize(l, [], 'amazon')), 'amazon');
-                    Data.saveSettings({ ...Calc.defaultsFor('amazon'), ...(a.settings || {}), marketplace: 'amazon' }, 'amazon');
+                    // Solo pisa el catálogo si el respaldo trae productos;
+                    // un slice vacío no borra un catálogo local con datos (misma regla que Sync).
+                    const restoreStore = (mp, slice) => {
+                        if (!slice || typeof slice !== 'object') return;
+                        const incoming = Array.isArray(slice.lotes) ? slice.lotes : [];
+                        const localN = (Data.peekLotes?.(mp) || Data.loadLotes(mp) || []).length;
+                        if (incoming.length === 0 && localN > 0) return;
+                        Data.saveLotes(incoming.map(l => Data.normalize(l, [], mp)), mp);
+                        Data.saveSettings({
+                            ...Calc.defaultsFor(mp),
+                            ...(slice.settings || {}),
+                            marketplace: mp,
+                        }, mp);
+                    };
+                    if (data.stores.meli) restoreStore('meli', data.stores.meli);
+                    if (data.stores.amazon) restoreStore('amazon', data.stores.amazon);
                     const mp = data.marketplace === 'amazon' ? 'amazon' : 'meli';
                     window.State.marketplace = mp;
-                    window.State.ui = { ...window.State.ui, marketplace: mp, mpView: mp };
+                    const uiFromBackup = (data.ui && typeof data.ui === 'object') ? { ...data.ui } : {};
+                    delete uiFromBackup.keepaApiKey;
+                    delete uiFromBackup.keepaCache;
+                    window.State.ui = {
+                        ...window.State.ui,
+                        ...uiFromBackup,
+                        marketplace: mp,
+                        mpView: uiFromBackup.mpView === 'general' ? 'general' : mp,
+                    };
                     window.State.saveUI();
                     window.State.lotes = Data.loadLotes(mp);
                     window.State.settings = Data.loadSettings(mp);
                 } else {
-                    window.State.lotes = data.lotes.map(l => Data.normalize(l, []));
+                    const legacyMp = data.marketplace === 'amazon'
+                        || data.settings?.marketplace === 'amazon'
+                        ? 'amazon'
+                        : (window.State.marketplace === 'amazon' ? 'amazon' : 'meli');
+                    if (legacyMp !== window.State.marketplace) {
+                        window.State.switchMarketplace(legacyMp);
+                    }
+                    window.State.lotes = data.lotes.map(l => Data.normalize(l, [], legacyMp));
                     if (data.settings) {
                         window.State.settings = {
-                            ...Calc.defaultsFor(window.State.marketplace),
+                            ...Calc.defaultsFor(legacyMp),
                             ...data.settings,
-                            marketplace: window.State.marketplace,
+                            marketplace: legacyMp,
                         };
                         window.State.saveSettings();
+                    }
+                    if (data.ui && typeof data.ui === 'object') {
+                        const legacyUI = { ...data.ui };
+                        delete legacyUI.keepaApiKey;
+                        delete legacyUI.keepaCache;
+                        window.State.ui = { ...window.State.ui, ...legacyUI, marketplace: legacyMp };
+                        window.State.saveUI();
                     }
                     window.State.save();
                 }
@@ -343,6 +436,15 @@ const App = (() => {
                 markBackupDone();
                 UI.toast('Respaldo restaurado');
                 window.State.notify();
+                // Refresca la vista abierta (wishlist/caja incluidos)
+                if (window.State.view === 'wishlist') WishlistView?.render?.();
+                else if (window.State.view === 'keepa') KeepaView?.render?.();
+                else if (window.State.view === 'caja') CajaView?.render?.();
+                else if (window.State.view === 'dashboard') DashboardView?.render?.();
+                else if (window.State.view === 'lotes') LotesView?.render?.();
+                else if (window.State.view === 'envios') EnviosView?.render?.();
+                else if (window.State.view === 'insights') InsightsView?.render?.();
+                refreshNavCounts();
             } catch (err) {
                 UI.toast('Error: ' + err.message, 'error');
             } finally {
@@ -357,36 +459,219 @@ const App = (() => {
         else if (choice === 'import') document.getElementById('file-backup').click();
     }
 
-    function exportJSON() {
+    function buildBackupPayload() {
         const active = Data.normalizeMarketplace(window.State.marketplace);
         Data.saveLotes(window.State.lotes, active);
         Data.saveSettings(window.State.settings, active);
-        const data = {
-            version: 4,
+        const meliLotes = active === 'meli' ? window.State.lotes : Data.loadLotes('meli');
+        const amzLotes = active === 'amazon' ? window.State.lotes : Data.loadLotes('amazon');
+        const backupUI = { ...(window.State.ui || {}) };
+        // Credencial y caché efímero de Keepa nunca salen en respaldos exportables.
+        delete backupUI.keepaApiKey;
+        delete backupUI.keepaCache;
+        return {
+            version: 5,
             exportedAt: new Date().toISOString(),
             marketplace: active,
             lotes: window.State.lotes,
             settings: window.State.settings,
+            ui: {
+                ...backupUI,
+                // Asegura wishlist + bolsitas en el JSON
+                wishlistAmazon: window.State.ui?.wishlistAmazon || [],
+                capitalAlloc: window.State.ui?.capitalAlloc || {},
+            },
             stores: {
                 meli: {
-                    lotes: active === 'meli' ? window.State.lotes : Data.loadLotes('meli'),
+                    lotes: meliLotes,
                     settings: active === 'meli' ? window.State.settings : Data.loadSettings('meli'),
                 },
                 amazon: {
-                    lotes: active === 'amazon' ? window.State.lotes : Data.loadLotes('amazon'),
+                    lotes: amzLotes,
                     settings: active === 'amazon' ? window.State.settings : Data.loadSettings('amazon'),
                 },
             },
+            _counts: { meli: (meliLotes || []).length, amazon: (amzLotes || []).length },
         };
+    }
+
+    function scrubKeepaFromStoredBackup() {
+        try {
+            const raw = localStorage.getItem('vm.autoBackup');
+            if (!raw) return;
+            const stored = JSON.parse(raw);
+            const ui = stored?.data?.ui;
+            if (!ui || typeof ui !== 'object') return;
+            if (!('keepaApiKey' in ui) && !('keepaCache' in ui)) return;
+            delete ui.keepaApiKey;
+            delete ui.keepaCache;
+            localStorage.setItem('vm.autoBackup', JSON.stringify(stored));
+        } catch (err) {
+            console.warn('[backup] no se pudo sanear Keepa', err);
+        }
+    }
+
+    function downloadBackupBlob(data, { silent = false } = {}) {
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `ventas-meli_backup_${new Date().toISOString().slice(0, 10)}.json`;
+        const stamp = (data.exportedAt || new Date().toISOString()).replace(/[:.]/g, '-').slice(0, 19);
+        a.download = `ventas-backup_${stamp}.json`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 100);
         markBackupDone();
-        UI.toast('Respaldo JSON descargado');
+        const nAmz = data._counts?.amazon ?? (data.stores?.amazon?.lotes || []).length;
+        UI.toast(silent ? `Amazon ${nAmz} SKUs` : `Respaldo JSON · Amazon ${nAmz} SKUs`);
+        return { nAmz, nMeli: data._counts?.meli ?? 0 };
+    }
+
+    function exportJSON({ silent = false } = {}) {
+        return downloadBackupBlob(buildBackupPayload(), { silent });
+    }
+
+    /** Auto-respaldo local (JSON + timestamp) sin spamear descargas. */
+    let lastAmzToastAt = 0;
+    let lastAmzToastN = null;
+    function persistAutoBackupLocal() {
+        const data = buildBackupPayload();
+        const stamp = data.exportedAt;
+        const nAmz = data._counts.amazon;
+        try {
+            localStorage.setItem('vm.autoBackup', JSON.stringify({ at: stamp, data }));
+            const metaRaw = localStorage.getItem('vm.autoBackupMeta');
+            const meta = metaRaw ? JSON.parse(metaRaw) : [];
+            const next = [{ at: stamp, nAmz, nMeli: data._counts.meli }, ...(Array.isArray(meta) ? meta : [])].slice(0, 8);
+            localStorage.setItem('vm.autoBackupMeta', JSON.stringify(next));
+            markBackupDone();
+            const now = Date.now();
+            if (nAmz !== lastAmzToastN || now - lastAmzToastAt > 12000) {
+                lastAmzToastAt = now;
+                lastAmzToastN = nAmz;
+                UI.toast(`Amazon ${nAmz} SKUs`);
+            }
+        } catch (err) {
+            console.warn('[auto-backup] quota → descarga', err);
+            downloadBackupBlob(data, { silent: true });
+        }
+    }
+
+    let autoBackupTimer = null;
+    function scheduleAutoBackup() {
+        if (cloudBackupActive()) return;
+        clearTimeout(autoBackupTimer);
+        autoBackupTimer = setTimeout(() => {
+            try {
+                window.__skipBackupDirty = true;
+                persistAutoBackupLocal();
+            } catch (err) {
+                console.warn('[auto-backup]', err);
+            } finally {
+                window.__skipBackupDirty = false;
+            }
+        }, 1800);
+    }
+
+    // ---- Ops alerts (PWA Notification + toast) --------------------------
+    function collectOpsAlerts() {
+        const out = [];
+        const both = typeof Data.loadBothCatalogs === 'function'
+            ? Data.loadBothCatalogs()
+            : {
+                meli: { lotes: Data.loadLotes('meli'), settings: Data.loadSettings('meli') },
+                amazon: { lotes: Data.loadLotes('amazon'), settings: Data.loadSettings('amazon') },
+            };
+        [['meli', both.meli], ['amazon', both.amazon]].forEach(([mp, pack]) => {
+            const agg = Calc.aggregate(pack.lotes || [], pack.settings || {});
+            (agg.rows || []).forEach(({ lote, calc }) => {
+                const name = lote.producto || lote.sku || 'SKU';
+                const tag = mp === 'amazon' ? 'Amz' : 'Meli';
+                if (calc.estrategia === 'AGOTADO' || (calc.inventarioRestante === 0 && (calc.vendidas || 0) > 0)) {
+                    out.push({
+                        id: `stockout:${mp}:${lote.id}`,
+                        kind: 'stockout',
+                        title: `Stockout · ${name}`,
+                        body: `${tag}: sin piezas. Revisa recompra.`,
+                    });
+                }
+                const fecha = lote.fecha ? new Date(lote.fecha) : null;
+                const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
+                if (fecha && calc.inventarioRestante > 0 && ventas.length === 0) {
+                    const dias = Math.floor((Date.now() - fecha.getTime()) / 86400000);
+                    if (dias >= 30) {
+                        out.push({
+                            id: `stagnant:${mp}:${lote.id}`,
+                            kind: 'stagnant',
+                            title: `Estancado 30d · ${name}`,
+                            body: `${tag}: ${dias}d sin ventas · ${Calc.fmtMXN(calc.valorInventario)} atrapados.`,
+                        });
+                    }
+                }
+                if (calc.adsStatus === 'over') {
+                    out.push({
+                        id: `ads:${mp}:${lote.id}`,
+                        kind: 'ads',
+                        title: `Ads > tope CPA · ${name}`,
+                        body: `${tag}: ${Calc.fmtMXN(calc.adsPorVenta)}/venta vs tope ${Calc.fmtMXN(calc.topeCPA)}.`,
+                    });
+                }
+            });
+        });
+        return out;
+    }
+
+    function notifiedTodayKey(id) {
+        const day = new Date().toISOString().slice(0, 10);
+        return `vm-alert:${day}:${id}`;
+    }
+
+    async function maybeNotifyOpsAlerts({ forceToast = false } = {}) {
+        const alerts = collectOpsAlerts().slice(0, 8);
+        if (!alerts.length) return;
+
+        let perm = (typeof Notification !== 'undefined') ? Notification.permission : 'denied';
+        if (perm === 'default' && forceToast === false) {
+            // No pedir permiso automáticamente; el usuario puede activarlo con la campana
+            perm = 'denied';
+        }
+
+        const fresh = alerts.filter(a => !sessionStorage.getItem(notifiedTodayKey(a.id)));
+        if (!fresh.length) return;
+
+        const show = fresh.slice(0, 3);
+        for (const a of show) {
+            sessionStorage.setItem(notifiedTodayKey(a.id), '1');
+            if (perm === 'granted') {
+                try {
+                    const reg = await navigator.serviceWorker?.ready;
+                    if (reg?.showNotification) {
+                        await reg.showNotification(a.title, {
+                            body: a.body,
+                            tag: a.id,
+                        });
+                        continue;
+                    }
+                    new Notification(a.title, { body: a.body, tag: a.id });
+                    continue;
+                } catch { /* fallback toast */ }
+            }
+            UI.toast?.(`${a.title} — ${a.body}`, a.kind === 'ads' ? 'error' : 'info', 5000);
+        }
+    }
+
+    async function requestOpsNotifyPermission() {
+        if (typeof Notification === 'undefined') {
+            UI.toast?.('Este navegador no soporta notificaciones', 'error');
+            return false;
+        }
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') {
+            UI.toast?.('Alertas activadas · stockout, estancado 30d, Ads>CPA');
+            await maybeNotifyOpsAlerts({ forceToast: false });
+            return true;
+        }
+        UI.toast?.('Permiso denegado · se usarán toasts', 'info');
+        return false;
     }
 
     // ---- Settings ------------------------------------------------------
@@ -453,6 +738,14 @@ const App = (() => {
         }
         window.State.save();
 
+        // Ventas borradas dejan liberaciones huérfanas → limpiar bolsitas del MP activo
+        try {
+            const mp = Data.currentMarketplace();
+            window.DashboardView?.purgeOrphanSaleLiberations?.({ [mp]: window.State.lotes });
+        } catch (err) {
+            console.warn('[app] purge bolsitas after clear ventas', err);
+        }
+
         try {
             if (window.Sync?.pushNow) {
                 // Esperar un momento a que la sesión esté lista
@@ -479,61 +772,11 @@ const App = (() => {
         else if (window.State.view === 'insights') InsightsView.render();
         else if (window.State.view === 'lotes') LotesView.render();
         else if (window.State.view === 'envios') EnviosView.render();
+        else if (window.State.view === 'wishlist') WishlistView.render();
+        else if (window.State.view === 'keepa') KeepaView.render();
+        else if (window.State.view === 'caja') CajaView.render();
         refreshNavCounts();
         return true;
-    }
-
-    async function maybeFixCocoliFromUrl() {
-        const params = new URLSearchParams(location.search);
-        if (params.get('fix') !== 'cocoli') return;
-        window.State.switchMarketplace('amazon');
-        let lotes = Data.loadLotes('amazon');
-        // Prasada 2.28 L @ $439 → Calculadora: alm 1.75, varios 0 → $78.00
-        lotes = lotes.map(l => {
-            const name = String(l.producto || '').toLowerCase()
-                .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-            const sku = String(l.sku || '').toUpperCase();
-            const isPrasada = name.includes('prasada')
-                || (name.includes('aceite') && name.includes('coco') && name.includes('2.28'))
-                || sku.includes('PRASADA')
-                || (Number(l.precio) === 439 && Number(l.costo) === 295.64);
-            if (!isPrasada) return l;
-            return Data.normalize({
-                ...l,
-                tipo: 'FBA',
-                categoria: 'Alimentación y Gourmet',
-                categoriaAmazon: 'alimentacion',
-                tamanoFba: 'estandar',
-                pesoKg: Number(l.pesoKg) > 0 ? Number(l.pesoKg) : 2.28,
-                almacenamiento: 1.75,
-                varios: 0,
-                envio: 0,
-            }, lotes);
-        });
-        window.State.lotes = lotes;
-        window.State.settings = {
-            ...Data.loadSettings('amazon'),
-            referidoSobreSinIVA: true,
-            usarTablaCategorias: true,
-            usarTablaFba: true,
-        };
-        window.State.saveSettings();
-        window.State.save();
-        refreshMarketplaceChrome();
-        switchTab('lotes');
-        const l = lotes.find(x => {
-            const n = String(x.producto || '').toLowerCase();
-            return n.includes('prasada') || (Number(x.precio) === 439 && Number(x.costo) === 295.64);
-        });
-        if (l && window.LotesView?.selectAndGo) LotesView.selectAndGo(l.id);
-        else LotesView.render();
-        const c = l ? Calc.computeLote(l, window.State.settings) : null;
-        UI.toast(c
-            ? `Prasada alineado · utilidad ${Calc.fmtMXN(c.utilidad)}`
-            : 'No encontré Prasada Aceite de coco');
-        params.delete('fix');
-        const q = params.toString();
-        history.replaceState({}, '', location.pathname + (q ? '?' + q : '') + location.hash);
     }
 
     async function maybeClearVentasFromUrl() {
@@ -570,13 +813,13 @@ const App = (() => {
         const sub = document.querySelector('.sb-brand-text .sub');
         if (sub) {
             sub.textContent = mpView === 'general'
-                ? 'Pulso del negocio · Meli + Amazon'
-                : (mp === 'amazon' ? 'Amazon México · rentabilidad' : 'Mercado Libre · rentabilidad');
+                ? 'Hoy · capital y agenda'
+                : (mp === 'amazon' ? 'Catálogo Amazon MX' : 'Catálogo Mercado Libre');
         }
         const root = document.querySelector('.tb-crumb-root');
         if (root) root.textContent = mpView === 'general' ? 'General' : meta.short;
         const curr = document.getElementById('tb-current');
-        if (curr && mpView === 'general') curr.textContent = 'Pulso';
+        if (curr && mpView === 'general') curr.textContent = 'Hoy';
         document.body.dataset.marketplace = mp;
         document.body.dataset.mpView = mpView;
 
@@ -596,12 +839,14 @@ const App = (() => {
         const mpHint = document.querySelector('.sb-mp-hint');
         if (mpHint) {
             mpHint.textContent = isGeneral
-                ? 'Consolida ambos canales. Agenda, metas y capital del negocio aquí.'
-                : 'General = corazón del negocio. Productos siguen por catálogo.';
+                ? 'Checklist, agenda y metas. Productos en cada catálogo.'
+                : 'Cambia a General para el pulso del día.';
         }
 
+        // Cards/flags por catálogo activo (incluso en General: Ajustes usa el MP subyacente).
+        // Envíos y similares se ocultan en General vía data-feature / data-hide-on-general.
         document.querySelectorAll('[data-mp-only]').forEach(el => {
-            el.hidden = isGeneral || el.dataset.mpOnly !== mp;
+            el.hidden = el.dataset.mpOnly !== mp;
         });
         document.querySelectorAll('[data-mp-field]').forEach(el => {
             el.hidden = el.dataset.mpField !== mp;
@@ -612,6 +857,9 @@ const App = (() => {
             el.hidden = !prepOn;
         });
         if (!isGeneral && window.State.view === 'envios' && !prepOn) {
+            switchTab('lotes');
+        }
+        if (!isGeneral && ['wishlist', 'keepa'].includes(window.State.view) && mp !== 'amazon') {
             switchTab('lotes');
         }
         // Labels del modal
@@ -662,7 +910,7 @@ const App = (() => {
             window.State.saveUI();
             refreshMarketplaceChrome();
             switchTab('dashboard');
-            if (toast) UI.toast('Consola General · Meli + Amazon');
+            if (toast) UI.toast('General · checklist y agenda');
             return;
         }
 
@@ -677,13 +925,16 @@ const App = (() => {
         else if (window.State.view === 'insights') InsightsView.render();
         else if (window.State.view === 'lotes') LotesView.render();
         else if (window.State.view === 'envios') EnviosView.render();
+        else if (window.State.view === 'wishlist') WishlistView.render();
+        else if (window.State.view === 'keepa') KeepaView.render();
+        else if (window.State.view === 'caja') CajaView.render();
         refreshNavCounts();
         if (document.body.classList.contains('nav-open')) {
             document.body.classList.remove('nav-open');
             const overlay = document.getElementById('nav-overlay');
             if (overlay) overlay.hidden = true;
         }
-        if (toast) UI.toast(mp === 'amazon' ? 'Catálogo Amazon' : 'Catálogo Mercado Libre');
+        if (toast) UI.toast(mp === 'amazon' ? 'Amazon' : 'Mercado Libre');
     }
 
     function scrollGeneralSection(id) {
@@ -694,6 +945,7 @@ const App = (() => {
             UI.toast?.('Sección no disponible en esta vista', 'error');
             return;
         }
+        if (el.tagName === 'DETAILS' && !el.open) el.open = true;
         const scroller = el.closest('.dash-body') || el.closest('.content');
         if (scroller) {
             const sRect = scroller.getBoundingClientRect();
@@ -717,12 +969,6 @@ const App = (() => {
                 applyMarketplaceView(mpBtn.dataset.marketplace);
                 return;
             }
-            const jump = e.target.closest('[data-mp-jump]');
-            if (jump) {
-                e.preventDefault();
-                applyMarketplaceView(jump.dataset.mpJump);
-                return;
-            }
             const gx = e.target.closest('[data-gx-jump]');
             if (gx) {
                 e.preventDefault();
@@ -739,6 +985,7 @@ const App = (() => {
     // ---- Init ----------------------------------------------------------
     function init() {
         window.State.ui = Data.loadUI();
+        scrubKeepaFromStoredBackup();
         window.State.marketplace = Data.normalizeMarketplace(window.State.ui.marketplace);
         if (!window.State.ui.mpView) {
             window.State.ui = {
@@ -762,19 +1009,57 @@ const App = (() => {
 
         LotesView.init();
         EnviosView.init();
+        WishlistView.init();
+        CajaView.init();
         DashboardView.init();
         InsightsView.init();
         SettingsView.init();
         Palette.init(App);
 
-        // Marcar dirty en cada guardado de lotes (excepto si acabamos de respaldar)
+        // Migra asignaciones desde ledger + limpia bolsitas de ventas ya borradas
+        try {
+            let hydrated = false;
+            const both = { meli: null, amazon: null };
+            ['meli', 'amazon'].forEach(mp => {
+                const lotes = mp === Data.currentMarketplace()
+                    ? window.State.lotes
+                    : Data.loadLotes(mp);
+                both[mp] = lotes;
+                if (Data.hydrateCobroFromLedger?.(lotes, mp)) {
+                    Data.saveLotes(lotes, mp);
+                    hydrated = true;
+                    if (mp === Data.currentMarketplace()) window.State.lotes = lotes;
+                }
+            });
+            const purged = window.DashboardView?.purgeOrphanSaleLiberations?.(both);
+            // Reconciliar también si el MP activo no estaba en el loop de purge con cambio
+            ['meli', 'amazon'].forEach(mp => {
+                window.DashboardView?.reconcileAllocFromLedger?.(mp);
+            });
+            if (hydrated || (purged?.n > 0)) window.App?.refreshNavCounts?.();
+        } catch { /* ignore */ }
+
+        // Marcar dirty + auto-respaldo JSON en cada guardado.
+        // UI contiene datos de negocio (Wishlist y Mis bolsitas), no solo layout.
         const origSave = window.State.save.bind(window.State);
         window.State.save = () => {
             origSave();
-            if (!window.__skipBackupDirty) markBackupNeeded();
+            if (!window.__skipBackupDirty) {
+                markBackupNeeded();
+                scheduleAutoBackup();
+            }
+            setTimeout(() => maybeNotifyOpsAlerts().catch(() => {}), 400);
+        };
+        const origSaveUI = window.State.saveUI.bind(window.State);
+        window.State.saveUI = () => {
+            origSaveUI();
+            if (!window.__skipBackupDirty) {
+                markBackupNeeded();
+                scheduleAutoBackup();
+            }
         };
 
-        // Sync Supabase (después de wrap de dirty, Sync vuelve a envolver save)
+        // Sync Supabase (después de wrap de dirty, Sync vuelve a envolver saves)
         const syncReady = window.Sync
             ? Sync.init().catch(err => console.warn('[sync] init', err))
             : Promise.resolve();
@@ -782,14 +1067,13 @@ const App = (() => {
         refreshBackupHint();
         // Más tarde: da tiempo a Sync.init() a restaurar sesión Supabase
         setTimeout(() => maybeRemindBackup(), 2200);
+        setTimeout(() => maybeNotifyOpsAlerts().catch(() => {}), 2800);
 
         switchTab('dashboard');
 
         // ?clearVentas=1 → limpia después del pull de Sync
-        // ?fix=cocoli → alinea Aceite de coco con Calculadora Amazon
         syncReady.finally(() => {
             maybeClearVentasFromUrl().catch(err => console.warn('[clearVentas]', err));
-            maybeFixCocoliFromUrl().catch(err => console.warn('[fix-cocoli]', err));
         });
     }
 
@@ -812,5 +1096,8 @@ const App = (() => {
         refreshMarketplaceChrome,
         applyMarketplaceView,
         scrollGeneralSection,
+        requestOpsNotifyPermission,
+        maybeNotifyOpsAlerts,
+        exportJSON,
     };
 })();

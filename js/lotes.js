@@ -11,7 +11,6 @@ const LotesView = (() => {
         search: '',
         strategies: new Set(),   // Multi-select
         withStock: false,
-        shipPending: false,      // legacy filter (ya no se usa; cola en vista Envíos)
         selected: null,          // familyKey (producto normalizado)
         selectedVariant: null,   // id del lote/variante activa
         sort: { key: 'utilidad', dir: 'desc' },
@@ -21,33 +20,33 @@ const LotesView = (() => {
     };
 
     const ENVIO_LABELS = {
-        por_preparar: 'Por empaquetar',
-        empaquetado: 'Empaquetado',
-        etiqueta: 'Con etiqueta',
-        listo: 'Listo para llevar',
-        enviado: 'Enviado al cliente',
+        por_preparar: '📦 Por empaquetar',
+        empaquetado: '📦 Empaquetado',
+        etiqueta: '🏷 Con etiqueta',
+        listo: '📬 Listo para llevar',
+        enviado: '✅ Enviado al cliente',
     };
     /** FBA: tú mandas inventario AL almacén de Amazon (inbound). */
     const FBA_INBOUND_LABELS = {
-        creando: 'Creando envío',
-        por_enviar: 'Por enviar a FBA',
-        en_transito: 'En tránsito',
-        recibido: 'Recibido en FBA',
+        creando: '📝 Creando envío',
+        por_enviar: '📤 Por enviar a FBA',
+        en_transito: '🚚 En tránsito',
+        recibido: '✅ Recibido en FBA',
     };
     const ENVIO_ESTADOS_OPTS_FBM = [
         { value: '', label: '— Sin prep.' },
-        { value: 'por_preparar', label: 'Por empaquetar' },
-        { value: 'empaquetado', label: 'Empaquetado' },
-        { value: 'etiqueta', label: 'Con etiqueta' },
-        { value: 'listo', label: 'Listo para llevar' },
-        { value: 'enviado', label: 'Enviado al cliente' },
+        { value: 'por_preparar', label: '📦 Por empaquetar' },
+        { value: 'empaquetado', label: '📦 Empaquetado' },
+        { value: 'etiqueta', label: '🏷 Con etiqueta' },
+        { value: 'listo', label: '📬 Listo para llevar' },
+        { value: 'enviado', label: '✅ Enviado al cliente' },
     ];
     const ENVIO_ESTADOS_OPTS_FBA = [
         { value: '', label: '— Aún no' },
-        { value: 'creando', label: 'Creando envío' },
-        { value: 'por_enviar', label: 'Por enviar a FBA' },
-        { value: 'en_transito', label: 'En tránsito' },
-        { value: 'recibido', label: 'Recibido en FBA' },
+        { value: 'creando', label: '📝 Creando envío' },
+        { value: 'por_enviar', label: '📤 Por enviar a FBA' },
+        { value: 'en_transito', label: '🚚 En tránsito' },
+        { value: 'recibido', label: '✅ Recibido en FBA' },
     ];
 
     function isMobile() {
@@ -334,11 +333,45 @@ const LotesView = (() => {
         }
 
         bindDynamicEvents();
+        if (window.Keepa?.hydrate) {
+            Keepa.hydrate(document.getElementById('lotes-detail'));
+        }
 
         window.App?.refreshNavCounts?.();
     }
 
     // ---- Stats strip ---------------------------------------------------
+    function statPctBlock(ratio, label, tone = '') {
+        const r = Number(ratio);
+        const safe = Number.isFinite(r) ? r : 0;
+        const w = Math.max(0, Math.min(100, Math.round(Math.abs(safe) * 1000) / 10));
+        const toneCls = tone ? ` is-${tone}` : '';
+        return `
+            <div class="stat-pct${toneCls}">
+                <div class="stat-pct-top">
+                    <span class="stat-pct-num">${Calc.fmtPct(safe)}</span>
+                    <span class="stat-pct-lbl">${label}</span>
+                </div>
+                <div class="stat-meter" aria-hidden="true">
+                    <div class="stat-meter-fill" style="--p:${w}%"></div>
+                </div>
+            </div>`;
+    }
+
+    /** Bloque % vacío / N/A (sin barra engañosa). */
+    function statPctNA(label, note = '—') {
+        return `
+            <div class="stat-pct is-na">
+                <div class="stat-pct-top">
+                    <span class="stat-pct-num">${note}</span>
+                    <span class="stat-pct-lbl">${label}</span>
+                </div>
+                <div class="stat-meter" aria-hidden="true">
+                    <div class="stat-meter-fill" style="--p:0%"></div>
+                </div>
+            </div>`;
+    }
+
     function renderStats() {
         const agg = Calc.aggregate(window.State.lotes, window.State.settings);
         const nProd = totalProductCount();
@@ -347,39 +380,80 @@ const LotesView = (() => {
         const liqN = agg.strategyCount.LIQUIDAR || 0;
         const agoN = agg.strategyCount.AGOTADO || 0;
         const pauN = agg.strategyCount.PAUSADA || 0;
+        const finN = agg.strategyCount.FINALIZADA || 0;
+        const nVar = agg.rows.length;
         const activos = agg.rows.filter(r => r.calc.inventarioRestante > 0).length;
         const utilPot = agg.rows.reduce((s, r) => s + r.calc.utilidad * r.calc.inventarioRestante, 0);
-        const total = agg.rows.length || 1;
+        const total = nVar || 1;
+        const pctConStock = nVar > 0 ? activos / nVar : 0;
+        const capital = agg.capitalDesplegado || 0;
+        const pctEnInventario = capital > 0 ? agg.valorInventario / capital : 0;
+        const hasSales = (agg.totalVendidas || 0) > 0 || Math.abs(agg.gananciaRealizada || 0) > 0.009;
+        const roiCapital = capital > 0 ? agg.gananciaRealizada / capital : null;
+        const upsideTotal = agg.gananciaRealizada + utilPot;
+        // Si hay pérdida realizada, el % pendiente se acota a 0–100% para no engañar
+        const pctUpsidePendiente = upsideTotal > 0.009
+            ? Math.max(0, Math.min(1, utilPot / upsideTotal))
+            : (utilPot > 0.009 ? 1 : 0);
+        const barTotal = (escN + manN + liqN + agoN + pauN + finN) || 1;
+        const pctEscalar = escN / total;
+        const roiTone = (roiCapital || 0) >= 0 ? 'pos' : 'neg';
+        const gananciaPct = !hasSales
+            ? statPctNA('sin ventas', '—')
+            : (capital > 0
+                ? statPctBlock(roiCapital, 'ROI capital', roiTone)
+                : statPctNA('sin capital', '—'));
 
         return `
             <div class="stat">
                 <div class="stat-label"><span class="stat-icon">📦</span>Productos</div>
-                <div class="stat-value">${nProd}</div>
-                <div class="stat-sub">${agg.rows.length} variante${agg.rows.length === 1 ? '' : 's'} · ${activos} con stock</div>
+                <div class="stat-main">
+                    <div class="stat-value">${nProd}</div>
+                    ${statPctBlock(pctConStock, 'con stock', 'info')}
+                </div>
+                <div class="stat-sub">${nVar} variante${nVar === 1 ? '' : 's'} · ${activos} activa${activos === 1 ? '' : 's'}</div>
             </div>
             <div class="stat">
                 <div class="stat-label"><span class="stat-icon">💰</span>Capital desplegado</div>
-                <div class="stat-value">${Calc.fmtMXN(agg.capitalDesplegado)}</div>
-                <div class="stat-sub">Inventario al costo: ${Calc.fmtMXN(agg.valorInventario)}</div>
+                <div class="stat-main">
+                    <div class="stat-value">${Calc.fmtMXN(capital)}</div>
+                    ${capital > 0
+                        ? statPctBlock(pctEnInventario, 'en inventario', 'warn')
+                        : statPctNA('sin capital', '—')}
+                </div>
+                <div class="stat-sub">${Calc.fmtMXN(agg.valorInventario)} al costo</div>
             </div>
             <div class="stat">
                 <div class="stat-label"><span class="stat-icon">📈</span>Ganancia realizada</div>
-                <div class="stat-value ${agg.gananciaRealizada >= 0 ? 'pos' : 'neg'}">${Calc.fmtMXN(agg.gananciaRealizada)}</div>
-                <div class="stat-sub">Por precio real de cada venta</div>
+                <div class="stat-main">
+                    <div class="stat-value ${!hasSales ? '' : (agg.gananciaRealizada >= 0 ? 'pos' : 'neg')}">${hasSales ? Calc.fmtMXN(agg.gananciaRealizada) : '—'}</div>
+                    ${gananciaPct}
+                </div>
+                <div class="stat-sub">${hasSales ? 'Por precio real de cada venta' : 'Registra una venta para ver ROI'}</div>
             </div>
             <div class="stat">
                 <div class="stat-label"><span class="stat-icon">🎯</span>Utilidad potencial</div>
-                <div class="stat-value ${utilPot >= 0 ? 'pos' : 'neg'}">${Calc.fmtMXN(utilPot)}</div>
+                <div class="stat-main">
+                    <div class="stat-value ${utilPot >= 0 ? 'pos' : 'neg'}">${Calc.fmtMXN(utilPot)}</div>
+                    ${statPctBlock(pctUpsidePendiente, 'del upside', utilPot >= 0 ? 'pos' : 'neg')}
+                </div>
                 <div class="stat-sub">Al vender inventario restante</div>
             </div>
             <div class="stat stat-dist">
-                <div class="stat-label"><span class="stat-icon">🚦</span>Semáforo de estrategia</div>
+                <div class="stat-dist-head">
+                    <div class="stat-label"><span class="stat-icon">🚦</span>Semáforo de estrategia</div>
+                    <div class="stat-pct-pill is-pos">
+                        <span class="stat-pct-num">${Calc.fmtPct(pctEscalar)}</span>
+                        <span class="stat-pct-lbl">escalar</span>
+                    </div>
+                </div>
                 <div class="dist-track">
-                    <div class="dist-seg esc" style="width:${(escN/total)*100}%"></div>
-                    <div class="dist-seg man" style="width:${(manN/total)*100}%"></div>
-                    <div class="dist-seg liq" style="width:${(liqN/total)*100}%"></div>
-                    <div class="dist-seg ago" style="width:${(agoN/total)*100}%"></div>
-                    <div class="dist-seg pau" style="width:${(pauN/total)*100}%"></div>
+                    <div class="dist-seg esc" style="width:${(escN/barTotal)*100}%"></div>
+                    <div class="dist-seg man" style="width:${(manN/barTotal)*100}%"></div>
+                    <div class="dist-seg liq" style="width:${(liqN/barTotal)*100}%"></div>
+                    <div class="dist-seg ago" style="width:${(agoN/barTotal)*100}%"></div>
+                    <div class="dist-seg pau" style="width:${(pauN/barTotal)*100}%"></div>
+                    ${finN > 0 ? `<div class="dist-seg fin" style="width:${(finN/barTotal)*100}%"></div>` : ''}
                 </div>
                 <div class="dist-legend">
                     <button class="d-leg" data-strat="ESCALAR"><span class="d esc"></span>Escalar ${escN}</button>
@@ -387,6 +461,7 @@ const LotesView = (() => {
                     <button class="d-leg" data-strat="LIQUIDAR"><span class="d liq"></span>Liquidar ${liqN}</button>
                     ${agoN > 0 ? `<button class="d-leg" data-strat="AGOTADO"><span class="d ago"></span>Agotado ${agoN}</button>` : ''}
                     ${pauN > 0 ? `<button class="d-leg" data-strat="PAUSADA"><span class="d pau"></span>Pausada ${pauN}</button>` : ''}
+                    ${finN > 0 ? `<button class="d-leg" data-strat="FINALIZADA"><span class="d fin"></span>Finalizada ${finN}</button>` : ''}
                 </div>
             </div>
         `;
@@ -394,21 +469,27 @@ const LotesView = (() => {
 
     // ---- Chip filters --------------------------------------------------
     function renderChips() {
-        const isAmz = window.State.marketplace === 'amazon';
+        const agg = Calc.aggregate(window.State.lotes, window.State.settings);
+        const counts = agg.strategyCount || {};
+        const withStockN = (agg.rows || []).filter(r => r.calc.inventarioRestante > 0).length;
         const chips = [
-            { key: 'ESCALAR',  cls: 'esc', label: '🟢 Escalar' },
-            { key: 'MANTENER', cls: 'man', label: '🟡 Mantener' },
-            { key: 'LIQUIDAR', cls: 'liq', label: '🔴 Liquidar' },
-            { key: 'AGOTADO',  cls: 'ago', label: '🔵 Agotado' },
-            { key: 'PAUSADA',  cls: 'pau', label: '⏸️ Pausada' },
+            { key: 'ESCALAR',  cls: 'esc', label: 'Escalar' },
+            { key: 'MANTENER', cls: 'man', label: 'Mantener' },
+            { key: 'LIQUIDAR', cls: 'liq', label: 'Liquidar' },
+            { key: 'AGOTADO',  cls: 'ago', label: 'Agotado' },
+            { key: 'PAUSADA',  cls: 'pau', label: 'Pausada' },
+            { key: 'FINALIZADA', cls: 'fin', label: 'Finalizada' },
         ];
-        return chips.map(c => `
-            <button class="chip ${c.cls} ${local.strategies.has(c.key) ? 'active' : ''}" data-chip="${c.key}">
-                ${c.label}
-            </button>
-        `).join('') + `
-            <button class="chip ${local.withStock ? 'active' : ''}" data-toggle="withStock" title="Solo mostrar productos con stock">
-                📦 Con stock
+        return chips.map(c => {
+            const n = counts[c.key] || 0;
+            const empty = n === 0 ? ' is-empty' : '';
+            return `
+            <button class="chip ${c.cls}${empty} ${local.strategies.has(c.key) ? 'active' : ''}" data-chip="${c.key}" title="${n} variante${n === 1 ? '' : 's'}">
+                ${c.label} <span class="chip-n">${n}</span>
+            </button>`;
+        }).join('') + `
+            <button class="chip ${local.withStock ? 'active' : ''}${withStockN === 0 ? ' is-empty' : ''}" data-toggle="withStock" title="Solo mostrar productos con stock">
+                Con stock <span class="chip-n">${withStockN}</span>
             </button>
             ${local.strategies.size || local.withStock ? `
                 <button class="chip chip-clear" data-clear-filters>× Limpiar</button>
@@ -460,8 +541,9 @@ const LotesView = (() => {
                 : (f.archivadas
                     ? 'Sin colores activos'
                     : `${f.variants.length} variante${f.variants.length === 1 ? '' : 's'}`);
-            const thumb = f.imagen
-                ? `<img class="lotes-row-thumb" src="${f.imagen}" alt="" loading="lazy">`
+            const thumbSrc = safeImageSrc(f.imagen);
+            const thumb = thumbSrc
+                ? `<img class="lotes-row-thumb" src="${thumbSrc}" alt="" loading="lazy">`
                 : `<span class="lotes-row-thumb is-empty" aria-hidden="true"></span>`;
             return `
             <div class="lotes-row ${f.key===local.selected?'active':''}" data-select="${esc(f.key)}">
@@ -474,7 +556,11 @@ const LotesView = (() => {
                         ${f.categoria ? `<span>·</span><span>${esc(f.categoria)}</span>` : ''}
                         <span>·</span>
                         <span>Stock ${f.stockRest}/${f.stockTotal}</span>
-                        ${prepEnvioOn() && f.shipPending ? `<span>·</span><span class="ship-pending-tag">🚚 ${f.shipPending} por enviar</span>` : ''}
+                        ${(() => {
+                            const ship = shipListLabel(f);
+                            if (!ship) return '';
+                            return `<span>·</span><span class="ship-pending-tag${ship.done ? ' is-done' : ''}${ship.idle ? ' is-idle' : ''}">${esc(ship.text)}</span>`;
+                        })()}
                     </div>
                 </div>
                 <div class="lotes-metric ${f.utilidad>=0?'pos':'neg'}">
@@ -485,6 +571,55 @@ const LotesView = (() => {
         }).join('');
 
         return head + items;
+    }
+
+    /**
+     * Emoji + estado en lista (mismos textos que el select).
+     * Siempre visible en Amazon: creando / por enviar / tránsito / recibido / FBM…
+     */
+    function shipListLabel(f) {
+        if (!prepEnvioOn()) return null;
+
+        // FBA: estado inbound del lote (prioridad a pendiente; si no, el primero FBA)
+        const fbaVars = f.variants.filter(v => String(v.lote.tipo || '').toUpperCase() === 'FBA');
+        if (fbaVars.length) {
+            const pending = fbaVars.find(v => {
+                const e = v.lote.fbaInboundEstado || '';
+                return e && e !== 'recibido';
+            });
+            const pick = pending || fbaVars[0];
+            const st = pick.lote.fbaInboundEstado || '';
+            if (!st) return { text: '— Aún no (FBA)', idle: true, done: false };
+            const text = FBA_INBOUND_LABELS[st] || st;
+            return { text, done: st === 'recibido', idle: false };
+        }
+
+        // FBM: venta pendiente o última con estado
+        const fbmVars = f.variants.filter(v => String(v.lote.tipo || '').toUpperCase() === 'FBM');
+        if (!fbmVars.length) return null;
+
+        let pending = null;
+        let last = null;
+        for (const v of fbmVars) {
+            for (const venta of (v.lote.ventas || [])) {
+                if (!venta.envioEstado) continue;
+                last = venta;
+                if (venta.envioEstado !== 'enviado' && !pending) pending = venta;
+            }
+        }
+        if (pending) {
+            const text = ENVIO_LABELS[pending.envioEstado] || pending.envioEstado;
+            const extra = f.shipPending > 1 ? ` · +${f.shipPending - 1}` : '';
+            return { text: text + extra, done: false, idle: false };
+        }
+        if (last) {
+            return {
+                text: ENVIO_LABELS[last.envioEstado] || last.envioEstado,
+                done: last.envioEstado === 'enviado',
+                idle: false,
+            };
+        }
+        return { text: '— Sin prep. (FBM)', idle: true, done: false };
     }
 
     // ---- Detalle con tabs + selector de colores ------------------------
@@ -503,7 +638,7 @@ const LotesView = (() => {
         const { lote, calc } = row;
         const visibleVariants = family.variants.filter(v => isVariantVisible(v.lote, v.calc));
         const multi = visibleVariants.length > 1;
-        const imagen = family.imagen || lote.imagen || '';
+        const imagen = safeImageSrc(family.imagen || lote.imagen || '');
         const productId = family.productId || lote.productId || '';
 
         const colorPills = multi ? `
@@ -559,6 +694,9 @@ const LotesView = (() => {
                         ${multi ? `<span>·</span><span>${visibleVariants.length} colores</span>` : ''}
                     </div>
                     <div class="lotes-detail-actions">
+                        ${isAmzMarketplace() && lote.asin
+                            ? `<button type="button" class="btn btn-sm" data-action="open-keepa" data-id="${lote.id}">📈 Keepa</button>`
+                            : ''}
                         <button type="button" class="btn btn-sm" data-action="edit" data-id="${lote.id}">✏️ Editar</button>
                         <div class="kebab" data-kebab>
                             <button class="icon-btn" data-kebab-btn aria-label="Más acciones">⋯</button>
@@ -623,6 +761,11 @@ const LotesView = (() => {
                 </div>
             </div>
 
+            ${isAmzMarketplace() && lote.asin && !window.Keepa?.panelPrefs?.().off
+                ? `<div class="lotes-keepa" data-keepa-asin="${esc(lote.asin)}"
+                    data-keepa-product-id="${esc(lote.id)}"></div>`
+                : ''}
+
             <nav class="detail-tabs" role="tablist">
                 ${tabs.map(t => `
                     <button class="detail-tab ${local.detailTab===t.key?'active':''}" data-detail-tab="${t.key}">${t.label}</button>
@@ -661,7 +804,7 @@ const LotesView = (() => {
             ? Calc.AMZ_CATEGORIES[calc.categoriaAmazon].label
             : '';
         const comLabel = isAmz
-            ? `Referido ${catLabel ? `(${catLabel}) ` : ''}(${(calc.pctComision * 100).toFixed(1)}%)`
+            ? `Referido ${catLabel ? `(${catLabel}) ` : ''}(${(calc.pctComision * 100).toFixed(1)}% s/sin IVA)`
             : `Comisión Meli (${(calc.pctComision * 100).toFixed(0)}%)`;
         const envioLabel = isAmz
             ? (String(lote.tipo || '').toUpperCase() === 'FBM' ? 'Envío FBM' : 'FBA logística')
@@ -852,7 +995,7 @@ const LotesView = (() => {
                         <div class="envio-panel-info">
                             <strong>${esc(lote.sku || lote.producto)}</strong>
                             <span class="muted">· stock ${Math.max(0, (Number(lote.unidades) || 0) - (Number(lote.vendidas) || 0))} ud</span>
-                            ${yaEnFba ? `<span class="ship-badge ship-enviado">✓ Recibido en FBA</span>` : ''}
+                            ${yaEnFba ? `<span class="ship-badge ship-enviado">${esc(FBA_INBOUND_LABELS.recibido)}</span>` : ''}
                         </div>
                         <select class="ship-estado-select"
                             data-fba-inbound
@@ -1011,7 +1154,7 @@ const LotesView = (() => {
             ? Calc.AMZ_CATEGORIES[b.categoriaAmazon].label
             : '';
         const comLabel = isAmz
-            ? `Referido${catName ? ` · ${catName}` : ''} (${(b.pctComision * 100).toFixed(1)}%)`
+            ? `Referido${catName ? ` · ${catName}` : ''} (${(b.pctComision * 100).toFixed(1)}% s/sin IVA)`
             : `Comisión Meli (${(b.pctComision * 100).toFixed(0)}%)`;
         return `
             <div class="breakdown">
@@ -1209,6 +1352,8 @@ const LotesView = (() => {
                 local.strategies.clear();
                 local.withStock = false;
                 local.search = '';
+                const searchInp = document.getElementById('lotes-search');
+                if (searchInp) searchInp.value = '';
                 renderContent();
             });
         });
@@ -1300,6 +1445,10 @@ const LotesView = (() => {
                 const action = btn.dataset.action;
                 const id = btn.dataset.id;
                 if (action === 'edit') openModal(id);
+                else if (action === 'open-keepa') {
+                    const lote = window.State.lotes.find(item => item.id === id);
+                    if (lote?.asin) window.KeepaView?.openAsin?.(lote.asin);
+                }
                 else if (action === 'set-logistica') setLogistica(id, btn.dataset.tipo);
                 else if (action === 'dup') duplicate(id);
                 else if (action === 'del') await remove(id);
@@ -1397,7 +1546,17 @@ const LotesView = (() => {
         if (isNaN(n) || n < 0) { UI.toast('Valor inválido', 'error'); return; }
 
         if (field === 'precio') lote.precio = n;
-        else if (field === 'stock') lote.unidades = Math.round(n);
+        else if (field === 'stock') {
+            const vendidas = Data.syncVendidasFromVentas
+                ? Data.syncVendidasFromVentas(lote)
+                : (Number(lote.vendidas) || 0);
+            const next = Math.round(n);
+            if (next < vendidas) {
+                UI.toast(`No puede bajar de ${vendidas} (ya vendidas)`, 'error');
+                return;
+            }
+            lote.unidades = next;
+        }
         else if (field === 'gastoAds') lote.gastoAds = Math.round(n * 100) / 100;
 
         window.State.lotes = Data.upsertLote(window.State.lotes, lote);
@@ -1413,6 +1572,12 @@ const LotesView = (() => {
     const IMG_MAX_PX = 520;
     const IMG_QUALITY = 0.72;
     const IMG_MAX_BYTES = 180_000; // ~180 KB data URL por producto
+
+    /** Solo data:image…;base64 (lo que genera compressImageFile). Evita XSS vía src. */
+    function safeImageSrc(src) {
+        const s = String(src || '').trim();
+        return /^data:image\/(jpeg|jpg|png|webp);base64,/i.test(s) ? s : '';
+    }
 
     function compressImageFile(file) {
         return new Promise((resolve, reject) => {
@@ -1596,10 +1761,28 @@ const LotesView = (() => {
             danger: true,
         });
         if (!ok) return;
+        // Quitar liberaciones de bolsitas de las ventas del lote (si no, quedan fantasmas)
+        (l.ventas || []).forEach(v => {
+            if (!v?.id) return;
+            const fallback = Data.hasAsignacion?.(v) ? { ...v.asignacion } : null;
+            try {
+                window.DashboardView?.reverseSaleLiberation?.(v.id, fallback);
+            } catch (err) {
+                console.warn('[bolsitas] reverse al borrar lote', err);
+            }
+        });
         window.State.lotes = Data.deleteLote(window.State.lotes, id);
         if (local.selectedVariant === id) local.selectedVariant = null;
+        try {
+            window.DashboardView?.purgeOrphanSaleLiberations?.({
+                [Data.currentMarketplace()]: window.State.lotes,
+            });
+        } catch { /* ignore */ }
         window.State.save();
         renderContent();
+        window.App?.refreshNavCounts?.();
+        if (window.State.view === 'dashboard') window.DashboardView?.render?.();
+        if (window.State.view === 'caja') window.CajaView?.render?.();
         UI.toast('Lote eliminado');
     }
 
@@ -1929,42 +2112,16 @@ const LotesView = (() => {
         }
         window.State.save();
 
-        // Auto-reparto por defecto: costo recuperado + ganancia → bolsitas
-        let allocMsg = '';
-        try {
-            const u = Calc.utilidadAtPrice(l, precio, window.State.settings).utilidad;
-            const liberated = (Math.max(0, Number(l.costo) || 0) + (Number(u) || 0)) * uds;
-            const entry = window.DashboardView?.applySaleLiberation?.(liberated, {
-                ventaId: venta?.id,
-                loteId: l.id,
-                unidades: uds,
-                precio,
-                fecha,
-            });
-            if (entry && liberated > 0) {
-                const s = entry.splits || {};
-                const parts = [
-                    s.reinversion > 0 ? `Reinversión ${Calc.fmtMXN(s.reinversion)}` : '',
-                    s.reserva > 0 ? `Reserva ${Calc.fmtMXN(s.reserva)}` : '',
-                    s.ads > 0 ? `Ads ${Calc.fmtMXN(s.ads)}` : '',
-                    s.insumos > 0 ? `Insumos ${Calc.fmtMXN(s.insumos)}` : '',
-                    s.utilidad > 0 ? `Utilidad ${Calc.fmtMXN(s.utilidad)}` : '',
-                ].filter(Boolean);
-                allocMsg = parts.length
-                    ? ` · bolsitas ${Calc.fmtMXN(liberated)} (${parts.join(' · ')})`
-                    : ` · bolsitas ${Calc.fmtMXN(liberated)}`;
-            }
-        } catch { /* no bloquear la venta */ }
-
         renderContent();
         window.App?.refreshNavCounts?.();
         UI.playMoneySound?.();
         const shipMsg = envioEstado && envioEstado !== 'enviado'
             ? ' · quedó en Envíos'
             : '';
+        const cajaMsg = ' · por cobrar en Caja';
         UI.toast(multi
-            ? `Venta registrada · ${l.variante || 'variante'} (−${uds})${shipMsg}${allocMsg}`
-            : `Venta registrada${shipMsg}${allocMsg}`);
+            ? `Venta registrada · ${l.variante || 'variante'} (−${uds})${shipMsg}${cajaMsg}`
+            : `Venta registrada${shipMsg}${cajaMsg}`);
     }
 
     async function removeSale(loteId, ventaId) {
@@ -1976,12 +2133,24 @@ const LotesView = (() => {
             primaryLabel: 'Eliminar', danger: true
         });
         if (!ok) return;
+        // Guardar asignacion ANTES de borrar (fallback si el ledger no matchea)
+        const venta = (l.ventas || []).find(x => x.id === ventaId);
+        const fallbackSplits = Data.hasAsignacion?.(venta) ? { ...venta.asignacion } : null;
+
+        let reversed = false;
+        try {
+            reversed = !!window.DashboardView?.reverseSaleLiberation?.(ventaId, fallbackSplits);
+        } catch (err) {
+            console.warn('[bolsitas] reverse al borrar venta', err);
+        }
+
         Data.removeVenta(l, ventaId);
         window.State.lotes = Data.upsertLote(window.State.lotes, l);
         window.State.save();
-        let reversed = false;
-        try { reversed = !!window.DashboardView?.reverseSaleLiberation?.(ventaId); } catch { /* ignore */ }
         renderContent();
+        window.App?.refreshNavCounts?.();
+        if (window.State.view === 'dashboard') window.DashboardView?.render?.();
+        if (window.State.view === 'caja') window.CajaView?.render?.();
         UI.toast(reversed
             ? 'Venta eliminada · monto quitado de bolsitas'
             : 'Venta eliminada');
@@ -1996,6 +2165,7 @@ const LotesView = (() => {
         ['f-envio','envio'], ['f-gasto-ads','gastoAds'], ['f-estatus','estatus'],
         ['f-peso-kg','pesoKg'], ['f-tamano-fba','tamanoFba'], ['f-almacenamiento','almacenamiento'],
         ['f-varios','varios'],
+        ['f-asin','asin'], ['f-link-compra','linkCompra'], ['f-link-amazon','linkAmazon'],
     ];
 
     function openModal(id = null) {
@@ -2019,7 +2189,7 @@ const LotesView = (() => {
         activateModalTab('identidad');
         renderPreview();
         renderCategoriaDatalist();
-        setTimeout(() => document.getElementById('f-producto').focus(), 50);
+        setTimeout(() => document.getElementById('f-producto')?.focus(), 50);
     }
 
     function closeModal() {
@@ -2061,6 +2231,9 @@ const LotesView = (() => {
             varios: 0,
             fbaInboundEstado: '',
             ventas: [], historial: [],
+            asin: '',
+            linkCompra: '',
+            linkAmazon: '',
         };
     }
 
@@ -2126,10 +2299,20 @@ const LotesView = (() => {
             imagen: prev?.imagen || '',
             estatus: document.getElementById('f-estatus').value,
             notas: prev?.notas || '',
+            // El valor del campo manda: vaciarlo debe poder borrar el dato.
+            asin: (document.getElementById('f-asin')?.value || '').trim().toUpperCase(),
+            linkCompra: (document.getElementById('f-link-compra')?.value || '').trim(),
+            linkAmazon: (document.getElementById('f-link-amazon')?.value || '').trim(),
         };
     }
 
     function renderPreview() {
+        const asinEl = document.getElementById('f-asin');
+        const linkEl = document.getElementById('f-link-amazon');
+        if (asinEl && linkEl && !asinEl.value.trim()) {
+            const detected = window.Keepa?.extractAsin?.(linkEl.value);
+            if (detected) asinEl.value = detected;
+        }
         const l = getForm();
         const c = Calc.computeLote(l, window.State.settings);
         const isAmz = window.State.marketplace === 'amazon'
@@ -2169,6 +2352,16 @@ const LotesView = (() => {
     function save() {
         const l = getForm();
         if (!l.producto) { UI.toast('Falta el nombre del producto', 'error'); return; }
+        const prevLote = editing ? window.State.lotes.find(x => x.id === editing) : null;
+        if (prevLote) {
+            const vendidas = Data.syncVendidasFromVentas
+                ? Data.syncVendidasFromVentas(prevLote)
+                : (Number(prevLote.vendidas) || 0);
+            if (Number(l.unidades) < vendidas) {
+                UI.toast(`Las unidades no pueden bajar de ${vendidas} (ya vendidas)`, 'error');
+                return;
+            }
+        }
         if (!l.sku) {
             const existentes = window.State.lotes.map(x => x.sku).filter(Boolean);
             l.sku = Data.autoSku(l.producto, l.variante, existentes);
@@ -2200,6 +2393,73 @@ const LotesView = (() => {
         return true;
     }
 
+    /**
+     * Crea un lote Amazon desde Wishlist (1 ud) y abre el modal para ajustar.
+     */
+    function createFromWishlist(item) {
+        if (!item || window.State.marketplace !== 'amazon') {
+            UI.toast?.('Solo disponible en Amazon', 'error');
+            return null;
+        }
+        if (item.loteId) {
+            const exists = window.State.lotes.find(l => l.id === item.loteId);
+            if (exists) {
+                window.App?.switchTab('lotes');
+                openModal(exists.id);
+                return exists;
+            }
+        }
+
+        const settings = window.State.settings || {};
+        const catKey = item.categoriaAmazon
+            || settings.categoriaDefault
+            || 'hogar_cocina';
+        const catLabel = Calc.AMZ_CATEGORIES?.[catKey]?.label || catKey;
+        const producto = (item.titulo || '').trim()
+            || (item.asin ? `ASIN ${item.asin}` : '')
+            || (item.tienda ? `${item.tienda} · prospecto` : 'Producto wishlist');
+        const existentes = window.State.lotes.map(x => x.sku).filter(Boolean);
+        const sku = Data.autoSku(producto, '', existentes);
+
+        const noteParts = [];
+        if (item.tienda) noteParts.push(`Tienda: ${item.tienda}`);
+        if (item.asin) noteParts.push(`ASIN: ${item.asin}`);
+        if (item.linkCompra) noteParts.push(`Compra: ${item.linkCompra}`);
+        if (item.linkAmazon) noteParts.push(`Amazon: ${item.linkAmazon}`);
+        if (item.nota) noteParts.push(item.nota);
+
+        const lote = {
+            ...blankLote(),
+            id: Data.newId(),
+            sku,
+            producto,
+            tipo: item.tipo === 'FBM' ? 'FBM' : 'FBA',
+            categoria: catLabel,
+            categoriaAmazon: catKey,
+            costo: Number(item.costo) || 0,
+            precio: Number(item.precioMercado) || 0,
+            unidades: 1,
+            asin: String(item.asin || '').trim().toUpperCase(),
+            linkCompra: String(item.linkCompra || '').trim(),
+            linkAmazon: String(item.linkAmazon || '').trim(),
+            notas: noteParts.join('\n'),
+            historial: [{
+                ts: Date.now(),
+                tipo: 'wishlist',
+                meta: { wishlistId: item.id, tienda: item.tienda || '' },
+            }],
+        };
+
+        window.State.lotes = Data.upsertLote(window.State.lotes, lote);
+        local.selected = familyKey(lote);
+        local.selectedVariant = lote.id;
+        window.State.save();
+        window.App?.switchTab('lotes');
+        openModal(lote.id);
+        UI.toast('Producto creado · ajusta unidades si hace falta');
+        return lote;
+    }
+
     // ---- Init ----------------------------------------------------------
     function init() {
         document.getElementById('btn-save').addEventListener('click', save);
@@ -2223,6 +2483,6 @@ const LotesView = (() => {
         render();
     }
 
-    return { init, render, openModal, selectAndGo };
+    return { init, render, openModal, selectAndGo, createFromWishlist };
 })();
 window.LotesView = LotesView;

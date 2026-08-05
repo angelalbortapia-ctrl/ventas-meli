@@ -52,6 +52,16 @@ const SettingsView = (() => {
         const prepEnvio = document.getElementById('set-amz-prep-envio');
         if (prepEnvio) prepEnvio.checked = s.prepEnvioActivo !== false;
 
+        const keepaKey = document.getElementById('set-keepa-key');
+        if (keepaKey) {
+            const k = window.Keepa?.getApiKey?.() || window.State.ui?.keepaApiKey || '';
+            keepaKey.value = k;
+            keepaKey.placeholder = k ? '•••••••• (guardada)' : 'Pégala desde keepa.com/#!api';
+        }
+        const keepaPanel = document.getElementById('set-keepa-panel');
+        if (keepaPanel) keepaPanel.checked = !window.Keepa?.panelPrefs?.().off;
+        paintKeepaStatus();
+
         const resico = document.getElementById('set-resico');
         if (resico) resico.checked = !!s.resico;
         const isr = document.getElementById('set-isr');
@@ -234,6 +244,71 @@ const SettingsView = (() => {
         });
     }
 
+    function paintKeepaStatus(extra = '') {
+        const el = document.getElementById('keepa-status');
+        if (!el) return;
+        if (extra) {
+            el.textContent = extra;
+            return;
+        }
+        if (!window.Keepa?.hasKey?.()) {
+            el.textContent = 'Sin configurar.';
+            return;
+        }
+        el.textContent = window.Keepa?.keyLooksValid?.()
+            ? 'Key guardada en este dispositivo. Usa python3 serve.py para consultar.'
+            : 'La key guardada no tiene formato de Keepa (64 caracteres alfanuméricos). Vuelve a pegarla.';
+    }
+
+    function initKeepaUi() {
+        document.getElementById('set-keepa-panel')?.addEventListener('change', event => {
+            window.Keepa?.setPanelPref?.({ keepaPanelOff: !event.target.checked });
+            UI.toast(event.target.checked ? 'Panel Keepa visible en Productos' : 'Panel Keepa oculto en Productos');
+            window.LotesView?.render?.();
+        });
+
+        document.getElementById('btn-keepa-save')?.addEventListener('click', () => {
+            const key = document.getElementById('set-keepa-key')?.value || '';
+            if (!window.Keepa) {
+                UI.toast('Keepa no cargó — recarga', 'error');
+                return;
+            }
+            if (key.trim() && !Keepa.keyLooksValid(key)) {
+                UI.toast('Esa no parece una API key de Keepa (64 caracteres alfanuméricos)', 'error');
+                return;
+            }
+            Keepa.setApiKey(key.trim());
+            UI.toast(key.trim() ? 'Keepa key guardada' : 'Keepa key borrada');
+            paintKeepaStatus();
+        });
+
+        document.getElementById('btn-keepa-test')?.addEventListener('click', async () => {
+            const typed = document.getElementById('set-keepa-key')?.value?.trim() || '';
+            // Solo adoptar lo escrito si tiene forma de key: el autocompletado del
+            // navegador puede haber inyectado una contraseña en este campo.
+            const previous = Keepa.getApiKey();
+            const adopted = Boolean(typed && typed !== previous && Keepa.keyLooksValid(typed));
+            if (adopted) Keepa.setApiKey(typed);
+            if (!Keepa.hasKey()) {
+                UI.toast('Pega tu API key primero', 'error');
+                return;
+            }
+            const status = document.getElementById('keepa-status');
+            if (status) status.textContent = 'Probando…';
+            try {
+                const tok = await Keepa.tokenStatus();
+                const left = tok.tokensLeft ?? tok.refillRate ?? '—';
+                paintKeepaStatus(`Conectado · tokens: ${left}`);
+                UI.toast('Keepa OK');
+            } catch (err) {
+                // Si la key nueva no sirve, no dejamos al usuario sin la que ya funcionaba.
+                if (adopted && previous) Keepa.setApiKey(previous);
+                paintKeepaStatus(err.message || 'Error');
+                UI.toast(err.message || 'No se pudo conectar', 'error');
+            }
+        });
+    }
+
     function init() {
         FIELDS.forEach(([id]) => {
             const el = document.getElementById(id);
@@ -255,6 +330,7 @@ const SettingsView = (() => {
         });
         loadIntoForm();
         initSyncUi();
+        initKeepaUi();
     }
 
     return { init, loadIntoForm };

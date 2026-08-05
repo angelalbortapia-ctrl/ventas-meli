@@ -7,17 +7,17 @@
 const EnviosView = (() => {
 
     const FBM_LABELS = {
-        por_preparar: 'Por empaquetar',
-        empaquetado: 'Empaquetado',
-        etiqueta: 'Con etiqueta',
-        listo: 'Listo para llevar',
-        enviado: 'Enviado al cliente',
+        por_preparar: '📦 Por empaquetar',
+        empaquetado: '📦 Empaquetado',
+        etiqueta: '🏷 Con etiqueta',
+        listo: '📬 Listo para llevar',
+        enviado: '✅ Enviado al cliente',
     };
     const FBA_LABELS = {
-        creando: 'Creando envío',
-        por_enviar: 'Por enviar a FBA',
-        en_transito: 'En tránsito',
-        recibido: 'Recibido en FBA',
+        creando: '📝 Creando envío',
+        por_enviar: '📤 Por enviar a FBA',
+        en_transito: '🚚 En tránsito',
+        recibido: '✅ Recibido en FBA',
     };
     const NEXT_FBA = {
         creando: 'por_enviar',
@@ -31,15 +31,15 @@ const EnviosView = (() => {
         listo: 'enviado',
     };
     const NEXT_BTN_FBA = {
-        creando: 'Por enviar a FBA',
-        por_enviar: 'En tránsito',
-        en_transito: 'Recibido en FBA',
+        creando: '📤 Por enviar a FBA',
+        por_enviar: '🚚 En tránsito',
+        en_transito: '✅ Recibido en FBA',
     };
     const NEXT_BTN_FBM = {
-        por_preparar: 'Ya empaqueté',
-        empaquetado: 'Ya puse etiqueta',
-        etiqueta: 'Listo para mañana',
-        listo: 'Ya lo envié',
+        por_preparar: '📦 Ya empaqueté',
+        empaquetado: '🏷 Ya puse etiqueta',
+        etiqueta: '📬 Listo para mañana',
+        listo: '✅ Ya lo envié',
     };
     const ORDER_FBA = { creando: 0, por_enviar: 1, en_transito: 2, recibido: 3 };
     const ORDER_FBM = { por_preparar: 0, empaquetado: 1, etiqueta: 2, listo: 3, enviado: 4 };

@@ -17,6 +17,7 @@ const Palette = (() => {
         const actions = [
             { section: 'Navegación', icon: '📦', title: 'Ir a Productos', keys: 'Lotes', run: () => App.switchTab('lotes') },
             { section: 'Navegación', icon: '📊', title: 'Ir a Inicio', keys: 'Dashboard KPIs métricas', run: () => App.switchTab('dashboard') },
+            { section: 'Navegación', icon: '💵', title: 'Ir a Caja', keys: 'Cobrar bolsitas asignar', run: () => App.switchTab('caja') },
             { section: 'Navegación', icon: '💡', title: 'Ir a Insights', keys: 'Alertas recomendaciones', run: () => App.switchTab('insights') },
             { section: 'Navegación', icon: '⚙️', title: 'Ir a Ajustes', keys: 'Comisiones IVA umbral', run: () => App.switchTab('settings') },
             { section: 'Marketplace', icon: '🛒', title: 'Cambiar a Mercado Libre', keys: 'Meli', run: () => {
@@ -33,6 +34,7 @@ const Palette = (() => {
             { section: 'Acciones', icon: '📥', title: 'Importar Excel', keys: 'Cargar archivo xlsx', run: () => document.getElementById('file-import').click() },
             { section: 'Acciones', icon: '📤', title: 'Exportar Excel', keys: 'Descargar xlsx', run: () => App.exportExcel() },
             { section: 'Acciones', icon: '💾', title: 'Respaldo (exportar/importar JSON)', keys: 'Backup datos', run: () => App.openBackup() },
+            { section: 'Acciones', icon: '🔔', title: 'Activar alertas push', keys: 'Notificaciones stockout CPA estancado', run: () => App.requestOpsNotifyPermission?.() },
             { section: 'Acciones', icon: '↺', title: 'Restaurar ajustes por defecto', keys: 'Reset settings', run: () => App.resetSettings() },
         ];
         if (enviosOn) {
@@ -42,6 +44,22 @@ const Palette = (() => {
                 title: 'Ir a Envíos',
                 keys: 'Amazon paquetes por enviar',
                 run: () => App.switchTab('envios'),
+            });
+        }
+        if (window.State?.marketplace === 'amazon' && window.State.ui?.mpView !== 'general') {
+            actions.splice(enviosOn ? 2 : 1, 0, {
+                section: 'Navegación',
+                icon: '🎯',
+                title: 'Ir a Wishlist',
+                keys: 'Amazon prospectos arbitraje ASIN ROI',
+                run: () => App.switchTab('wishlist'),
+            });
+            actions.splice(enviosOn ? 3 : 2, 0, {
+                section: 'Navegación',
+                icon: '📈',
+                title: 'Ir a Keepa Lab',
+                keys: 'Amazon ASIN gráfica Buy Box Finder Deals',
+                run: () => App.switchTab('keepa'),
             });
         }
         return actions;

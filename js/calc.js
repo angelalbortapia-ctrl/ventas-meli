@@ -65,7 +65,7 @@ const Calc = (() => {
         topeCPA: 0.40,
     };
 
-    /** Categorías oficiales Amazon MX (referido % con IVA). */
+    /** Categorías oficiales Amazon MX (referido %; fee se calcula sobre precio sin IVA). */
     const AMZ_CATEGORIES = {
         acc_amazon:          { label: 'Accesorios dispositivos Amazon', pct: 0.45 },
         bebe:                { label: 'Productos para bebé', pct: 0.15 },
@@ -113,6 +113,10 @@ const Calc = (() => {
         computadoras: 'computadoras', bebe: 'bebe', bebés: 'bebe',
         alimentacion: 'alimentacion', alimentos: 'alimentacion', gourmet: 'alimentacion',
         chocolate: 'alimentacion', comida: 'alimentacion', 'alimentacion y gourmet': 'alimentacion',
+        hemp: 'alimentacion', semillas: 'alimentacion', okko: 'alimentacion',
+        'crema para cafe': 'alimentacion', 'sustituto de crema': 'alimentacion',
+        'coffee creamer': 'alimentacion',
+        jabon: 'belleza', jabón: 'belleza', belleza: 'belleza', soap: 'belleza',
     };
 
     /**
@@ -489,6 +493,7 @@ const Calc = (() => {
         const rotacion = unidades > 0 ? vendidas / unidades : 0;
 
         // Cash-in y ganancia REALIZADA: precio de cada venta (no el de lista)
+        // Usa costoUnitario congelado en la venta si existe (restock no reescribe historia)
         let cashIn = 0;
         let gananciaRealizada = 0;
         if (Array.isArray(lote.ventas) && lote.ventas.length) {
@@ -496,7 +501,16 @@ const Calc = (() => {
                 const uds = Number(v.unidades) || 0;
                 const p = Number(v.precio) || 0;
                 cashIn += p * uds;
-                gananciaRealizada += utilidadAtPrice(lote, p, s).utilidad * uds;
+                const loteAtSale = (typeof Data !== 'undefined' && Data.loteForVentaCalc)
+                    ? Data.loteForVentaCalc(lote, v)
+                    : (() => {
+                        const frozen = Number(v.costoUnitario);
+                        const costo = Number.isFinite(frozen) && frozen >= 0
+                            ? frozen
+                            : Number(lote.costo) || 0;
+                        return { ...lote, costo };
+                    })();
+                gananciaRealizada += utilidadAtPrice(loteAtSale, p, s).utilidad * uds;
             });
         } else {
             // Legacy: sin eventos de venta, estima con precio de lista

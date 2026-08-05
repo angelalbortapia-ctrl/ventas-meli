@@ -241,11 +241,15 @@ const Sync = (() => {
 
         // Ambos tienen data: preguntar con desglose Meli / Amazon
         if (local.total > 0 && remote.total > 0) {
+            const amzWarn = local.amazon > 0 && remote.amazon === 0
+                ? `<p class="dlg-msg"><strong>⚠️ La nube trae Amazon vacío</strong> (${local.amazon} aquí). Aunque elijas nube, se conservan los productos Amazon de este dispositivo y se re-suben.</p>`
+                : '';
             const choice = await UI.dialog({
                 title: 'Sincronizar con la nube',
                 body: `<p class="dlg-msg">Hay datos en este dispositivo y en Supabase. ¿Cuál prevalece?</p>
                        <p class="dlg-msg muted small">${countsHtml(local, remote)}</p>
-                       <p class="dlg-msg muted small">Meli y Amazon viajan juntos: al elegir, se reemplazan <strong>ambos</strong> catálogos.</p>`,
+                       ${amzWarn}
+                       <p class="dlg-msg muted small">Meli y Amazon viajan juntos. Un catálogo vacío en la nube <strong>ya no borra</strong> productos locales.</p>`,
                 actions: [
                     { label: 'Usar nube → este dispositivo', variant: 'ghost', value: 'pull' },
                     { label: 'Subir este dispositivo → nube', variant: 'primary', value: 'push' },
@@ -266,7 +270,8 @@ const Sync = (() => {
     }
 
     async function resolveConflict(row) {
-        if (!window.UI || conflictBusy) return 'remote';
+        // Nunca default a 'remote': eso borraba Amazon local con nube vacía.
+        if (!window.UI || conflictBusy) return 'local';
         conflictBusy = true;
         try {
             const active = Data.normalizeMarketplace(window.State.marketplace);
@@ -278,13 +283,14 @@ const Sync = (() => {
                 title: 'Conflicto de sincronización',
                 body: `<p class="dlg-msg">Hay cambios en <strong>este dispositivo</strong> y también en la <strong>nube</strong> (otro dispositivo). ¿Qué quieres conservar?</p>
                        <p class="dlg-msg muted small">${countsHtml(local, remote)}</p>
-                       <p class="dlg-msg muted small">Tip: Meli y Amazon se sincronizan juntos. Evita editar el mismo lote en ambos dispositivos a la vez.</p>`,
+                       <p class="dlg-msg muted small">Tip: Meli y Amazon se sincronizan juntos. Si la nube trae Amazon en 0 y aquí hay productos, elige este dispositivo.</p>`,
                 actions: [
                     { label: 'Quedarme con este dispositivo', variant: 'primary', value: 'local' },
                     { label: 'Usar la nube (descartar local)', variant: 'danger', value: 'remote' },
                 ],
             });
-            return choice === 'local' ? 'local' : 'remote';
+            // Cerrar / Esc → conservar local (no wipe)
+            return choice === 'remote' ? 'remote' : 'local';
         } finally {
             conflictBusy = false;
         }
@@ -352,6 +358,18 @@ const Sync = (() => {
         setStatus({ state: 'syncing', detail: 'Subiendo…' });
         const updated_at = new Date().toISOString();
         const packed = packStateForSync();
+
+        // Nunca pisar en la nube un catálogo con productos usando un paquete vacío
+        try {
+            const { data: remoteRow } = await c.from(TABLE)
+                .select('lotes, settings, updated_at')
+                .eq('user_id', user.id)
+                .maybeSingle();
+            if (remoteRow) mergeNonEmptyRemoteIntoPack(packed, remoteRow);
+        } catch (err) {
+            console.warn('[sync] merge remoto antes de push', err);
+        }
+
         const payload = {
             user_id: user.id,
             lotes: packed.lotes,
@@ -454,9 +472,12 @@ const Sync = (() => {
                     lotes: amazonLotes,
                     settings: amazonSettings,
                 },
+                // Wishlist, Mis bolsitas y demás estado operativo compartido.
+                // Los metadatos de respaldo son locales a cada dispositivo.
+                _ui: syncableUI(window.State.ui),
                 _marketplace: active,
                 _syncMeta: {
-                    version: 2,
+                    version: 3,
                     packedAt: new Date().toISOString(),
                     counts: {
                         meli: meliLotes.length,
@@ -468,9 +489,20 @@ const Sync = (() => {
         };
     }
 
+    function syncableUI(ui) {
+        const out = { ...(ui || {}) };
+        delete out.backupDirty;
+        delete out.lastBackupAt;
+        // Key de Keepa y caché de tokens: solo en este dispositivo
+        delete out.keepaApiKey;
+        delete out.keepaCache;
+        return out;
+    }
+
     function stripSyncMeta(settings) {
         const s = { ...(settings || {}) };
         delete s._amazon;
+        delete s._ui;
         delete s._marketplace;
         delete s._syncMeta;
         return s;
@@ -498,41 +530,134 @@ const Sync = (() => {
             + `Nube — Meli <strong>${remote.meli}</strong> · Amazon <strong>${remote.amazon}</strong>`;
     }
 
+    /** Si el pack local trae un catálogo vacío y la nube sí tiene productos, conserva los de la nube. */
+    function mergeNonEmptyRemoteIntoPack(packed, remoteRow) {
+        if (!packed || !remoteRow) return packed;
+        const remoteCounts = remoteCatalogCounts(remoteRow);
+        const localCounts = remoteCatalogCounts({ lotes: packed.lotes, settings: packed.settings });
+
+        if (localCounts.meli === 0 && remoteCounts.meli > 0 && Array.isArray(remoteRow.lotes)) {
+            packed.lotes = remoteRow.lotes;
+        }
+
+        const remoteAmz = remoteRow.settings && typeof remoteRow.settings === 'object'
+            ? remoteRow.settings._amazon
+            : null;
+        if (localCounts.amazon === 0 && remoteCounts.amazon > 0
+            && remoteAmz && typeof remoteAmz === 'object' && Array.isArray(remoteAmz.lotes)
+            && remoteAmz.lotes.length > 0) {
+            packed.settings = packed.settings || {};
+            packed.settings._amazon = remoteAmz;
+        }
+
+        if (packed.settings?._syncMeta?.counts) {
+            packed.settings._syncMeta.counts = {
+                meli: Array.isArray(packed.lotes) ? packed.lotes.length : 0,
+                amazon: Array.isArray(packed.settings._amazon?.lotes)
+                    ? packed.settings._amazon.lotes.length
+                    : 0,
+            };
+        }
+        return packed;
+    }
+
+    /**
+     * Nunca reemplazar un catálogo local con productos por uno vacío de la nube.
+     * Devuelve { lotes, settings, protected } para Amazon (y análogo para Meli).
+     */
+    function protectCatalogFromEmptyRemote(remoteLotes, remoteSettings, mp) {
+        const remoteArr = Array.isArray(remoteLotes) ? remoteLotes : [];
+        const localArr = typeof Data.peekLotes === 'function'
+            ? Data.peekLotes(mp)
+            : Data.loadLotes(mp);
+        if (remoteArr.length === 0 && localArr.length > 0) {
+            return {
+                lotes: localArr,
+                settings: stripSyncMeta(Data.loadSettings(mp)),
+                protected: true,
+                kept: localArr.length,
+            };
+        }
+        return {
+            lotes: remoteArr,
+            settings: remoteSettings && typeof remoteSettings === 'object' ? remoteSettings : {},
+            protected: false,
+            kept: 0,
+        };
+    }
+
     function applyRemote(row, { silent } = {}) {
         if (!row || !Array.isArray(row.lotes)) return;
         applyingRemote = true;
         window.__skipBackupDirty = true;
         window.__skipSync = true;
+        let healNeeded = false;
+        const protectedMsg = [];
         try {
             const rawSettings = (row.settings && typeof row.settings === 'object') ? row.settings : {};
             const marketplace = rawSettings._marketplace === 'amazon' ? 'amazon' : 'meli';
+            const remoteUI = rawSettings._ui && typeof rawSettings._ui === 'object'
+                ? { ...rawSettings._ui }
+                : null;
+            // Key/caché Keepa son locales: un row legacy en la nube no debe reinyectarlas.
+            if (remoteUI) {
+                delete remoteUI.keepaApiKey;
+                delete remoteUI.keepaCache;
+            }
             const meliSettings = stripSyncMeta(rawSettings);
 
-            // Seguridad: si la nube NO trae _amazon (payload viejo), NO borrar el catálogo Amazon local
-            const hasAmazonKey = Object.prototype.hasOwnProperty.call(rawSettings, '_amazon');
-            let amazonLotes;
-            let amazonSettings;
-            if (hasAmazonKey && rawSettings._amazon && typeof rawSettings._amazon === 'object') {
-                amazonLotes = Array.isArray(rawSettings._amazon.lotes) ? rawSettings._amazon.lotes : [];
-                amazonSettings = rawSettings._amazon.settings && typeof rawSettings._amazon.settings === 'object'
-                    ? rawSettings._amazon.settings
-                    : {};
-            } else {
-                amazonLotes = Data.loadLotes('amazon');
-                amazonSettings = stripSyncMeta(Data.loadSettings('amazon'));
+            // Meli: no borrar productos locales si la nube viene vacía
+            const meliGuard = protectCatalogFromEmptyRemote(row.lotes, meliSettings, 'meli');
+            if (meliGuard.protected) {
+                healNeeded = true;
+                protectedMsg.push(`Meli×${meliGuard.kept}`);
             }
 
-            Data.saveLotes((row.lotes || []).map(l => Data.normalize(l, [], 'meli')), 'meli');
-            Data.saveSettings({ ...Calc.defaultsFor('meli'), ...meliSettings, marketplace: 'meli' }, 'meli');
-            Data.saveLotes(amazonLotes.map(l => Data.normalize(l, [], 'amazon')), 'amazon');
+            // Amazon: clave ausente O array vacío → conservar local
+            const hasAmazonKey = Object.prototype.hasOwnProperty.call(rawSettings, '_amazon');
+            let remoteAmazonLotes = [];
+            let remoteAmazonSettings = {};
+            if (hasAmazonKey && rawSettings._amazon && typeof rawSettings._amazon === 'object') {
+                remoteAmazonLotes = Array.isArray(rawSettings._amazon.lotes) ? rawSettings._amazon.lotes : [];
+                remoteAmazonSettings = rawSettings._amazon.settings && typeof rawSettings._amazon.settings === 'object'
+                    ? rawSettings._amazon.settings
+                    : {};
+            }
+            // Si no hay clave _amazon, protectCatalog también conserva local (remote vacío)
+            const amzGuard = protectCatalogFromEmptyRemote(remoteAmazonLotes, remoteAmazonSettings, 'amazon');
+            if (amzGuard.protected) {
+                healNeeded = true;
+                protectedMsg.push(`Amazon×${amzGuard.kept}`);
+            }
+
+            Data.saveLotes(meliGuard.lotes.map(l => Data.normalize(l, [], 'meli')), 'meli');
+            Data.saveSettings({
+                ...Calc.defaultsFor('meli'),
+                ...stripSyncMeta(meliGuard.settings),
+                marketplace: 'meli',
+            }, 'meli');
+            Data.saveLotes(
+                typeof Data.migrateLotes === 'function'
+                    ? Data.migrateLotes(amzGuard.lotes, 'amazon')
+                    : amzGuard.lotes.map(l => Data.normalize(l, [], 'amazon')),
+                'amazon'
+            );
             Data.saveSettings({
                 ...Calc.defaultsFor('amazon'),
-                ...stripSyncMeta(amazonSettings),
+                ...stripSyncMeta(amzGuard.settings),
                 marketplace: 'amazon',
             }, 'amazon');
 
             window.State.marketplace = marketplace;
-            window.State.ui = { ...window.State.ui, marketplace, mpView: marketplace };
+            // Conservar vista General si el usuario (o la nube) la tenía abierta
+            const keepGeneral = window.State.ui?.mpView === 'general'
+                || remoteUI?.mpView === 'general';
+            window.State.ui = {
+                ...window.State.ui,
+                ...(remoteUI || {}),
+                marketplace,
+                mpView: keepGeneral ? 'general' : marketplace,
+            };
             window.State.saveUI();
             window.State.lotes = Data.loadLotes(marketplace);
             window.State.settings = Data.loadSettings(marketplace);
@@ -545,6 +670,9 @@ const Sync = (() => {
             if (window.State.view === 'dashboard' && window.DashboardView?.render) DashboardView.render();
             if (window.State.view === 'insights' && window.InsightsView?.render) InsightsView.render();
             if (window.State.view === 'envios' && window.EnviosView?.render) EnviosView.render();
+            if (window.State.view === 'wishlist' && window.WishlistView?.render) WishlistView.render();
+            if (window.State.view === 'keepa' && window.KeepaView?.render) KeepaView.render();
+            if (window.State.view === 'caja' && window.CajaView?.render) CajaView.render();
             if (window.App?.refreshNavCounts) App.refreshNavCounts();
 
             const counts = {
@@ -553,16 +681,28 @@ const Sync = (() => {
             };
             setStatus({
                 state: 'synced',
-                detail: `Desde nube · Meli ${counts.meli} · Amazon ${counts.amazon}`,
+                detail: healNeeded
+                    ? `Nube + local protegido · Meli ${counts.meli} · Amazon ${counts.amazon}`
+                    : `Desde nube · Meli ${counts.meli} · Amazon ${counts.amazon}`,
                 email: status.email,
             });
             if (!silent && window.UI) {
                 UI.toast(`☁️ Nube aplicada · Meli ${counts.meli} · Amazon ${counts.amazon}`);
             }
+            if (healNeeded && window.UI) {
+                UI.toast(`🛡️ Conservé ${protectedMsg.join(' · ')} (la nube venía vacía)`);
+            }
         } finally {
             window.__skipSync = false;
             window.__skipBackupDirty = false;
             applyingRemote = false;
+        }
+        // Subir de nuevo para sanar la nube (fuera de applyingRemote)
+        if (healNeeded) {
+            holdRemote(25000);
+            setTimeout(() => {
+                pushNow({ force: true }).catch(err => console.warn('[sync] heal push', err));
+            }, 900);
         }
     }
 
@@ -587,6 +727,7 @@ const Sync = (() => {
         if (!window.State.__syncWrapped) {
             window.State.save = wrap(window.State.save.bind(window.State));
             window.State.saveSettings = wrap(window.State.saveSettings.bind(window.State));
+            window.State.saveUI = wrap(window.State.saveUI.bind(window.State));
             window.State.__syncWrapped = true;
         }
     }
