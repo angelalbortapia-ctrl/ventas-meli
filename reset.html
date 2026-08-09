@@ -3,110 +3,49 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Restaurar inventario — Ventas Meli</title>
+  <title>Restaurar inventario — Ventas Meli / Amazon</title>
   <style>
-    body { font-family: Calibri, Carlito, Candara, 'Segoe UI', Arial, sans-serif; max-width: 420px; margin: 48px auto; padding: 0 16px; color: #1a2332; }
-    h1 { font-size: 1.25rem; }
+    :root {
+      --font-body: Calibri, Carlito, Candara, 'Segoe UI', Optima, Arial, sans-serif;
+      --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Roboto Mono", monospace;
+    }
+    body { font-family: var(--font-body); max-width: 460px; margin: 48px auto; padding: 0 16px; color: #1a2332; }
+    h1 { font-size: 1.25rem; margin: 0 0 12px; }
     p { color: #5a6a7a; line-height: 1.45; }
-    button { background: #c0392b; color: #fff; border: 0; border-radius: 8px; padding: 12px 16px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; font-family: inherit; }
+    ul { color: #5a6a7a; line-height: 1.45; padding-left: 20px; }
+    button {
+      background: #dc2626; color: #fff; border: 0; border-radius: 8px;
+      padding: 12px 16px; font-size: 15px; font-weight: 600; cursor: pointer;
+      width: 100%; font-family: inherit;
+    }
     button:disabled { opacity: .6; cursor: wait; }
-    #log { margin-top: 16px; font-family: Calibri, Carlito, Candara, 'Segoe UI', Arial, sans-serif; font-size: 12px; white-space: pre-wrap; background: #f4f6f8; padding: 12px; border-radius: 8px; min-height: 3em; }
-    a { color: #3b6ea8; }
+    a { color: #2563eb; }
+    .actions { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+    .back { text-align: center; margin-top: 12px; }
+    code { font-family: var(--font-mono); font-size: 13px; background: #f4f6f8; padding: 1px 6px; border-radius: 4px; }
   </style>
 </head>
 <body>
   <h1>Restaurar inventario original</h1>
-  <p>Borra todas las ventas simuladas, vuelve a las piezas del catálogo y sube el cambio a Supabase (si Sync está configurado).</p>
-  <button id="go" type="button">Borrar ventas y restaurar ahora</button>
-  <p style="margin-top:16px"><a href="./">← Volver al panel</a></p>
-  <div id="log">Listo para restaurar.</div>
+  <p>Esto abrirá la app y ejecutará “Borrar todas las ventas” en <strong>ambos marketplaces</strong> (Mercado Libre y Amazon). Se hace desde la app para que:</p>
+  <ul>
+    <li>Se limpien las ventas de los dos catálogos, no solo del activo.</li>
+    <li>Se vacíen las bolsitas de capital (Meli y Amazon) que quedaron atadas a esas ventas.</li>
+    <li>Sync suba el estado limpio a Supabase para que no reaparezcan desde otro dispositivo.</li>
+  </ul>
+  <div class="actions">
+    <button id="go" type="button">Borrar ventas y restaurar ahora</button>
+  </div>
+  <p class="back"><a href="./">← Volver a la app sin cambiar nada</a></p>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-    const STORAGE_KEY = 'ventas-meli:v1';
-    const SETTINGS_KEY = 'ventas-meli:settings:v1';
-    const CFG_KEY = 'ventas-meli:supabase:v1';
-    const TABLE = 'ventas_meli_state';
-
-    // Piezas originales del seed
-    const SEED_UNITS = {
-      'PAL-ELÉ-AIR-ROJ-01': 3,
-      'ASP-3-EN-NEG-01': 3,
-      'CON-JUE-MIN-GRI-01': 4,
-      'MON-PRE-ART-BLA-01': 2,
-      'RAL-COR-PIC-NEG-01': 3,
-      'LÁM-ESC-CON-ROJ-01': 2,
-      'JUE-ACC-BAÑ-ROS-01': 1,
-      'JUE-ACC-BAÑ-GRI-01': 1,
-      'JUE-ACC-BAÑ-BLA-01': 1,
-    };
-
-    const logEl = document.getElementById('log');
     const btn = document.getElementById('go');
-    function log(msg) { logEl.textContent = msg; }
-
-    async function run() {
+    function goToApp() {
       btn.disabled = true;
-      try {
-        let lotes = [];
-        try { lotes = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
-        catch { throw new Error('No se pudo leer localStorage'); }
-        if (!Array.isArray(lotes) || !lotes.length) throw new Error('No hay lotes guardados');
-
-        let cleared = 0;
-        lotes = lotes.map(l => {
-          const had = (Array.isArray(l.ventas) && l.ventas.length) || (Number(l.vendidas) || 0) > 0;
-          if (had) cleared += Array.isArray(l.ventas) ? l.ventas.length : 1;
-          const u = SEED_UNITS[l.sku];
-          return {
-            ...l,
-            unidades: u != null ? u : (Number(l.unidades) || 0),
-            ventas: [],
-            vendidas: 0,
-            estatus: '✅ Activa / En Venta',
-          };
-        });
-
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(lotes));
-        log(`Local OK: ${cleared} venta(s) borrada(s).\nSubiendo a Sync…`);
-
-        let settings = {};
-        try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {}; } catch {}
-
-        let cfg = {};
-        try { cfg = JSON.parse(localStorage.getItem(CFG_KEY) || '{}') || {}; } catch {}
-
-        if (cfg.url && cfg.anonKey && window.supabase) {
-          const client = supabase.createClient(cfg.url, cfg.anonKey);
-          const { data: { session }, error: authErr } = await client.auth.getSession();
-          if (authErr) throw authErr;
-          if (!session?.user) {
-            log(`Local limpio (${cleared} venta(s)).\nNo hay sesión Sync — abre el panel e inicia sesión, o ya quedó solo en este navegador.`);
-          } else {
-            const updated_at = new Date().toISOString();
-            const { error } = await client.from(TABLE).upsert({
-              user_id: session.user.id,
-              lotes,
-              settings,
-              updated_at,
-            }, { onConflict: 'user_id' });
-            if (error) throw error;
-            log(`Listo.\n${cleared} venta(s) borradas · stock original · Sync actualizado.\nRedirigiendo…`);
-          }
-        } else {
-          log(`Local limpio (${cleared} venta(s)).\nSync no configurado en este navegador.`);
-        }
-
-        setTimeout(() => { location.href = './?t=' + Date.now(); }, 900);
-      } catch (e) {
-        log('Error: ' + (e.message || e));
-        btn.disabled = false;
-      }
+      location.replace('./?clearVentas=1&scope=both&t=' + Date.now());
     }
-
-    btn.addEventListener('click', run);
-    // Auto-run si viene con ?go=1
-    if (new URLSearchParams(location.search).get('go') === '1') run();
+    btn.addEventListener('click', goToApp);
+    if (new URLSearchParams(location.search).get('go') === '1') goToApp();
   </script>
 </body>
 </html>

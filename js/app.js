@@ -703,13 +703,18 @@ const App = (() => {
         }
     }
 
-    /** Borra ventas, restaura piezas del seed y sube a Sync si hay sesión. */
+    /**
+     * Borra ventas de AMBOS marketplaces (Meli + Amazon), restaura piezas del seed
+     * (donde aplica), purga las bolsitas ligadas a esas ventas y sube a Sync.
+     * Operar sobre un solo MP era un bug: el hermano conservaba ventas y el
+     * bundle dual las reintroducía.
+     */
     async function clearVentasRestore({ confirm = true } = {}) {
         if (confirm) {
             const ok = await UI.confirm({
-                title: 'Borrar ventas y restaurar piezas',
-                message: 'Se eliminarán <strong>todas las ventas registradas</strong> y el stock volverá a las piezas originales. Si Sync está activo, se subirá a Supabase para que no regresen.',
-                primaryLabel: 'Borrar y restaurar',
+                title: 'Borrar todas las ventas',
+                message: 'Se eliminarán <strong>todas las ventas registradas en ambos marketplaces</strong> (Mercado Libre y Amazon), el stock volverá a las piezas originales del catálogo y las bolsitas de capital ligadas a esas ventas se limpiarán. Si Sync está activo, se subirá el cambio a Supabase.',
+                primaryLabel: 'Borrar en ambos MPs',
                 danger: true,
             });
             if (!ok) return false;
@@ -717,31 +722,29 @@ const App = (() => {
         // Evita que realtime/pull vuelva a meter las ventas viejas
         Sync?.holdRemote?.(25000);
 
+        const activeMp = Data.currentMarketplace();
+        const both = { meli: [], amazon: [] };
         let ventasCleared = 0;
-        if (typeof Data.clearVentasRestoreStock === 'function') {
-            const r = Data.clearVentasRestoreStock(window.State.lotes);
-            window.State.lotes = r.lotes;
-            ventasCleared = r.ventasCleared;
-        } else {
-            const bySku = Object.fromEntries(Data.SEED.map(s => [s.sku, s]));
-            window.State.lotes = window.State.lotes.map(l => {
-                const seed = bySku[l.sku];
-                if ((l.ventas || []).length || l.vendidas) ventasCleared++;
-                return Data.normalize({
-                    ...l,
-                    unidades: seed ? seed.unidades : l.unidades,
-                    ventas: [],
-                    vendidas: 0,
-                    estatus: '✅ Activa / En Venta',
-                }, []);
-            });
-        }
-        window.State.save();
 
-        // Ventas borradas dejan liberaciones huérfanas → limpiar bolsitas del MP activo
+        ['meli', 'amazon'].forEach(mp => {
+            const source = mp === activeMp
+                ? window.State.lotes
+                : Data.loadLotes(mp);
+            const r = Data.clearVentasRestoreStock(source, mp);
+            both[mp] = r.lotes;
+            ventasCleared += r.ventasCleared || 0;
+        });
+
+        // Persistir catálogo activo vía State.save() para disparar suscriptores;
+        // el hermano se guarda directo con Data.saveLotes.
+        window.State.lotes = both[activeMp];
+        window.State.save();
+        const otherMp = activeMp === 'meli' ? 'amazon' : 'meli';
+        Data.saveLotes(both[otherMp], otherMp);
+
+        // Ventas borradas dejan liberaciones huérfanas en las bolsitas de AMBOS MPs
         try {
-            const mp = Data.currentMarketplace();
-            window.DashboardView?.purgeOrphanSaleLiberations?.({ [mp]: window.State.lotes });
+            window.DashboardView?.purgeOrphanSaleLiberations?.(both);
         } catch (err) {
             console.warn('[app] purge bolsitas after clear ventas', err);
         }
@@ -786,9 +789,12 @@ const App = (() => {
         Sync?.holdRemote?.(30000);
         // Esperar a que Sync termine el pull inicial
         await new Promise(r => setTimeout(r, 2200));
+        // scope=both está implícito: clearVentasRestore siempre limpia ambos MPs.
         await clearVentasRestore({ confirm: false });
         sessionStorage.removeItem('vm:clearVentas');
         params.delete('clearVentas');
+        params.delete('scope');
+        params.delete('t');
         const q = params.toString();
         history.replaceState({}, '', location.pathname + (q ? '?' + q : '') + location.hash);
     }
