@@ -784,16 +784,22 @@ const App = (() => {
 
     async function maybeClearVentasFromUrl() {
         const params = new URLSearchParams(location.search);
-        if (params.get('clearVentas') !== '1' && sessionStorage.getItem('vm:clearVentas') !== '1') return;
+        const inFlight = sessionStorage.getItem('vm:clearVentas') === '1';
+        if (params.get('clearVentas') !== '1' && !inFlight) return;
+        // Nonce firmado por reset.html: si viene sin nonce (URL pegada a mano o
+        // compartida), obligamos a confirmar dentro de la app antes de tocar datos.
+        const nonceQuery = params.get('nonce') || '';
+        const nonceExpected = sessionStorage.getItem('vm:clearVentasNonce') || '';
+        const trusted = inFlight || (nonceQuery && nonceExpected && nonceQuery === nonceExpected);
         sessionStorage.setItem('vm:clearVentas', '1');
         Sync?.holdRemote?.(30000);
-        // Esperar a que Sync termine el pull inicial
         await new Promise(r => setTimeout(r, 2200));
-        // scope=both está implícito: clearVentasRestore siempre limpia ambos MPs.
-        await clearVentasRestore({ confirm: false });
+        const ok = await clearVentasRestore({ confirm: !trusted });
+        if (ok !== false) sessionStorage.removeItem('vm:clearVentasNonce');
         sessionStorage.removeItem('vm:clearVentas');
         params.delete('clearVentas');
         params.delete('scope');
+        params.delete('nonce');
         params.delete('t');
         const q = params.toString();
         history.replaceState({}, '', location.pathname + (q ? '?' + q : '') + location.hash);

@@ -42,7 +42,13 @@
     const btn = document.getElementById('go');
     function goToApp() {
       btn.disabled = true;
-      location.replace('./?clearVentas=1&scope=both&t=' + Date.now());
+      // Nonce en sessionStorage + querystring: la app confía en el flujo solo
+      // si ambos coinciden. Impide que una URL pegada a mano borre ventas.
+      const nonce = (crypto.randomUUID && crypto.randomUUID()) ||
+        Math.random().toString(36).slice(2) + Date.now().toString(36);
+      try { sessionStorage.setItem('vm:clearVentasNonce', nonce); } catch (_) {}
+      const q = new URLSearchParams({ clearVentas: '1', scope: 'both', nonce, t: String(Date.now()) });
+      location.replace('./?' + q.toString());
     }
     btn.addEventListener('click', goToApp);
     if (new URLSearchParams(location.search).get('go') === '1') goToApp();
