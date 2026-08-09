@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#3483fa">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23ffe600'/%3E%3Ctext x='50' y='68' text-anchor='middle' font-size='60' fill='%231a1a1a' font-family='Calibri,sans-serif' font-weight='bold'%3EM%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="css/styles.css?v=140">
+    <link rel="stylesheet" href="css/styles.css?v=141">
 </head>
 <body>
 
@@ -352,6 +352,7 @@
 </div>
 
 <!-- Bottom tabs (iPhone) -->
+<!-- 4 tabs principales + Más. Slot 3 = Wishlist en Amazon, Insights en Meli. -->
 <nav class="mobile-tabbar" id="mobile-tabbar" aria-label="Navegación principal">
     <button type="button" class="mobile-tab active" data-tab="dashboard">
         <span class="mobile-tab-icon" data-icon="dashboard"></span>
@@ -362,23 +363,25 @@
         <span>Productos</span>
         <span class="mobile-tab-badge" id="m-tab-lotes" hidden>0</span>
     </button>
+    <button type="button" class="mobile-tab" data-tab="wishlist" data-mp-slot="amazon">
+        <span class="mobile-tab-icon" data-icon="wishlist"></span>
+        <span>Wishlist</span>
+        <span class="mobile-tab-badge" id="m-tab-wishlist" hidden>0</span>
+    </button>
+    <button type="button" class="mobile-tab" data-tab="insights" data-mp-slot="non-amazon">
+        <span class="mobile-tab-icon" data-icon="insights"></span>
+        <span>Insights</span>
+        <span class="mobile-tab-badge" id="m-tab-insights" hidden>0</span>
+    </button>
     <button type="button" class="mobile-tab" data-tab="caja">
         <span class="mobile-tab-icon" data-icon="caja"></span>
         <span>Caja</span>
         <span class="mobile-tab-badge" id="m-tab-caja" hidden>0</span>
     </button>
-    <button type="button" class="mobile-tab" data-tab="insights">
-        <span class="mobile-tab-icon" data-icon="insights"></span>
-        <span>Insights</span>
-        <span class="mobile-tab-badge" id="m-tab-insights" hidden>0</span>
-    </button>
-    <button type="button" class="mobile-tab" data-tab="settings">
-        <span class="mobile-tab-icon" data-icon="settings"></span>
-        <span>Ajustes</span>
-    </button>
     <button type="button" class="mobile-tab" id="m-tab-more" aria-label="Más opciones">
         <span class="mobile-tab-icon" data-icon="more"></span>
         <span>Más</span>
+        <span class="mobile-tab-badge" id="m-tab-more-badge" hidden>0</span>
     </button>
 </nav>
 
@@ -513,7 +516,7 @@
 <script src="js/data.js?v=53"></script>
 <script src="js/excel.js?v=8"></script>
 <script src="js/icons.js?v=1"></script>
-<script src="js/ui.js?v=6"></script>
+<script src="js/ui.js?v=7"></script>
 <script src="js/keepa.js?v=13"></script>
 <script src="js/keepa-view.js?v=11"></script>
 <script src="js/palette.js?v=13"></script>
@@ -525,7 +528,7 @@
 <script src="js/caja.js?v=15"></script>
 <script src="js/sync.js?v=17"></script>
 <script src="js/settings.js?v=21"></script>
-<script src="js/app.js?v=60"></script>
+<script src="js/app.js?v=61"></script>
 
 </body>
 </html>

@@ -139,9 +139,64 @@ const App = (() => {
                 closeMobileNav();
             });
         });
-        document.getElementById('m-tab-more')?.addEventListener('click', () => {
-            if (document.body.classList.contains('nav-open')) closeMobileNav();
-            else openMobileNav();
+        document.getElementById('m-tab-more')?.addEventListener('click', () => openMoreSheet());
+    }
+
+    /**
+     * Bottom-sheet "Más": tabs restantes + acciones de Datos.
+     * Se construye dinámicamente con badges y respetando el marketplace activo.
+     */
+    function openMoreSheet() {
+        const isAmazon = window.State.marketplace === 'amazon';
+        const prepOn = isAmazon && window.State.settings?.prepEnvioActivo !== false;
+        const pendingShip = window.EnviosView?.pendingCount?.() || 0;
+        const pendingWish = window.WishlistView?.pendingCount?.() || 0;
+        const alerts = window.InsightsView?.alertCount?.() || 0;
+
+        const items = [];
+        if (isAmazon && prepOn) {
+            items.push({ id: 'envios', icon: 'envios', label: 'Envíos',
+                hint: 'FBA + FBM pendientes',
+                badge: pendingShip || null });
+        }
+        if (isAmazon) {
+            items.push({ id: 'keepa', icon: 'keepa', label: 'Keepa Lab',
+                hint: 'Investigación de ASINs' });
+        }
+        // Slot Insights: en Amazon está fuera del tabbar → aparece en el sheet.
+        if (isAmazon) {
+            items.push({ id: 'insights', icon: 'insights', label: 'Insights',
+                hint: 'Alertas y recomendaciones',
+                badge: alerts || null });
+        }
+        items.push({ id: 'settings', icon: 'settings', label: 'Ajustes',
+            hint: 'Sync, comisiones, umbrales' });
+        // Datos (import/export/backup) — atajos rápidos
+        items.push({ id: 'import', icon: 'import', label: 'Importar Excel',
+            hint: 'XLSX de lotes', tone: 'mute' });
+        items.push({ id: 'export', icon: 'export', label: 'Exportar Excel',
+            hint: 'Descarga snapshot', tone: 'mute' });
+        items.push({ id: 'backup', icon: 'backup', label: 'Respaldo JSON',
+            hint: 'Exportar / importar copia' });
+
+        // Wishlist va en el tabbar cuando estás en Amazon; en Meli lo mostramos aquí también
+        if (!isAmazon) {
+            items.unshift({ id: 'wishlist', icon: 'wishlist', label: 'Wishlist Amazon',
+                hint: 'Cambia a Amazon para verlo', badge: pendingWish || null, tone: 'mute' });
+        }
+
+        UI.bottomSheet({
+            title: 'Más opciones',
+            items,
+            onPick: id => {
+                if (['dashboard', 'lotes', 'envios', 'wishlist', 'keepa', 'caja', 'insights', 'settings'].includes(id)) {
+                    switchTab(id);
+                    return;
+                }
+                if (id === 'import') document.getElementById('file-import')?.click();
+                else if (id === 'export') exportExcel();
+                else if (id === 'backup') openBackup();
+            },
         });
     }
 
@@ -190,6 +245,11 @@ const App = (() => {
             sbWish.textContent = pendingWish;
             sbWish.hidden = pendingWish === 0;
         }
+        const mWish = document.getElementById('m-tab-wishlist');
+        if (mWish) {
+            mWish.textContent = pendingWish;
+            mWish.hidden = pendingWish === 0;
+        }
 
         const pendingCaja = window.CajaView?.pendingCount?.() || 0;
         const sbCaja = document.getElementById('sb-count-caja');
@@ -202,6 +262,21 @@ const App = (() => {
         if (mCaja) {
             mCaja.textContent = pendingCaja;
             mCaja.hidden = pendingCaja === 0;
+        }
+
+        // Badge del botón "Más": suma señales de los tabs escondidos dentro
+        // del sheet, respetando marketplace. Así no perdemos el rojo cuando
+        // Insights o Envíos quedan detrás del "⋯".
+        const moreBadge = document.getElementById('m-tab-more-badge');
+        if (moreBadge) {
+            const isAmz = window.State.marketplace === 'amazon';
+            const prepOn = isAmz && window.State.settings?.prepEnvioActivo !== false;
+            let moreCount = 0;
+            if (isAmz) moreCount += alerts;
+            if (prepOn) moreCount += pendingShip;
+            moreBadge.textContent = moreCount;
+            moreBadge.hidden = moreCount === 0;
+            moreBadge.classList.toggle('is-mute', !isAmz);
         }
     }
 

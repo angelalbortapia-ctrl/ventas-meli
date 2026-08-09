@@ -4962,7 +4962,7 @@ button.ship-advance:hover {
 
     .mobile-tabbar {
         display: grid;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         position: fixed;
         left: 0; right: 0; bottom: 0;
         z-index: 70;
@@ -4971,6 +4971,9 @@ button.ship-advance:hover {
         padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
         box-shadow: 0 -4px 16px rgba(20, 30, 50, 0.06);
     }
+    /* Slot 3 alterna Wishlist (Amazon) / Insights (Meli). En General el tabbar entero se oculta. */
+    body[data-marketplace="amazon"] .mobile-tab[data-mp-slot="non-amazon"] { display: none !important; }
+    body:not([data-marketplace="amazon"]) .mobile-tab[data-mp-slot="amazon"] { display: none !important; }
     .mobile-tab {
         position: relative;
         display: flex;
@@ -5525,5 +5528,120 @@ button.ship-advance:hover {
         width: 64px;
         height: 64px;
     }
+}
+
+/* ============================================================================
+   Bottom sheet (móvil): usado por el botón "Más" del tabbar.
+   Slide-up con backdrop, drag-down para cerrar, badge de alertas.
+   ============================================================================ */
+.bsheet-wrap {
+    position: fixed; inset: 0;
+    z-index: 100;
+    display: flex; align-items: flex-end; justify-content: stretch;
+}
+.bsheet-wrap[hidden] { display: none !important; }
+.bsheet-backdrop {
+    position: absolute; inset: 0;
+    background: rgba(15, 23, 42, 0.42);
+    opacity: 0;
+    transition: opacity 0.18s ease;
+}
+.bsheet-wrap.is-open .bsheet-backdrop { opacity: 1; }
+.bsheet-panel {
+    position: relative;
+    width: 100%;
+    max-height: 82vh;
+    background: var(--surface);
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+    padding: 8px 16px calc(24px + env(safe-area-inset-bottom));
+    box-shadow: 0 -18px 40px rgba(15, 23, 42, 0.18);
+    transform: translateY(100%);
+    transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+}
+.bsheet-wrap.is-open .bsheet-panel { transform: translateY(0); }
+.bsheet-handle {
+    align-self: center;
+    width: 44px; height: 4px;
+    background: var(--border-strong);
+    border-radius: 999px;
+    margin: 8px 0 12px;
+    flex-shrink: 0;
+}
+.bsheet-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 4px 8px;
+    flex-shrink: 0;
+}
+.bsheet-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+.bsheet-body {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px 0 8px;
+    display: flex; flex-direction: column; gap: 4px;
+}
+.bsheet-item {
+    display: flex; align-items: center; gap: 14px;
+    width: 100%;
+    padding: 14px 12px;
+    background: transparent;
+    border: 0;
+    border-radius: 12px;
+    color: var(--text);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.12s;
+    min-height: 52px;
+    position: relative;
+}
+.bsheet-item:hover,
+.bsheet-item:active { background: var(--surface-alt); }
+.bsheet-item-icon {
+    width: 24px; height: 24px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+.bsheet-item-icon svg { width: 22px; height: 22px; stroke: currentColor; fill: none; }
+.bsheet-item-body {
+    flex: 1;
+    display: flex; flex-direction: column; gap: 2px;
+    min-width: 0;
+}
+.bsheet-item-label { line-height: 1.2; }
+.bsheet-item-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+.bsheet-item-badge {
+    min-width: 20px; height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 11px;
+    line-height: 20px;
+    font-family: var(--mono); font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+.bsheet-item-badge.is-mute {
+    background: var(--surface-alt);
+    color: var(--text-muted);
+}
+.bsheet-item-badge[hidden] { display: none !important; }
+
+.mobile-tab-badge.is-mute {
+    background: color-mix(in srgb, var(--primary) 40%, var(--text-muted));
 }
 
