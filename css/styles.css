@@ -252,8 +252,13 @@ body[data-marketplace="amazon"] .sb-brand-dot {
 .sb-icon {
     width: 18px; height: 18px;
     display: inline-flex; align-items: center; justify-content: center;
-    font-size: 16px; color: var(--text-muted);
+    color: var(--text-muted);
     flex-shrink: 0;
+}
+.sb-icon svg {
+    width: 16px; height: 16px;
+    stroke: currentColor;
+    fill: none;
 }
 .sb-item .badge-count {
     margin-left: auto;
@@ -2745,19 +2750,45 @@ input:focus, select:focus {
    ============================================================================ */
 .fab {
     position: fixed;
-    bottom: 24px; right: 24px;
-    width: 56px; height: 56px;
-    border-radius: 50%;
+    bottom: max(24px, env(safe-area-inset-bottom));
+    right: max(24px, env(safe-area-inset-right));
+    height: 56px;
+    min-width: 56px;
+    padding: 0;
+    border-radius: 999px;
     background: var(--primary); color: var(--on-primary, #fff);
-    border: 0; font-size: 26px; font-weight: 300;
-    box-shadow: var(--shadow), 0 8px 20px rgba(0,0,0,0.12);
+    border: 0; font-size: 14px; font-weight: 600;
+    box-shadow: 0 4px 16px color-mix(in srgb, var(--primary) 30%, transparent),
+                0 8px 20px rgba(0, 0, 0, 0.08);
     cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: transform 0.15s, background 0.15s;
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 8px;
+    transition: transform 0.15s, background 0.15s, box-shadow 0.15s;
     z-index: 10;
 }
-.fab:hover { background: var(--primary-hover); transform: translateY(-2px); }
-.fab:active { transform: scale(0.95); }
+.fab .fab-icon {
+    width: 22px; height: 22px;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+.fab .fab-icon svg {
+    width: 22px; height: 22px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2.4;
+}
+.fab.has-label {
+    padding: 0 20px 0 16px;
+}
+.fab.has-label .fab-label { display: inline-block; letter-spacing: -0.01em; }
+.fab-label[hidden] { display: none !important; }
+.fab:hover {
+    background: var(--primary-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 22px color-mix(in srgb, var(--primary) 38%, transparent),
+                0 10px 24px rgba(0, 0, 0, 0.10);
+}
+.fab:active { transform: scale(0.96); }
 
 /* ============================================================================
    Stats strip
@@ -4958,7 +4989,18 @@ button.ship-advance:hover {
         border-radius: 10px;
         padding: 4px 2px;
     }
-    .mobile-tab-icon { font-size: 18px; line-height: 1; }
+    .mobile-tab-icon {
+        width: 20px; height: 20px;
+        display: inline-flex; align-items: center; justify-content: center;
+        line-height: 1;
+    }
+    .mobile-tab-icon svg {
+        width: 20px; height: 20px;
+        stroke: currentColor;
+        fill: none;
+    }
+    .mobile-tab.active .mobile-tab-icon { color: var(--primary); }
+    .mobile-tab { color: var(--text-muted); }
     .mobile-tab.active {
         color: var(--primary-text);
         background: var(--primary-tint);
@@ -4976,8 +5018,12 @@ button.ship-advance:hover {
         font-family: var(--mono); font-variant-numeric: tabular-nums;
     }
 
+    /* FAB no debe chocar con la tabbar móvil (~64px) ni con el notch */
     .fab {
-        bottom: calc(72px + env(safe-area-inset-bottom)) !important;
+        right: max(16px, env(safe-area-inset-right));
+        bottom: calc(72px + env(safe-area-inset-bottom));
+        min-width: 56px;
+        height: 56px;
     }
 
     .view-head {
@@ -5076,12 +5122,6 @@ button.ship-advance:hover {
         min-height: 44px;
     }
     .sync-actions .btn { min-height: 44px; }
-
-    .fab {
-        right: max(16px, env(safe-area-inset-right));
-        bottom: max(16px, env(safe-area-inset-bottom));
-        width: 56px; height: 56px;
-    }
 
     .modal { padding: 0; align-items: stretch; }
     .modal-panel {

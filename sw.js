@@ -11,6 +11,7 @@ const STATIC_ASSETS = [
     './js/calc.js',
     './js/data.js',
     './js/excel.js',
+    './js/icons.js',
     './js/ui.js',
     './js/keepa.js',
     './js/keepa-view.js',

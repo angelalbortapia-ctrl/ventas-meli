@@ -1018,6 +1018,7 @@ const App = (() => {
         initBackup();
         initFAB();
         initPWA();
+        window.Icons?.hydrate?.(document);
 
         LotesView.init();
         EnviosView.init();
