@@ -2328,6 +2328,170 @@ body[data-mp-view="general"] .dash-seg-btn.active {
 .dash-section .dash-split-2,
 .dash-section .dash-split-3 { margin-bottom: 0; }
 
+/* Chart type dropdown "⋯" — reemplaza las 4 pestañas visibles de Barras/Líneas/Área */
+.dash-chart-type-more { position: relative; display: inline-block; }
+.dash-chart-type-btn {
+    list-style: none;
+    display: inline-flex;
+    align-items: center; justify-content: center;
+    width: 36px; height: 32px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text-muted);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1;
+}
+.dash-chart-type-btn::-webkit-details-marker { display: none; }
+.dash-chart-type-more[open] .dash-chart-type-btn {
+    color: var(--primary-text);
+    border-color: var(--primary);
+    background: var(--primary-tint);
+}
+.dash-chart-type-list {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 20;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 6px;
+    display: grid;
+    gap: 4px;
+    box-shadow: var(--shadow-lg);
+    min-width: 132px;
+}
+.dash-chart-type-list button {
+    width: 100%;
+    justify-content: flex-start;
+    text-align: left;
+    padding: 6px 10px;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font: inherit; font-size: 13px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.dash-chart-type-list button:hover { background: var(--surface-alt); }
+.dash-chart-type-list button.active {
+    background: var(--primary-tint);
+    color: var(--primary-text);
+    font-weight: 600;
+}
+
+/* P&G compacto — flujo Ingresos → Utilidad */
+.dash-pyg-compact { padding: 20px 22px; }
+.dash-pyg-flow {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 22px;
+    align-items: center;
+}
+.dash-pyg-node { min-width: 0; }
+.dash-pyg-node-label {
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+.dash-pyg-node-value {
+    font-family: var(--mono); font-variant-numeric: tabular-nums;
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin-top: 6px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.dash-pyg-node-value.pos { color: var(--success); }
+.dash-pyg-node-value.neg { color: var(--danger); }
+.dash-pyg-node-sub { margin-top: 6px; }
+.dash-pyg-arrow {
+    color: var(--text-dim);
+    font-size: 22px;
+    line-height: 1;
+    text-align: center;
+}
+.dash-pyg-details { margin-top: 16px; }
+.dash-pyg-details > summary {
+    cursor: pointer;
+    padding: 6px 0;
+    color: var(--primary-text);
+    font-weight: 600;
+    font-size: 13px;
+    list-style: none;
+}
+.dash-pyg-details > summary::-webkit-details-marker { display: none; }
+.dash-pyg-details > summary::before {
+    content: '›';
+    display: inline-block;
+    margin-right: 6px;
+    transition: transform 0.15s;
+}
+.dash-pyg-details[open] > summary::before { transform: rotate(90deg); }
+.dash-pyg-details-body { margin-top: 12px; }
+@media (max-width: 640px) {
+    .dash-pyg-flow { grid-template-columns: 1fr; gap: 8px; }
+    .dash-pyg-arrow { transform: rotate(90deg); font-size: 20px; margin: 6px 0; }
+}
+
+/* Ranking top 3 — una columna, tipografía más aireada */
+.dash-rank-top3 { padding-left: 0; margin: 0; list-style: none; }
+.dash-rank-top3 li {
+    display: grid;
+    grid-template-columns: 34px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    border-top: 1px solid var(--border-subtle);
+    transition: background 0.1s;
+}
+.dash-rank-top3 li:first-child { border-top: 0; }
+.dash-rank-top3 li:hover { background: var(--surface-alt); }
+.dash-rank-top3 .n {
+    font-family: var(--mono); font-variant-numeric: tabular-nums;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-dim);
+    text-align: center;
+}
+.dash-rank-top3 li:first-child .n { color: var(--primary); }
+.dash-rank-top3 .name { font-weight: 500; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-rank-top3 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; text-align: right; }
+.dash-rank-hint { margin: 12px 4px 0; }
+
+.dash-link-inline {
+    background: transparent;
+    border: 0;
+    color: var(--primary-text);
+    font: inherit;
+    font-weight: 600;
+    padding: 0 2px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.dash-link-inline:hover { color: var(--primary); }
+
+.dash-hint-general {
+    padding: 14px 18px;
+    background: var(--surface-alt);
+    border: 1px dashed var(--border-strong);
+    border-radius: 10px;
+    margin-top: 6px;
+}
+.dash-hint-general p { margin: 0; }
+
 /* Hero KPIs (Cobrado / Vendido / Ganancia con delta chip) */
 .dash-hero-kpis {
     display: grid;

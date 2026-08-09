@@ -69,12 +69,15 @@ const DashboardView = (() => {
                                     <button type="button" class="dash-seg-btn${chartPeriod === 'months' ? ' active' : ''}" data-dash-period="months">Meses</button>
                                     <button type="button" class="dash-seg-btn${chartPeriod === 'years' ? ' active' : ''}" data-dash-period="years">Años</button>
                                 </div>
-                                <div class="dash-seg" role="group" aria-label="Tipo de gráfica">
-                                    <button type="button" class="dash-seg-btn${chartType === 'hero' ? ' active' : ''}" data-dash-type="hero">Hero</button>
-                                    <button type="button" class="dash-seg-btn${chartType === 'bars' ? ' active' : ''}" data-dash-type="bars">Barras</button>
-                                    <button type="button" class="dash-seg-btn${chartType === 'lines' ? ' active' : ''}" data-dash-type="lines">Líneas</button>
-                                    <button type="button" class="dash-seg-btn${chartType === 'area' ? ' active' : ''}" data-dash-type="area">Área</button>
-                                </div>
+                                <details class="dash-chart-type-more">
+                                    <summary class="dash-chart-type-btn" aria-label="Tipo de gráfica">⋯</summary>
+                                    <div class="dash-chart-type-list" role="group" aria-label="Tipo de gráfica">
+                                        <button type="button" class="dash-seg-btn${chartType === 'hero' ? ' active' : ''}" data-dash-type="hero">Hero</button>
+                                        <button type="button" class="dash-seg-btn${chartType === 'bars' ? ' active' : ''}" data-dash-type="bars">Barras</button>
+                                        <button type="button" class="dash-seg-btn${chartType === 'lines' ? ' active' : ''}" data-dash-type="lines">Líneas</button>
+                                        <button type="button" class="dash-seg-btn${chartType === 'area' ? ' active' : ''}" data-dash-type="area">Área</button>
+                                    </div>
+                                </details>
                             </div>
                         </div>
                         ${layProgreso(lotes, {
@@ -88,25 +91,18 @@ const DashboardView = (() => {
                         })}
                     </section>
                     <section class="dash-section">
-                        <h2 class="dash-section-title">P&amp;G</h2>
-                        ${layPyG(ctx)}
+                        <h2 class="dash-section-title">P&amp;G <small class="muted">estimado</small></h2>
+                        ${layPyGCompact(ctx)}
                     </section>
                     <section class="dash-section">
-                        <h2 class="dash-section-title">Caja</h2>
-                        ${layCaja(ctx)}
+                        <h2 class="dash-section-title">Top 3 · utilidad <span class="dash-mp-tag">${esc(mpLabel)}</span></h2>
+                        ${layRankingTop3(ctx)}
                     </section>
-                    <section class="dash-section">
-                        <h2 class="dash-section-title">Asignación <span class="dash-mp-tag">${esc(mpLabel)}</span></h2>
-                        ${layAsignacion(ctx)}
-                    </section>
-                    <section class="dash-section">
-                        <h2 class="dash-section-title">Portafolio</h2>
-                        ${layPortafolio(ctx)}
-                    </section>
-                    <section class="dash-section">
-                        <h2 class="dash-section-title">Ranking <span class="dash-mp-tag">${esc(mpLabel)}</span></h2>
-                        ${layRanking(ctx)}
-                    </section>
+                    <div class="dash-hint-general">
+                        <p class="muted small">Caja, Portafolio, Bolsitas y ranking completo se movieron a
+                            <button type="button" class="dash-link-inline" data-dash-goto-mp="general">General</button>
+                            para consolidar Meli + Amazon en un solo lugar.</p>
+                    </div>
                 </div>
             </div>
         `;
@@ -229,7 +225,7 @@ const DashboardView = (() => {
                         </div>
                     </details>
                     <details class="gx-more" id="gx-finanzas">
-                        <summary class="gx-more-summary">Finanzas (P&amp;G · caja · portafolio)</summary>
+                        <summary class="gx-more-summary">Finanzas (P&amp;G · caja · portafolio · bolsitas)</summary>
                         <div class="gx-more-body">
                             <div class="gx-fin-stack">
                                 <div>
@@ -241,8 +237,16 @@ const DashboardView = (() => {
                                     ${layCaja(ctx)}
                                 </div>
                                 <div>
-                                    <h3 class="gx-fin-h">Portafolio</h3>
+                                    <h3 class="gx-fin-h">Portafolio (Meli + Amazon)</h3>
                                     ${layPortafolio(ctx)}
+                                </div>
+                                <div>
+                                    <h3 class="gx-fin-h">Bolsitas (ambos catálogos)</h3>
+                                    ${layAsignacionDualReadonly()}
+                                </div>
+                                <div>
+                                    <h3 class="gx-fin-h">Ranking completo</h3>
+                                    ${layRanking(ctx)}
                                 </div>
                             </div>
                         </div>
@@ -2061,6 +2065,72 @@ const DashboardView = (() => {
         `;
     }
 
+    /**
+     * P&G compacto: solo el flujo Ingresos → Utilidad. El desglose largo
+     * (fees, ads, composición) queda detrás de un "Ver desglose" que
+     * expande a la vista original.
+     */
+    function layPyGCompact(ctx) {
+        const { agg, fees, costoVendido, gastoAds } = ctx;
+        const cashIn = agg.cashIn || 0;
+        const neto = agg.gananciaRealizada || 0;
+        const bruto = cashIn - costoVendido;
+        const marginPct = cashIn > 0 ? (neto / cashIn) : 0;
+        return `
+            <div class="dash-panel dash-pyg-compact">
+                <div class="dash-pyg-flow">
+                    <div class="dash-pyg-node">
+                        <div class="dash-pyg-node-label">Ingresos</div>
+                        <div class="dash-pyg-node-value mono">${Calc.fmtMXN(cashIn)}</div>
+                    </div>
+                    <div class="dash-pyg-arrow" aria-hidden="true">→</div>
+                    <div class="dash-pyg-node">
+                        <div class="dash-pyg-node-label">Utilidad</div>
+                        <div class="dash-pyg-node-value mono ${tone(neto)}">${Calc.fmtMXN(neto)}</div>
+                        <div class="dash-pyg-node-sub muted small">${Calc.fmtPct(marginPct)} margen · ${agg.totalVendidas || 0} uds</div>
+                    </div>
+                </div>
+                <details class="dash-pyg-details">
+                    <summary>Ver desglose</summary>
+                    <div class="dash-pyg-details-body">
+                        ${layPyG(ctx)}
+                        ${(gastoAds || 0) > 0 ? `<p class="muted small" style="margin-top:8px">Ads (referencia, no restado arriba): ${Calc.fmtMXN(gastoAds)}</p>` : ''}
+                        <p class="muted small" style="margin:6px 0 0">Utilidad bruta est.: ${Calc.fmtMXN(bruto)} · Fees: ${Calc.fmtMXN(fees)}.</p>
+                    </div>
+                </details>
+            </div>
+        `;
+    }
+
+    /**
+     * Ranking Top-3 por utilidad — una sola columna, no las 3 paralelas.
+     * El ranking completo (utilidad + margen + ROI en 3 cols top 8) vive
+     * ahora en General.
+     */
+    function layRankingTop3({ rows }) {
+        const active = rows.filter(r => isRankable(r));
+        const byProduct = groupBestByProduct(active);
+        const top = [...byProduct].sort((a, b) => b.calc.utilidad - a.calc.utilidad).slice(0, 3);
+        return `
+            <div class="dash-panel">
+                ${top.length
+                    ? `<ol class="dash-rank-ol dash-rank-top3">
+                        ${top.map((r, i) => `
+                            <li data-dash-lote="${esc(r.lote.id)}" data-dash-mp="${esc(r.lote._mp || '')}">
+                                <span class="n">${i + 1}</span>
+                                <span class="name" title="${esc(r.lote.producto)}${r.lote.variante ? ' · ' + esc(r.lote.variante) : ''}">
+                                    ${esc(short(r.lote.producto, 42))}${r.lote.variante ? ` <small class="muted">${esc(short(r.lote.variante, 12))}</small>` : ''}
+                                </span>
+                                <span class="num ${tone(r.calc.utilidad)}">${Calc.fmtMXN(r.calc.utilidad)}</span>
+                            </li>
+                        `).join('')}
+                    </ol>
+                    <p class="muted small dash-rank-hint">Ver ranking completo (margen y ROI) en <button type="button" class="dash-link-inline" data-dash-goto-mp="general">General</button>.</p>`
+                    : '<p class="muted small">Sin lotes rankeables todavía.</p>'}
+            </div>
+        `;
+    }
+
     /** Cash de ventas marcadas Cobrado en Caja (o legacy sin eventos). */
     function sumCashCobrado(rows) {
         let cash = 0;
@@ -3105,7 +3175,7 @@ const DashboardView = (() => {
         root.querySelectorAll('[data-dash-goto-mp]').forEach(btn => {
             btn.addEventListener('click', () => {
                 const mp = btn.dataset.dashGotoMp;
-                if (!mp || !['meli', 'amazon'].includes(mp)) return;
+                if (!mp || !['meli', 'amazon', 'general'].includes(mp)) return;
                 if (window.App?.applyMarketplaceView) window.App.applyMarketplaceView(mp);
                 else document.querySelector(`.sb-mp [data-marketplace="${mp}"]`)?.click();
             });
