@@ -1070,6 +1070,8 @@ const Data = (() => {
             delete ui.dashChartProposal;
             delete ui.dashChartStyle;
             delete ui.dashChartMetric;
+            // Ticker Walmart/Costco eliminado; la key queda huérfana en UIs viejas.
+            delete ui.dealsTicker;
             // Migrar filtros de gráfica legado (año/mes/semana → YYYY-MM-DD)
             if (ui.dashChartFrom && !/^\d{4}-\d{2}-\d{2}$/.test(String(ui.dashChartFrom))) {
                 const s = String(ui.dashChartFrom).trim();

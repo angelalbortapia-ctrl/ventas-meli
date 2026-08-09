@@ -624,235 +624,6 @@ const DashboardView = (() => {
         return `${Math.round(d)} d`;
     }
 
-    const DEALS_SEED = [
-        {
-            id: 'seed-wm-1',
-            store: 'walmart',
-            title: 'Ofertas Walmart México',
-            note: 'Revisa electrónicos y hogar',
-            tag: 'Walmart',
-            url: 'https://www.walmart.com.mx/contenido/ofertas',
-        },
-        {
-            id: 'seed-wm-2',
-            store: 'walmart',
-            title: 'Walmart · Super precios',
-            note: 'Ideas de recompra / sourcing',
-            tag: 'Promo',
-            url: 'https://www.walmart.com.mx/',
-        },
-        {
-            id: 'seed-costco-1',
-            store: 'costco',
-            title: 'Costco México · ofertas',
-            note: 'Mayoreo y warehouse',
-            tag: 'Costco',
-            url: 'https://www.costco.com.mx/',
-        },
-        {
-            id: 'seed-costco-2',
-            store: 'costco',
-            title: 'Costco · Especiales del mes',
-            note: 'Compara vs tu costo actual',
-            tag: 'Especial',
-            url: 'https://www.costco.com.mx/',
-        },
-    ];
-
-    function normalizeDeal(raw) {
-        if (!raw || typeof raw !== 'object') return null;
-        const store = String(raw.store || 'otro').toLowerCase();
-        const title = String(raw.title || '').trim();
-        const url = String(raw.url || '').trim();
-        if (!title || !url) return null;
-        return {
-            id: String(raw.id || (`d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`)),
-            store: ['walmart', 'costco', 'otro'].includes(store) ? store : 'otro',
-            title,
-            note: String(raw.note || '').trim(),
-            tag: String(raw.tag || '').trim() || (store === 'walmart' ? 'Walmart' : store === 'costco' ? 'Costco' : 'Oferta'),
-            url,
-        };
-    }
-
-    function loadDeals() {
-        const raw = window.State.ui?.dealsTicker;
-        if (Array.isArray(raw) && raw.length) {
-            const list = raw.map(normalizeDeal).filter(Boolean);
-            if (list.length) return list;
-        }
-        return DEALS_SEED.map(d => ({ ...d }));
-    }
-
-    function saveDeals(list) {
-        const dealsTicker = (list || []).map(normalizeDeal).filter(Boolean);
-        window.State.ui = { ...window.State.ui, dealsTicker };
-        window.State.saveUI();
-        return dealsTicker;
-    }
-
-    function storeLabel(store) {
-        if (store === 'walmart') return 'Walmart';
-        if (store === 'costco') return 'Costco';
-        return 'Otro';
-    }
-
-    function layDealsTicker() {
-        const deals = loadDeals();
-        const items = deals.length ? deals : DEALS_SEED;
-        // Duplicar pista para loop continuo
-        const track = [...items, ...items].map(d => `
-            <a class="gx-ticker-item store-${esc(d.store)}" href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">
-                <span class="gx-ticker-tag">${esc(d.tag || storeLabel(d.store))}</span>
-                <span class="gx-ticker-title">${esc(d.title)}</span>
-                ${d.note ? `<span class="gx-ticker-note">${esc(d.note)}</span>` : ''}
-            </a>
-        `).join('<span class="gx-ticker-sep" aria-hidden="true">·</span>');
-        return `
-            <div class="gx-ticker" role="region" aria-label="Ofertas Walmart y Costco">
-                <div class="gx-ticker-label">
-                    <span>Ofertas</span>
-                    <button type="button" class="gx-ticker-manage" data-deals-open title="Gestionar ofertas">✎</button>
-                </div>
-                <div class="gx-ticker-viewport">
-                    <div class="gx-ticker-track">${track}</div>
-                </div>
-            </div>
-            <div class="gx-deals-panel" data-deals-panel hidden>
-                <div class="gx-deals-panel-card">
-                    <div class="gx-deals-panel-head">
-                        <div>
-                            <h3>Ofertas del ticker</h3>
-                            <p class="muted small">Cárgalas a mano o importa un JSON. No scrapea Walmart/Costco automáticamente.</p>
-                        </div>
-                        <button type="button" class="icon-btn" data-deals-close aria-label="Cerrar">×</button>
-                    </div>
-                    <form class="gx-deals-form" data-deals-form>
-                        <label class="gx-field"><span>Tienda</span>
-                            <select name="store">
-                                <option value="walmart">Walmart</option>
-                                <option value="costco">Costco</option>
-                                <option value="otro">Otro</option>
-                            </select>
-                        </label>
-                        <label class="gx-field"><span>Título</span>
-                            <input name="title" required placeholder="Ej. TV 55&quot; en oferta" maxlength="80">
-                        </label>
-                        <label class="gx-field"><span>Nota</span>
-                            <input name="note" placeholder="Opcional" maxlength="80">
-                        </label>
-                        <label class="gx-field"><span>Etiqueta</span>
-                            <input name="tag" placeholder="−20% / Promo" maxlength="20">
-                        </label>
-                        <label class="gx-field gx-field-wide"><span>URL</span>
-                            <input name="url" type="url" required placeholder="https://www.walmart.com.mx/...">
-                        </label>
-                        <button type="submit" class="btn primary">Agregar</button>
-                    </form>
-                    <div class="gx-deals-tools">
-                        <button type="button" class="btn" data-deals-import>Importar JSON</button>
-                        <button type="button" class="btn" data-deals-export>Exportar JSON</button>
-                        <button type="button" class="btn" data-deals-seed>Restaurar ejemplos</button>
-                        <input type="file" accept="application/json,.json" data-deals-file hidden>
-                    </div>
-                    <ul class="gx-deals-list" data-deals-list>
-                        ${items.map(d => `
-                            <li>
-                                <div>
-                                    <strong>${esc(d.title)}</strong>
-                                    <span class="muted small">${esc(storeLabel(d.store))} · ${esc(d.tag || '')}</span>
-                                </div>
-                                <button type="button" class="btn" data-deals-del="${esc(d.id)}">Quitar</button>
-                            </li>
-                        `).join('')}
-                    </ul>
-                    <p class="muted small">Formato JSON: <code>[{"store":"walmart","title":"...","url":"https://...","tag":"−15%","note":"..."}]</code></p>
-                </div>
-            </div>
-        `;
-    }
-
-    function bindDealsTicker(root) {
-        const panel = root.querySelector('[data-deals-panel]');
-        const open = () => { if (panel) panel.hidden = false; };
-        const close = () => { if (panel) panel.hidden = true; };
-        root.querySelectorAll('[data-deals-open]').forEach(btn => btn.addEventListener('click', open));
-        root.querySelectorAll('[data-deals-close]').forEach(btn => btn.addEventListener('click', close));
-        panel?.addEventListener('click', (e) => {
-            if (e.target === panel) close();
-        });
-
-        const form = root.querySelector('[data-deals-form]');
-        form?.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const fd = new FormData(form);
-            const next = saveDeals([
-                ...loadDeals(),
-                {
-                    store: fd.get('store'),
-                    title: fd.get('title'),
-                    note: fd.get('note'),
-                    tag: fd.get('tag'),
-                    url: fd.get('url'),
-                },
-            ]);
-            UI.toast?.(`Oferta agregada · ${next.length} en ticker`);
-            render();
-        });
-
-        root.querySelectorAll('[data-deals-del]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const id = btn.dataset.dealsDel;
-                saveDeals(loadDeals().filter(d => d.id !== id));
-                UI.toast?.('Oferta quitada');
-                render();
-            });
-        });
-
-        root.querySelectorAll('[data-deals-seed]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                saveDeals(DEALS_SEED.map(d => ({ ...d })));
-                UI.toast?.('Ejemplos restaurados');
-                render();
-            });
-        });
-
-        const fileInput = root.querySelector('[data-deals-file]');
-        root.querySelectorAll('[data-deals-import]').forEach(btn => {
-            btn.addEventListener('click', () => fileInput?.click());
-        });
-        fileInput?.addEventListener('change', async () => {
-            const file = fileInput.files?.[0];
-            if (!file) return;
-            try {
-                const text = await file.text();
-                const parsed = JSON.parse(text);
-                const arr = Array.isArray(parsed) ? parsed : (parsed?.deals || []);
-                const list = arr.map(normalizeDeal).filter(Boolean);
-                if (!list.length) throw new Error('Sin ofertas válidas');
-                saveDeals(list);
-                UI.toast?.(`Importadas ${list.length} ofertas`);
-                render();
-            } catch (err) {
-                UI.toast?.(err.message || 'JSON inválido', 'error');
-            } finally {
-                fileInput.value = '';
-            }
-        });
-
-        root.querySelectorAll('[data-deals-export]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const blob = new Blob([JSON.stringify(loadDeals(), null, 2)], { type: 'application/json' });
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = `ofertas-ticker-${new Date().toISOString().slice(0, 10)}.json`;
-                a.click();
-                URL.revokeObjectURL(a.href);
-                UI.toast?.('JSON exportado');
-            });
-        });
-    }
-
     function layGeneralExecutive(exec) {
         const {
             nMeli, nAmz, aggCombined, hardMeli, hardAmz,
@@ -1045,7 +816,7 @@ const DashboardView = (() => {
             </section>
 
             <details class="gx-more" id="gx-canales" data-gx-more-persist ${moreOpen ? 'open' : ''}>
-                <summary class="gx-more-summary">Más detalle · canales, capital y ofertas Walmart/Costco</summary>
+                <summary class="gx-more-summary">Más detalle · canales y capital</summary>
                 <div class="gx-more-body">
                     <div class="gx-alloc-suggest" aria-label="Asignación sugerida de capital" style="margin-bottom:16px">
                         <div class="gx-alloc-copy">
@@ -1063,9 +834,6 @@ const DashboardView = (() => {
                     </div>
                     ${layChannelMatrix(exec.aggMeli, exec.aggAmz, nMeli, nAmz, hardMeli, hardAmz)}
                     <div style="margin-top:18px">${layCapitalUnificado(allocUnified)}</div>
-                    <div class="gx-ticker-wrap" id="gx-ticker" style="margin-top:18px">
-                        ${layDealsTicker()}
-                    </div>
                 </div>
             </details>
         `;
@@ -1311,7 +1079,6 @@ const DashboardView = (() => {
                 window.State.saveUI();
             });
         });
-        bindDealsTicker(root);
     }
 
     /** Inventario atrapado: sano (≥20% margen) vs flojo. */
@@ -3614,12 +3381,7 @@ const DashboardView = (() => {
         reverseSaleLiberation,
         purgeOrphanSaleLiberations,
         reconcileAllocFromLedger,
-        spendFromBucket,
-        listUnassignedVentas,
         ALLOC_BUCKETS,
-        emptyAllocBuckets,
-        defaultAllocPercents,
-        normalizePercents,
         splitByPercents,
         readAllocState,
         round2,
