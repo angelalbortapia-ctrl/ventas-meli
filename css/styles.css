@@ -2925,6 +2925,72 @@ body[data-mp-view="general"] .dash-seg-btn.active {
 }
 .tb-date { font-variant-numeric: tabular-nums; }
 
+.tb-sync-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px 0 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s;
+}
+.tb-sync-pill[hidden] { display: none !important; }
+.tb-sync-pill:hover { background: var(--bg); }
+.tb-sync-pill:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--primary) 25%, transparent);
+    outline-offset: 1px;
+}
+.tb-sync-dot {
+    width: 8px; height: 8px; border-radius: 999px;
+    background: currentColor;
+    flex-shrink: 0;
+}
+.tb-sync-pill.is-offline {
+    color: #b42318;
+    border-color: color-mix(in srgb, #b42318 40%, transparent);
+    background: color-mix(in srgb, #b42318 6%, var(--surface));
+}
+.tb-sync-pill.is-error {
+    color: var(--warning, #d97706);
+    border-color: color-mix(in srgb, var(--warning, #d97706) 40%, transparent);
+    background: color-mix(in srgb, var(--warning, #d97706) 6%, var(--surface));
+}
+.tb-sync-pill.is-syncing { color: var(--info, #2563eb); }
+.tb-sync-pill.is-syncing .tb-sync-dot {
+    animation: sync-pulse 1.1s ease-in-out infinite;
+}
+.tb-sync-pill.is-ok {
+    color: var(--success, #16a34a);
+    border-color: color-mix(in srgb, var(--success, #16a34a) 40%, transparent);
+    background: color-mix(in srgb, var(--success, #16a34a) 6%, var(--surface));
+}
+.tb-sync-pill.is-idle {
+    color: var(--text-muted);
+}
+@keyframes sync-pulse {
+    0%, 100% { opacity: 0.4; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.1); }
+}
+@media (max-width: 720px) {
+    .tb-sync-pill .tb-sync-label {
+        display: none;
+    }
+    .tb-sync-pill {
+        padding: 0;
+        width: 26px;
+        height: 26px;
+        justify-content: center;
+    }
+}
+
 .tb-bell {
     position: relative;
     background: transparent; border: 1px solid var(--border);

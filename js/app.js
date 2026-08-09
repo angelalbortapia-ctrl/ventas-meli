@@ -141,6 +141,69 @@ const App = (() => {
             });
         });
         document.getElementById('m-tab-more')?.addEventListener('click', () => openMoreSheet());
+        initSyncPill();
+    }
+
+    /**
+     * Pill de estado en el topbar: red offline, sync error/syncing/ok.
+     * Se oculta cuando todo está tranquilo (idle sin cuenta o silent OK).
+     */
+    function initSyncPill() {
+        const pill = document.getElementById('tb-sync-pill');
+        if (!pill) return;
+        const label = pill.querySelector('.tb-sync-label');
+        let okHideTimer = 0;
+
+        function paint() {
+            const online = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
+            const st = window.Sync?.getStatus?.() || { state: 'off' };
+            pill.classList.remove('is-offline', 'is-error', 'is-syncing', 'is-ok', 'is-idle');
+            if (!online) {
+                pill.hidden = false;
+                pill.classList.add('is-offline');
+                label.textContent = 'Sin conexión';
+                pill.title = 'Estás offline. Tus cambios se guardan localmente y suben al reconectar.';
+                clearTimeout(okHideTimer);
+                return;
+            }
+            if (st.state === 'syncing') {
+                pill.hidden = false;
+                pill.classList.add('is-syncing');
+                label.textContent = 'Sincronizando…';
+                pill.title = 'Subiendo cambios a Supabase.';
+                clearTimeout(okHideTimer);
+                return;
+            }
+            if (st.state === 'error') {
+                pill.hidden = false;
+                pill.classList.add('is-error');
+                label.textContent = 'Sync error';
+                pill.title = st.detail || 'Falla de sincronización. Click para abrir Ajustes.';
+                clearTimeout(okHideTimer);
+                return;
+            }
+            if (st.state === 'synced') {
+                pill.hidden = false;
+                pill.classList.add('is-ok');
+                label.textContent = 'Sync OK';
+                pill.title = st.email ? `Sincronizado · ${st.email}` : 'Sincronizado.';
+                clearTimeout(okHideTimer);
+                okHideTimer = setTimeout(() => { pill.hidden = true; }, 3000);
+                return;
+            }
+            // Estados "sin cuenta / esperando login": ocultamos para no ensuciar.
+            pill.hidden = true;
+        }
+
+        pill.addEventListener('click', () => {
+            switchTab('settings');
+            const sync = document.getElementById('view-settings')?.querySelector('#sync-panel, [data-sync-section]');
+            sync?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+        });
+        window.addEventListener('online', paint);
+        window.addEventListener('offline', paint);
+        window.Sync?.onStatus?.(paint);
+        paint();
     }
 
     /**
