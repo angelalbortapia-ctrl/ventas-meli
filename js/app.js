@@ -1051,6 +1051,14 @@ const App = (() => {
         }
         refreshMarketplaceChrome();
         SettingsView.loadIntoForm();
+        // Invalida el HTML de vistas ocultas para que no muestren catálogos del
+        // marketplace anterior si algo (snapshot, preview, hidden overlay)
+        // inspecciona el DOM antes de que el usuario navegue a ellas.
+        ['view-lotes', 'view-envios', 'view-wishlist', 'view-keepa', 'view-insights', 'view-caja']
+            .forEach(id => {
+                const el = document.getElementById(id);
+                if (el && el.hidden) el.innerHTML = '';
+            });
         if (window.State.view === 'dashboard') DashboardView.render();
         else if (window.State.view === 'insights') InsightsView.render();
         else if (window.State.view === 'lotes') LotesView.render();

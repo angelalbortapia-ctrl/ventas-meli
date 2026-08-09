@@ -1483,28 +1483,6 @@ const DashboardView = (() => {
                 </div>
                 <span class="muted small">${esc(modeHint)}</span>
             </div>
-            <div class="dash-grid-kpi dash-grid-kpi-3">
-                ${kpi(
-                    'Cobrado · periodo',
-                    Calc.fmtMXN(totalCobrado),
-                    cashMode === 'cobrado' ? 'pos' : '',
-                    porCobrarAmt > 0.009
-                        ? `Por cobrar ${Calc.fmtMXN(porCobrarAmt)}`
-                        : rangeHint,
-                )}
-                ${kpi(
-                    'Vendido · periodo',
-                    Calc.fmtMXN(totalVendido),
-                    cashMode === 'vendido' ? 'pos' : '',
-                    rangeHint,
-                )}
-                ${kpi(
-                    cashMode === 'cobrado' ? 'Ganancia cobrada' : 'Ganancia vendida',
-                    Calc.fmtMXN(totalGain),
-                    tone(totalGain),
-                    `${totalUds} uds · ${esc(modeHint)}`,
-                )}
-            </div>
             <div class="dash-panel dash-chart-panel">
                 <div class="dash-chart-filters">
                     <div class="dash-from-row">
