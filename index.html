@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#3483fa">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23ffe600'/%3E%3Ctext x='50' y='68' text-anchor='middle' font-size='60' fill='%231a1a1a' font-family='Calibri,sans-serif' font-weight='bold'%3EM%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="css/styles.css?v=144">
+    <link rel="stylesheet" href="css/styles.css?v=145">
 </head>
 <body>
 
@@ -246,17 +246,17 @@
                     </div>
                 </div>
 
-                <div class="card" data-mp-only="meli">
-                    <h3>Comisiones Mercado Libre</h3>
+                <fieldset class="card setting-group" data-mp-only="meli">
+                    <legend>Comisiones Mercado Libre</legend>
                     <label><span>Comisión Clásica (%)</span><input type="number" step="0.01" id="set-com-clasica"></label>
                     <label><span>Comisión Premium (%)</span><input type="number" step="0.01" id="set-com-premium"></label>
                     <label><span>Cargo fijo si Precio &lt; umbral (MXN)</span><input type="number" step="0.01" id="set-cargo-fijo"></label>
                     <label><span>Precio umbral para cargo fijo (MXN)</span><input type="number" step="1" id="set-umbral-cargo"></label>
                     <p class="muted small">Default cargo fijo ≈ $35 (ajusta al valor vigente de tu tipo de publicación en ML).</p>
-                </div>
+                </fieldset>
 
-                <div class="card" data-mp-only="meli">
-                    <h3>Retenciones SAT</h3>
+                <fieldset class="card setting-group" data-mp-only="meli">
+                    <legend>Retenciones SAT</legend>
                     <label class="check-row">
                         <input type="checkbox" id="set-resico">
                         <span>Estoy en RESICO (ISR 1% en lugar de 2.5%)</span>
@@ -264,7 +264,7 @@
                     <label><span>Retención IVA (%)</span><input type="number" step="0.01" id="set-iva"></label>
                     <label><span>Retención ISR (%)</span><input type="number" step="0.01" id="set-isr"></label>
                     <p class="muted small">Se calculan sobre el precio sin IVA (precio ÷ 1.16). Con RESICO activo el ISR se fija en 1% automáticamente.</p>
-                </div>
+                </fieldset>
 
                 <div class="card" data-mp-only="amazon" hidden>
                     <h3>Keepa (Amazon MX)</h3>
@@ -291,8 +291,8 @@
                     </p>
                 </div>
 
-                <div class="card" data-mp-only="amazon" hidden>
-                    <h3>Tarifas Amazon México</h3>
+                <fieldset class="card setting-group" data-mp-only="amazon" hidden>
+                    <legend>Tarifas Amazon México</legend>
                     <label class="check-row">
                         <input type="checkbox" id="set-amz-tabla-cat" checked>
                         <span>Usar tabla oficial de referido por categoría</span>
@@ -330,15 +330,15 @@
                         (&lt;$150 / $150–299 / $299–499 / ≥$499), tamaño y peso. El almacenamiento FBA
                         se captura por producto (campo en Precios).
                     </p>
-                </div>
+                </fieldset>
 
-                <div class="card">
-                    <h3>Semáforo de viabilidad</h3>
+                <fieldset class="card setting-group">
+                    <legend>Semáforo de viabilidad</legend>
                     <label><span>Umbral 🔴 Liquidar — utilidad neta menor a (MXN)</span><input type="number" step="1" id="set-umbral-liquidar"></label>
                     <label><span>Umbral 🟢 Escalar — utilidad neta mayor o igual a (MXN)</span><input type="number" step="1" id="set-umbral-escalar"></label>
                     <label><span>Tope CPA (Ads) como % de utilidad neta</span><input type="number" step="0.01" id="set-cpa"></label>
                     <p class="muted small">Ej.: liquidar &lt; $50, escalar ≥ $80, CPA 40% de la utilidad.</p>
-                </div>
+                </fieldset>
             </div>
         </section>
 
@@ -521,7 +521,7 @@
 <script src="js/keepa-view.js?v=11"></script>
 <script src="js/palette.js?v=13"></script>
 <script src="js/insights.js?v=10"></script>
-<script src="js/lotes.js?v=70"></script>
+<script src="js/lotes.js?v=71"></script>
 <script src="js/envios.js?v=8"></script>
 <script src="js/wishlist.js?v=9"></script>
 <script src="js/dashboard.js?v=79"></script>

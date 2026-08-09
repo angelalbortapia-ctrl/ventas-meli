@@ -3355,7 +3355,7 @@ body.resizing * { user-select: none !important; }
 .lotes-sort-dir:hover { background: var(--bg); }
 
 .lotes-row {
-    padding: 12px 16px;
+    padding: 8px 16px;
     border-bottom: 1px solid var(--border);
     cursor: pointer;
     display: grid;
@@ -3402,8 +3402,25 @@ body.resizing * { user-select: none !important; }
     color: var(--text);
 }
 .lotes-sub {
-    font-size: 11px; color: var(--text-muted); margin-top: 3px;
-    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    font-size: 11px; color: var(--text-muted); margin-top: 2px;
+    display: flex; gap: 8px; align-items: center; flex-wrap: nowrap;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.lotes-sub > * { flex-shrink: 0; }
+.lotes-sub > .lotes-sub-primary {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 1;
+}
+/* Metadatos secundarios (categoría) solo aparecen en el tooltip nativo del row */
+.lotes-sub .lotes-sub-cat { display: none; }
+@media (min-width: 1100px) {
+    .lotes-sub .lotes-sub-cat { display: inline; }
+    .lotes-sub .lotes-sub-cat + span { display: inline; }
 }
 .lotes-sub code {
     font-family: var(--mono); font-variant-numeric: tabular-nums;
@@ -4016,6 +4033,25 @@ body.resizing * { user-select: none !important; }
     box-shadow: var(--shadow-sm);
 }
 .card h3 { margin-bottom: 14px; font-weight: 600; }
+
+/* Ajustes: agrupa cada bloque en <fieldset> semántico con márgenes consistentes */
+fieldset.setting-group {
+    margin: 0;
+    display: block;
+}
+fieldset.setting-group > legend {
+    padding: 0;
+    margin: 0 0 14px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+}
+fieldset.setting-group > label,
+fieldset.setting-group > .check-row { margin-bottom: 10px; }
+fieldset.setting-group > label:last-of-type,
+fieldset.setting-group > .check-row:last-of-type { margin-bottom: 0; }
+fieldset.setting-group > .card-sep { margin: 12px 0; }
+fieldset.setting-group > p.muted { margin-top: 10px; margin-bottom: 0; }
 
 .mini-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .mini-table thead th {

@@ -545,22 +545,27 @@ const LotesView = (() => {
             const thumb = thumbSrc
                 ? `<img class="lotes-row-thumb" src="${thumbSrc}" alt="" loading="lazy">`
                 : `<span class="lotes-row-thumb is-empty" aria-hidden="true"></span>`;
+            const shipMeta = shipListLabel(f);
+            const tooltipParts = [
+                esc(f.producto),
+                colorLine,
+                f.categoria ? `Cat: ${esc(f.categoria)}` : '',
+                `Stock ${f.stockRest}/${f.stockTotal}`,
+                shipMeta ? esc(shipMeta.text) : '',
+                `${Calc.fmtMXN(f.utilidad)} util · ${Calc.fmtPct(f.margen)} margen`,
+            ].filter(Boolean).join(' · ');
             return `
-            <div class="lotes-row ${f.key===local.selected?'active':''}" data-select="${esc(f.key)}">
+            <div class="lotes-row ${f.key===local.selected?'active':''}" data-select="${esc(f.key)}" title="${tooltipParts}">
                 <span class="lotes-dot ${cls(f.estrategia)}" title="${label(f.estrategia)}"></span>
                 ${thumb}
                 <div class="lotes-info">
                     <div class="lotes-name">${esc(f.producto)}</div>
                     <div class="lotes-sub">
-                        <span>${colorLine}</span>
-                        ${f.categoria ? `<span>·</span><span>${esc(f.categoria)}</span>` : ''}
+                        <span class="lotes-sub-primary">${colorLine}</span>
+                        ${f.categoria ? `<span class="lotes-sub-cat">·</span><span class="lotes-sub-cat">${esc(f.categoria)}</span>` : ''}
                         <span>·</span>
                         <span>Stock ${f.stockRest}/${f.stockTotal}</span>
-                        ${(() => {
-                            const ship = shipListLabel(f);
-                            if (!ship) return '';
-                            return `<span>·</span><span class="ship-pending-tag${ship.done ? ' is-done' : ''}${ship.idle ? ' is-idle' : ''}">${esc(ship.text)}</span>`;
-                        })()}
+                        ${shipMeta ? `<span>·</span><span class="ship-pending-tag${shipMeta.done ? ' is-done' : ''}${shipMeta.idle ? ' is-idle' : ''}">${esc(shipMeta.text)}</span>` : ''}
                     </div>
                 </div>
                 <div class="lotes-metric ${f.utilidad>=0?'pos':'neg'}">
