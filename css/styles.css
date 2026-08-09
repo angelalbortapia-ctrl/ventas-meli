@@ -59,6 +59,10 @@
     /* Sistema semántico (ganancia, pérdida, aviso, info) — aliases claros */
     --success: #16a34a;
     --warning: #f59e0b;
+
+    /* Superficies secundarias — para cards elevadas y bordes suaves */
+    --card-bg-2: color-mix(in srgb, var(--surface) 94%, var(--text) 6%);
+    --border-subtle: color-mix(in srgb, var(--border) 60%, transparent);
 }
 
 /* Mercado Libre — azul para texto/números; amarillo solo marca/CTA */
@@ -2323,6 +2327,95 @@ body[data-mp-view="general"] .dash-seg-btn.active {
 .dash-section .dash-grid-kpi { margin-bottom: 12px; }
 .dash-section .dash-split-2,
 .dash-section .dash-split-3 { margin-bottom: 0; }
+
+/* Hero KPIs (Cobrado / Vendido / Ganancia con delta chip) */
+.dash-hero-kpis {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-bottom: 18px;
+}
+.hero-kpi {
+    background: var(--card-bg-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow-sm);
+    display: flex; flex-direction: column;
+    min-width: 0;
+}
+.hero-kpi-title {
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    font-weight: 600;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.hero-kpi-title small {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 10px;
+    color: var(--text-dim);
+    font-weight: 500;
+}
+.hero-kpi-value {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin-top: 10px;
+    color: var(--text);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.hero-kpi-value.pos { color: var(--success); }
+.hero-kpi-value.neg { color: var(--danger); }
+.hero-kpi-delta {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 12px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--border) 45%, transparent);
+    color: var(--text-muted);
+    align-self: flex-start;
+    white-space: nowrap;
+}
+.hero-kpi-delta.is-pos {
+    color: var(--success);
+    background: color-mix(in srgb, var(--success) 14%, transparent);
+}
+.hero-kpi-delta.is-neg {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.hero-kpi-delta.is-zero {
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--border) 45%, transparent);
+}
+.hero-kpi-delta.is-na {
+    color: var(--text-dim);
+    background: transparent;
+    padding-left: 0;
+    padding-right: 0;
+}
+@media (max-width: 768px) {
+    .dash-hero-kpis {
+        grid-template-columns: 1fr;
+        gap: 10px;
+        margin-bottom: 14px;
+    }
+    .hero-kpi { padding: 14px 16px; }
+    .hero-kpi-value { font-size: 26px; }
+}
 
 .dash-grid-kpi {
     display: grid;

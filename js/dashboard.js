@@ -59,6 +59,7 @@ const DashboardView = (() => {
         root.innerHTML = `
             <div class="dash-shell">
                 <div class="dash-body dash-body-combined">
+                    ${layHeroKPIs(lotes)}
                     <section class="dash-section">
                         <div class="dash-section-head">
                             <h2 class="dash-section-title">Progreso <span class="dash-mp-tag">${esc(mpLabel)}</span></h2>
@@ -1326,6 +1327,110 @@ const DashboardView = (() => {
     /** Venta ya repartida en bolsitas (Caja). No cuenta cobrado-sin-asignar ni legacy suelto. */
     function ventaIsCobrado(v) {
         return !!(v && Data.hasAsignacion?.(v));
+    }
+
+    /**
+     * Estadísticas del periodo actual (últimos N días) y del periodo previo
+     * de igual duración, para el Hero de KPIs con delta chip. Legacy sin
+     * eventos no cae en ninguno de los buckets: no tiene fecha confiable.
+     */
+    function heroPeriodStats(lotes, days = 30) {
+        const now = new Date();
+        const curStart = new Date(now.getTime() - days * 86400000);
+        const prevStart = new Date(now.getTime() - 2 * days * 86400000);
+        const cur = { cobrado: 0, vendido: 0, ganancia: 0, uds: 0 };
+        const prev = { cobrado: 0, vendido: 0, ganancia: 0, uds: 0 };
+        let hasAnyPrev = false;
+        let hasAnyCur = false;
+
+        (lotes || []).forEach(lote => {
+            const settings = settingsForTaggedLote(lote);
+            const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
+            ventas.forEach(v => {
+                const uds = Math.max(0, Number(v.unidades) || 0);
+                if (!uds) return;
+                const precio = Number(v.precio) || 0;
+                const dSale = parseSaleDate(v.fecha);
+                const loteAt = loteAtSaleCost(lote, v);
+                const util = Calc.utilidadAtPrice(loteAt, precio, settings).utilidad;
+
+                if (dSale) {
+                    if (dSale >= curStart && dSale <= now) {
+                        cur.vendido += precio * uds;
+                        cur.ganancia += util * uds;
+                        cur.uds += uds;
+                        hasAnyCur = true;
+                    } else if (dSale >= prevStart && dSale < curStart) {
+                        prev.vendido += precio * uds;
+                        prev.ganancia += util * uds;
+                        prev.uds += uds;
+                        hasAnyPrev = true;
+                    }
+                }
+                if (ventaIsCobrado(v)) {
+                    const dC = parseSaleDate(v.cobradoAt) || dSale;
+                    if (dC) {
+                        if (dC >= curStart && dC <= now) cur.cobrado += precio * uds;
+                        else if (dC >= prevStart && dC < curStart) {
+                            prev.cobrado += precio * uds;
+                            hasAnyPrev = true;
+                        }
+                    }
+                }
+            });
+        });
+        return { cur, prev, hasAnyPrev, hasAnyCur, days };
+    }
+
+    /**
+     * Hero KPIs: 3 cards (Cobrado / Vendido / Ganancia) con delta chip.
+     * Delta = (cur - prev) / prev%; si no hay periodo previo con datos, muestra
+     * "Sin datos previos" en gris.
+     */
+    function layHeroKPIs(lotes, opts = {}) {
+        const days = Number.isFinite(opts.days) ? opts.days : 30;
+        const stats = heroPeriodStats(lotes, days);
+        const label = days === 30 ? '30 días' : `${days} días`;
+        const compareLabel = days === 30 ? 'vs mes ant.' : `vs ${days}d prev.`;
+
+        const cards = [
+            { key: 'cobrado', title: 'Cobrado', tone: 'pos', value: stats.cur.cobrado, prev: stats.prev.cobrado },
+            { key: 'vendido', title: 'Vendido', tone: '', value: stats.cur.vendido, prev: stats.prev.vendido },
+            { key: 'ganancia', title: 'Ganancia', tone: tone(stats.cur.ganancia), value: stats.cur.ganancia, prev: stats.prev.ganancia },
+        ];
+
+        const chip = (cur, prev) => {
+            if (!stats.hasAnyPrev) {
+                return `<div class="hero-kpi-delta is-na">Sin datos previos</div>`;
+            }
+            if (Math.abs(prev) < 0.005) {
+                if (Math.abs(cur) < 0.005) {
+                    return `<div class="hero-kpi-delta is-zero">Sin cambio</div>`;
+                }
+                return `<div class="hero-kpi-delta is-pos" title="Nuevo vs periodo anterior sin ventas">Nuevo ${compareLabel}</div>`;
+            }
+            const rel = (cur - prev) / Math.abs(prev);
+            const pct = Math.abs(rel * 100);
+            const arrow = rel > 0 ? '↑' : rel < 0 ? '↓' : '·';
+            const cls = rel > 0.0001 ? 'is-pos' : rel < -0.0001 ? 'is-neg' : 'is-zero';
+            const pctStr = pct >= 100 ? Math.round(pct) : pct.toFixed(1);
+            return `<div class="hero-kpi-delta ${cls}" title="Periodo actual: ${Calc.fmtMXN(cur)} · anterior: ${Calc.fmtMXN(prev)}">${arrow} ${pctStr}% ${compareLabel}</div>`;
+        };
+
+        return `
+            <div class="dash-hero-kpis">
+                ${cards.map(c => `
+                    <div class="hero-kpi">
+                        <div class="hero-kpi-title">
+                            <span>${esc(c.title)}</span>
+                            <small>${esc(label)}</small>
+                        </div>
+                        <div class="hero-kpi-value mono ${c.tone || ''}">${Calc.fmtMXN(c.value)}</div>
+                        ${chip(c.value, c.prev)}
+                    </div>
+                `).join('')}
+            </div>
+        `;
     }
 
     function layProgreso(lotes, opts = {}) {
