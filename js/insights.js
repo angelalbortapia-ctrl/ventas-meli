@@ -115,10 +115,15 @@ const InsightsView = (() => {
         const { agg } = analyze();
         const ctx = { agg, rows: agg.rows, lotes };
 
+        const momo = buildMoMo(lotes);
         root.innerHTML = `
             <div class="ins-shell">
                 <div class="ins-body ins-body-combined">
                     ${lotes.length ? `
+                        <section class="ins-section">
+                            <h2 class="ins-section-title">Este mes vs el pasado</h2>
+                            ${layMoMo(momo)}
+                        </section>
                         <section class="ins-section">
                             <h2 class="ins-section-title">Matriz</h2>
                             ${layMatriz(ctx)}
@@ -140,6 +145,127 @@ const InsightsView = (() => {
             </div>
         `;
         bind(root);
+    }
+
+    /**
+     * Comparativo mes/mes usando ventas fechadas. Compara:
+     *  - Mes actual completo (a día de hoy) vs mes anterior completo.
+     *  - Mes actual acumulado (día 1..hoy) vs mismo tramo del mes anterior
+     *    (día 1..min(hoy, últimoDía)) — es el número justo para saber
+     *    si vamos mejor o peor con datos comparables.
+     */
+    function buildMoMo(lotes) {
+        const now = new Date();
+        const yThis = now.getFullYear();
+        const mThis = now.getMonth();
+        const startThis = new Date(yThis, mThis, 1);
+        const dayNow = now.getDate();
+        const prev = new Date(yThis, mThis - 1, 1);
+        const yPrev = prev.getFullYear();
+        const mPrev = prev.getMonth();
+        const startPrev = new Date(yPrev, mPrev, 1);
+        const daysPrev = new Date(yPrev, mPrev + 1, 0).getDate();
+        const cutPrev = new Date(yPrev, mPrev, Math.min(dayNow, daysPrev), 23, 59, 59, 999);
+
+        const empty = () => ({ cashIn: 0, ganancia: 0, uds: 0, ventas: 0 });
+        const thisFull = empty();
+        const thisMtd = empty();
+        const prevFull = empty();
+        const prevMtd = empty();
+
+        const settings = window.State.settings;
+        (lotes || []).forEach(lote => {
+            const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
+            ventas.forEach(v => {
+                const d = parseDate(v.fecha);
+                if (!d) return;
+                const uds = Math.max(0, Number(v.unidades) || 0);
+                if (uds <= 0) return;
+                const precio = Number(v.precio) || 0;
+                const util = Calc.utilidadAtPrice(loteCostAtSale(lote, v), precio, settings).utilidad;
+                const bucket = (b) => {
+                    b.cashIn += precio * uds;
+                    b.ganancia += util * uds;
+                    b.uds += uds;
+                    b.ventas += 1;
+                };
+                if (d >= startThis) {
+                    bucket(thisFull);
+                    bucket(thisMtd);
+                } else if (d >= startPrev) {
+                    bucket(prevFull);
+                    if (d <= cutPrev) bucket(prevMtd);
+                }
+            });
+        });
+        return {
+            monthLabelThis: startThis.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }),
+            monthLabelPrev: startPrev.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }),
+            dayNow,
+            daysPrev,
+            thisMtd, prevMtd,
+            thisFull, prevFull,
+        };
+    }
+
+    /** Costo unitario histórico (si la venta lo tiene) o el actual del lote. */
+    function loteCostAtSale(lote, v) {
+        const costoAtSale = Number(v.costoAtSale);
+        if (Number.isFinite(costoAtSale) && costoAtSale > 0) {
+            return { ...lote, costo: costoAtSale };
+        }
+        return lote;
+    }
+
+    function parseDate(iso) {
+        if (!iso) return null;
+        const d = new Date(iso);
+        return Number.isNaN(d.getTime()) ? null : d;
+    }
+
+    function layMoMo(m) {
+        if (!m) return '';
+        const noPrev = m.prevMtd.uds === 0 && m.prevFull.uds === 0;
+        const cards = [
+            momCard('Cash in', m.thisMtd.cashIn, m.prevMtd.cashIn, Calc.fmtMXN, m),
+            momCard('Utilidad', m.thisMtd.ganancia, m.prevMtd.ganancia, Calc.fmtMXN, m),
+            momCard('Unidades', m.thisMtd.uds, m.prevMtd.uds, (n) => `${Math.round(n)} ud`, m),
+            momCard('Ventas', m.thisMtd.ventas, m.prevMtd.ventas, (n) => `${Math.round(n)}`, m),
+        ].join('');
+        const totals = noPrev
+            ? '<p class="muted small ins-note">Sin ventas registradas el mes pasado — cuando acumules historia aparecerá el comparativo real.</p>'
+            : `<p class="muted small ins-note">
+                    Mes actual (día ${m.dayNow}) vs mismo tramo del mes pasado (día 1 al ${Math.min(m.dayNow, m.daysPrev)}).
+                    Mes pasado completo: <strong>${Calc.fmtMXN(m.prevFull.cashIn)}</strong> cash in ·
+                    <strong>${Calc.fmtMXN(m.prevFull.ganancia)}</strong> utilidad ·
+                    <strong>${Math.round(m.prevFull.uds)}</strong> ud.
+                </p>`;
+        return `
+            <div class="ins-kpis ins-momom">${cards}</div>
+            ${totals}
+        `;
+    }
+
+    function momCard(label, cur, prev, fmt, m) {
+        const delta = cur - prev;
+        const pct = prev > 0 ? (delta / prev) * 100 : (cur > 0 ? 100 : 0);
+        const tone = delta > 0.0001 ? 'pos' : (delta < -0.0001 ? 'neg' : '');
+        const sign = delta > 0 ? '+' : '';
+        const arrow = delta > 0.0001 ? '▲' : (delta < -0.0001 ? '▼' : '·');
+        const prevLabel = m.monthLabelPrev.split(' ')[0];
+        const sub = prev <= 0
+            ? `vs ${prevLabel}: —`
+            : `vs ${prevLabel}: ${fmt(prev)}`;
+        const deltaTxt = prev > 0
+            ? `${arrow} ${sign}${pct.toFixed(1)}%`
+            : (cur > 0 ? '▲ nuevo' : '· sin dato');
+        return `
+            <div class="ins-kpi ins-mom-card">
+                <div class="ins-kpi-label">${esc(label)}</div>
+                <div class="ins-kpi-value">${fmt(cur)}</div>
+                <div class="ins-kpi-sub ins-mom-delta ${tone}">${deltaTxt}</div>
+                <div class="ins-kpi-sub muted small">${sub}</div>
+            </div>`;
     }
 
     function layMatriz({ rows }) {

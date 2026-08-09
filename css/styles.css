@@ -4900,6 +4900,10 @@ button.ship-advance:hover {
 .ins-kpi-value.pos { color: var(--success); }
 .ins-kpi-value.neg { color: var(--danger); }
 .ins-kpi-sub { margin-top: 4px; font-size: 12px; color: var(--text-muted); }
+.ins-mom-delta { font-weight: 600; }
+.ins-mom-delta.pos { color: var(--success); }
+.ins-mom-delta.neg { color: var(--danger); }
+.ins-momom { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 
 .ins-panel {
     background: var(--surface);
