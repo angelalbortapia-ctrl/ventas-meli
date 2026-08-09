@@ -335,10 +335,23 @@ const WishlistView = (() => {
     }
 
     function removeItem(id) {
-        saveItems(loadItems().filter(i => i.id !== id));
+        const before = loadItems();
+        const target = before.find(i => i.id === id);
+        if (!target) return;
+        saveItems(before.filter(i => i.id !== id));
         if (local.editingId === id) local.editingId = null;
         render();
-        UI.toast('Eliminado');
+        const label = target.titulo || target.asin || 'ítem';
+        UI.toast(`Eliminado · ${label}`, 'success', {
+            action: {
+                label: 'Deshacer',
+                handler: () => {
+                    saveItems(before);
+                    render();
+                    UI.toast('Wishlist restaurada');
+                },
+            },
+        });
     }
 
     function card(item) {

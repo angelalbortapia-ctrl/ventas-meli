@@ -1761,12 +1761,20 @@ const LotesView = (() => {
         if (!l) return;
         const ok = await UI.confirm({
             title: 'Eliminar lote',
-            message: `Se eliminará <strong>${esc(l.producto)}</strong>${l.variante ? ` · ${esc(l.variante)}` : ''} (${esc(l.sku)}). Esta acción no se puede deshacer.`,
+            message: `Se eliminará <strong>${esc(l.producto)}</strong>${l.variante ? ` · ${esc(l.variante)}` : ''} (${esc(l.sku)}). Puedes deshacer los próximos 7 segundos con el toast.`,
             primaryLabel: 'Eliminar',
             danger: true,
         });
         if (!ok) return;
-        // Quitar liberaciones de bolsitas de las ventas del lote (si no, quedan fantasmas)
+        // Snapshot para undo: catálogo + bolsitas del MP. Cubre el side-effect
+        // del reverse de liberaciones sin reejecutar cálculos.
+        const mp = Data.currentMarketplace();
+        const snapshot = {
+            mp,
+            lotes: JSON.parse(JSON.stringify(window.State.lotes)),
+            capitalAlloc: JSON.parse(JSON.stringify(window.State.ui?.capitalAlloc || {})),
+            selectedVariant: local.selectedVariant,
+        };
         (l.ventas || []).forEach(v => {
             if (!v?.id) return;
             const fallback = Data.hasAsignacion?.(v) ? { ...v.asignacion } : null;
@@ -1788,7 +1796,38 @@ const LotesView = (() => {
         window.App?.refreshNavCounts?.();
         if (window.State.view === 'dashboard') window.DashboardView?.render?.();
         if (window.State.view === 'caja') window.CajaView?.render?.();
-        UI.toast('Lote eliminado');
+        UI.toast(`Eliminado · ${l.producto}${l.variante ? ' · ' + l.variante : ''}`, 'success', {
+            action: {
+                label: 'Deshacer',
+                handler: () => restoreSnapshot(snapshot, 'Lote restaurado'),
+            },
+        });
+    }
+
+    /**
+     * Restaura un snapshot capturado antes de una acción destructiva.
+     * Cubre catálogo del MP + estado de bolsitas + selección UI.
+     */
+    function restoreSnapshot(snapshot, msg = 'Restaurado') {
+        if (!snapshot) return;
+        window.Sync?.holdRemote?.(4000);
+        // Si el MP activo cambió, solo restauramos si el usuario sigue en el mismo.
+        if (snapshot.mp && Data.currentMarketplace() !== snapshot.mp) {
+            UI.toast('No se pudo deshacer: cambiaste de marketplace', 'error');
+            return;
+        }
+        window.State.lotes = snapshot.lotes;
+        window.State.ui = { ...window.State.ui, capitalAlloc: snapshot.capitalAlloc };
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'selectedVariant')) {
+            local.selectedVariant = snapshot.selectedVariant;
+        }
+        window.State.save();
+        window.State.saveUI();
+        renderContent();
+        window.App?.refreshNavCounts?.();
+        if (window.State.view === 'dashboard') window.DashboardView?.render?.();
+        if (window.State.view === 'caja') window.CajaView?.render?.();
+        UI.toast(msg);
     }
 
     async function changeStatus(id) {
@@ -2134,13 +2173,18 @@ const LotesView = (() => {
         if (!l) return;
         const ok = await UI.confirm({
             title: 'Eliminar venta',
-            message: 'Se restará del inventario vendido y, si estaba en bolsitas, también se quita ese monto (útil en devoluciones).',
+            message: 'Se restará del inventario vendido y, si estaba en bolsitas, también se quita ese monto (útil en devoluciones). Puedes deshacer los próximos 7 segundos con el toast.',
             primaryLabel: 'Eliminar', danger: true
         });
         if (!ok) return;
-        // Guardar asignacion ANTES de borrar (fallback si el ledger no matchea)
         const venta = (l.ventas || []).find(x => x.id === ventaId);
         const fallbackSplits = Data.hasAsignacion?.(venta) ? { ...venta.asignacion } : null;
+
+        const snapshot = {
+            mp: Data.currentMarketplace(),
+            lotes: JSON.parse(JSON.stringify(window.State.lotes)),
+            capitalAlloc: JSON.parse(JSON.stringify(window.State.ui?.capitalAlloc || {})),
+        };
 
         let reversed = false;
         try {
@@ -2158,7 +2202,12 @@ const LotesView = (() => {
         if (window.State.view === 'caja') window.CajaView?.render?.();
         UI.toast(reversed
             ? 'Venta eliminada · monto quitado de bolsitas'
-            : 'Venta eliminada');
+            : 'Venta eliminada', 'success', {
+            action: {
+                label: 'Deshacer',
+                handler: () => restoreSnapshot(snapshot, 'Venta restaurada'),
+            },
+        });
     }
 
     // ---- Modal edición -------------------------------------------------

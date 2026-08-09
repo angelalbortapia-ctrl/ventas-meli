@@ -274,11 +274,45 @@ const UI = (() => {
     }
 
     // Toast (única instancia).
-    function toast(msg, kind = 'success', duration = 2400) {
+    // BC: toast(msg, kind, 2400) sigue funcionando.
+    // Nueva firma: toast(msg, kind, { duration, action: { label, handler, ttl } }).
+    function toast(msg, kind = 'success', options) {
         const el = document.getElementById('toast');
         if (!el) return;
-        el.className = 'toast ' + kind;
-        el.textContent = msg;
+        let duration = 2400;
+        let action = null;
+        if (typeof options === 'number') {
+            duration = options;
+        } else if (options && typeof options === 'object') {
+            if (Number.isFinite(options.duration)) duration = options.duration;
+            if (options.action && typeof options.action.handler === 'function') {
+                action = options.action;
+                // Con acción, damos margen para reaccionar.
+                if (!Number.isFinite(options.duration)) duration = 7000;
+            }
+        }
+        el.className = 'toast ' + kind + (action ? ' has-action' : '');
+        el.innerHTML = '';
+        const msgSpan = document.createElement('span');
+        msgSpan.className = 'toast-msg';
+        msgSpan.textContent = msg;
+        el.appendChild(msgSpan);
+        if (action) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'toast-action';
+            btn.textContent = action.label || 'Deshacer';
+            let done = false;
+            btn.addEventListener('click', () => {
+                if (done) return;
+                done = true;
+                try { action.handler(); }
+                catch (err) { console.warn('[toast action]', err); }
+                el.hidden = true;
+                clearTimeout(el._t);
+            });
+            el.appendChild(btn);
+        }
         el.hidden = false;
         clearTimeout(el._t);
         el._t = setTimeout(() => { el.hidden = true; }, duration);
