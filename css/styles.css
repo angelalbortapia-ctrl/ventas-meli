@@ -671,6 +671,9 @@ body[data-mp-view="general"] .gx-body {
     border-radius: 12px;
     background: var(--surface);
     overflow: hidden;
+    /* Ancestro .gx-body es flex column; sin esto el <details> se aplasta a 2px
+       en cuanto el contenido excede la ventana y las bolsitas quedan invisibles. */
+    flex-shrink: 0;
 }
 .gx-more-summary {
     cursor: pointer;

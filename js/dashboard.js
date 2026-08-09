@@ -159,6 +159,7 @@ const DashboardView = (() => {
             hardMeli, hardAmz, monthStats, goals, split, nextBuy, agenda, alerts, allocUnified,
         };
 
+        const moreFlags = readGxMoreOpen();
         const chartPeriod = ['weeks', 'years'].includes(window.State.ui?.dashChartPeriod)
             ? window.State.ui.dashChartPeriod
             : 'months';
@@ -197,7 +198,7 @@ const DashboardView = (() => {
             <div class="dash-shell dash-shell-general" id="dash-general-root">
                 <div class="dash-body dash-body-combined gx-body">
                     ${layGeneralExecutive(exec)}
-                    <details class="gx-more" id="gx-progreso">
+                    <details class="gx-more" id="gx-progreso" data-gx-more-persist="progreso"${moreFlags.progreso ? ' open' : ''}>
                         <summary class="gx-more-summary">Progreso (gráficas)</summary>
                         <div class="gx-more-body">
                             <div class="dash-chart-toggles" style="margin-bottom:12px">
@@ -224,7 +225,7 @@ const DashboardView = (() => {
                             })}
                         </div>
                     </details>
-                    <details class="gx-more" id="gx-finanzas">
+                    <details class="gx-more" id="gx-finanzas" data-gx-more-persist="finanzas"${moreFlags.finanzas ? ' open' : ''}>
                         <summary class="gx-more-summary">Finanzas (P&amp;G · caja · portafolio · bolsitas)</summary>
                         <div class="gx-more-body">
                             <div class="gx-fin-stack">
@@ -648,7 +649,9 @@ const DashboardView = (() => {
             ? monthStats.monthLabel.charAt(0).toUpperCase() + monthStats.monthLabel.slice(1)
             : '';
         const healthLabel = healthUtil === 'ok' ? 'En ritmo' : (healthUtil === 'warn' ? 'Ajustar ritmo' : 'Fuera de meta');
-        const moreOpen = window.State.ui?.gxMoreOpen === true;
+        const moreFlags = readGxMoreOpen();
+        // BC: si el flag legacy era boolean, lo usábamos como "canales open".
+        const moreOpen = moreFlags.canales;
         const checklist = readDailyChecklist();
 
         return `
@@ -820,7 +823,7 @@ const DashboardView = (() => {
                 </div>
             </section>
 
-            <details class="gx-more" id="gx-canales" data-gx-more-persist ${moreOpen ? 'open' : ''}>
+            <details class="gx-more" id="gx-canales" data-gx-more-persist="canales" ${moreOpen ? 'open' : ''}>
                 <summary class="gx-more-summary">Más detalle · canales y capital</summary>
                 <div class="gx-more-body">
                     <div class="gx-alloc-suggest" aria-label="Asignación sugerida de capital" style="margin-bottom:16px">
@@ -1080,10 +1083,33 @@ const DashboardView = (() => {
         });
         root.querySelectorAll('details[data-gx-more-persist]').forEach(el => {
             el.addEventListener('toggle', () => {
-                window.State.ui = { ...window.State.ui, gxMoreOpen: el.open };
+                const key = el.getAttribute('data-gx-more-persist') || 'canales';
+                const flags = { ...readGxMoreOpen(), [key]: el.open };
+                window.State.ui = { ...window.State.ui, gxMoreOpen: flags };
                 window.State.saveUI();
             });
         });
+    }
+
+    /**
+     * Lee el estado por-details. BC: si es boolean (modelo viejo) se usa como
+     * "canales". Finanzas queda abierto por defecto para que las bolsitas sean
+     * visibles al entrar a General sin clicks extra.
+     */
+    function readGxMoreOpen() {
+        const raw = window.State.ui?.gxMoreOpen;
+        const defaults = { canales: false, progreso: false, finanzas: true };
+        if (raw === true || raw === false) {
+            return { ...defaults, canales: !!raw };
+        }
+        if (raw && typeof raw === 'object') {
+            return {
+                canales: raw.canales === true,
+                progreso: raw.progreso === true,
+                finanzas: raw.finanzas !== false, // opt-out
+            };
+        }
+        return defaults;
     }
 
     /** Inventario atrapado: sano (≥20% margen) vs flojo. */

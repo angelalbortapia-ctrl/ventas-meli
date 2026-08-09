@@ -1,6 +1,6 @@
 /* Service worker: network-first local (evita CSS/JS viejos), fallback a cache offline. */
 
-const VERSION = 'vm-v195';
+const VERSION = 'vm-v196';
 const STATIC_ASSETS = [
     './',
     './index.html',
