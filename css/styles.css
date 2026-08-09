@@ -3007,11 +3007,11 @@ input:focus, select:focus {
    ============================================================================ */
 .fab {
     position: fixed;
-    bottom: max(24px, env(safe-area-inset-bottom));
+    bottom: calc(24px + env(safe-area-inset-bottom));
     right: max(24px, env(safe-area-inset-right));
     height: 56px;
     min-width: 56px;
-    padding: 0;
+    padding: 0 22px 0 18px;
     border-radius: 999px;
     background: var(--primary); color: var(--on-primary, #fff);
     border: 0; font-size: 14px; font-weight: 600;
@@ -3021,8 +3021,9 @@ input:focus, select:focus {
     display: inline-flex; align-items: center; justify-content: center;
     gap: 8px;
     transition: transform 0.15s, background 0.15s, box-shadow 0.15s;
-    z-index: 10;
+    z-index: 30;
 }
+.fab[hidden] { display: none !important; }
 .fab .fab-icon {
     width: 22px; height: 22px;
     display: inline-flex; align-items: center; justify-content: center;
@@ -3034,18 +3035,34 @@ input:focus, select:focus {
     fill: none;
     stroke-width: 2.4;
 }
-.fab.has-label {
-    padding: 0 20px 0 16px;
+.fab .fab-label {
+    letter-spacing: -0.01em;
+    white-space: nowrap;
 }
-.fab.has-label .fab-label { display: inline-block; letter-spacing: -0.01em; }
-.fab-label[hidden] { display: none !important; }
+.fab .fab-label:empty { display: none; }
 .fab:hover {
-    background: var(--primary-hover);
+    background: var(--primary-hover, var(--primary));
     transform: translateY(-2px);
     box-shadow: 0 6px 22px color-mix(in srgb, var(--primary) 38%, transparent),
                 0 10px 24px rgba(0, 0, 0, 0.10);
 }
 .fab:active { transform: scale(0.96); }
+.fab:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+}
+
+/* En móvil el FAB se despega por encima de la tabbar */
+@media (max-width: 768px) {
+    .fab {
+        bottom: calc(var(--mobile-tabbar-height, 64px) + 12px + env(safe-area-inset-bottom));
+        right: 16px;
+        padding: 0 18px 0 16px;
+        height: 52px;
+    }
+    .fab .fab-icon,
+    .fab .fab-icon svg { width: 20px; height: 20px; }
+}
 
 /* ============================================================================
    Stats strip

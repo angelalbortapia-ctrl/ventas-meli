@@ -68,6 +68,7 @@ const App = (() => {
         else if (tab === 'caja') CajaView.render();
         else if (tab === 'settings') SettingsView.loadIntoForm();
         refreshNavCounts();
+        refreshFAB();
     }
 
     function closeMobileNav() {
@@ -763,10 +764,52 @@ const App = (() => {
         UI.toast('Ajustes restaurados');
     }
 
-    // ---- FAB -----------------------------------------------------------
+    // ---- FAB contextual -----------------------------------------------
+    // Cada vista define su acción primaria; el resto oculta el botón.
+    // Ninguna acción es destructiva; todas abren editores/formularios.
+    const FAB_CONFIG = {
+        lotes: {
+            label: 'Nuevo producto',
+            title: 'Nuevo producto (N)',
+            aria: 'Nuevo producto',
+            action: () => LotesView.openModal(null),
+        },
+        wishlist: {
+            label: 'Añadir',
+            title: 'Añadir a Wishlist',
+            aria: 'Añadir a Wishlist',
+            action: () => {
+                const view = document.getElementById('view-wishlist');
+                view?.scrollTo?.({ top: 0, behavior: 'smooth' });
+                document.getElementById('wl-link-compra')?.focus();
+            },
+        },
+    };
+
+    function refreshFAB() {
+        const fab = document.getElementById('fab-new');
+        if (!fab) return;
+        const cfg = FAB_CONFIG[window.State.view];
+        if (!cfg) {
+            fab.hidden = true;
+            return;
+        }
+        fab.hidden = false;
+        fab.setAttribute('aria-label', cfg.aria);
+        fab.setAttribute('title', cfg.title);
+        const label = fab.querySelector('.fab-label');
+        if (label) label.textContent = cfg.label;
+        fab.dataset.fabView = window.State.view;
+    }
+
     function initFAB() {
         const fab = document.getElementById('fab-new');
-        if (fab) fab.addEventListener('click', () => LotesView.openModal(null));
+        if (!fab) return;
+        fab.addEventListener('click', () => {
+            const view = fab.dataset.fabView || window.State.view;
+            FAB_CONFIG[view]?.action?.();
+        });
+        refreshFAB();
     }
 
     // ---- PWA -----------------------------------------------------------
