@@ -87,6 +87,33 @@ const InsightsView = (() => {
                 lote, calc,
             };
         },
+        ({ lote, calc }) => {
+            if (!calc.inventarioRestante) return null;
+            const days = Calc.daysSinceActivity?.(lote);
+            if (days == null || days < 45) return null;
+            return {
+                severity: days >= 75 ? 'high' : 'medium',
+                kind: 'aged',
+                title: `Aged ${days}d · ${lote.producto}`,
+                text: `Sin movimiento reciente con ${calc.inventarioRestante} uds · ${Calc.fmtMXN(calc.valorInventario || 0)} atrapados.`,
+                lote, calc, days,
+            };
+        },
+        ({ lote, calc, settings }) => {
+            if (window.State.marketplace !== 'amazon' && settings?.marketplace !== 'amazon') return null;
+            if (!calc.inventarioRestante) return null;
+            const suggested = Calc.estimateStorageMxnPerUnit?.(lote, settings) || 0;
+            const current = Number(lote.almacenamiento) || 0;
+            if (!(suggested > 0) || current > 0) return null;
+            if (calc.inventarioRestante < 2) return null;
+            return {
+                severity: 'low',
+                kind: 'storage',
+                title: `Storage vacío · ${lote.producto}`,
+                text: `Sugiero ~${Calc.fmtMXN(suggested)}/ud/mes (heurística). Llénalo en la ficha para P&G realista.`,
+                lote, calc, suggested,
+            };
+        },
     ];
 
     function analyze() {
@@ -100,6 +127,16 @@ const InsightsView = (() => {
                 } catch (e) { console.error('Rule failed:', e); }
             }
         }
+        // Keepa ops (último scan batch)
+        (window.Keepa?.readOpsAlerts?.() || []).forEach(a => {
+            alerts.push({
+                severity: a.severity || 'medium',
+                kind: a.kind || 'keepa',
+                title: a.title,
+                text: a.text,
+                lote: (window.State.lotes || []).find(l => l.id === a.loteId) || null,
+            });
+        });
         alerts.sort((a, b) => {
             const order = { high: 0, medium: 1, low: 2 };
             return (order[a.severity] ?? 9) - (order[b.severity] ?? 9);

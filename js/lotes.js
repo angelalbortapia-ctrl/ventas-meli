@@ -55,6 +55,7 @@ const LotesView = (() => {
 
     let editing = null;
     let shellMounted = false;
+    let resizerHandlers = null;
 
     // ---- Format helpers -------------------------------------------------
     const cls = e => ({ ESCALAR: 'esc', MANTENER: 'man', LIQUIDAR: 'liq', AGOTADO: 'ago', PAUSADA: 'pau', FINALIZADA: 'fin' }[e] || '');
@@ -65,6 +66,19 @@ const LotesView = (() => {
     const esc = UI.escapeHTML;
     const normalize = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     const familyKey = l => l.productId || normalize(l.producto || '') || ('id:' + l.id);
+
+    /** Presentación: evita ALL CAPS ruidoso sin tocar el dato guardado. */
+    function displayName(name) {
+        const s = String(name || '').trim();
+        if (!s) return '';
+        const letters = s.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g, '');
+        if (letters.length >= 4 && letters === letters.toUpperCase()) {
+            return s
+                .toLowerCase()
+                .replace(/(^|[\s([{/.-])([\p{L}])/gu, (_, a, b) => a + b.toUpperCase());
+        }
+        return s;
+    }
 
     const STRAT_PRIORITY = { LIQUIDAR: 0, MANTENER: 1, ESCALAR: 2, AGOTADO: 3, PAUSADA: 4, FINALIZADA: 5 };
 
@@ -91,9 +105,12 @@ const LotesView = (() => {
     /** Filas individuales (lotes) que pasan filtros de búsqueda/estrategia/stock. */
     function matchingRows() {
         const q = normalize(local.search).trim();
+        const showFinalizadas = local.strategies.has('FINALIZADA');
         return window.State.lotes
             .map(l => ({ lote: l, calc: Calc.computeLote(l, window.State.settings) }))
             .filter(({ lote, calc }) => {
+                // Finalizada = archivo: fuera del listado activo salvo chip/filtro Finalizada o búsqueda.
+                if (calc.estrategia === 'FINALIZADA' && !showFinalizadas && !q) return false;
                 if (local.strategies.size && !local.strategies.has(calc.estrategia)) return false;
                 if (local.withStock && calc.inventarioRestante === 0) return false;
                 if (!q) return true;
@@ -245,6 +262,12 @@ const LotesView = (() => {
     function initResizer() {
         const split = document.getElementById('lotes-split');
         const resizer = document.getElementById('lotes-resizer');
+        if (!split || !resizer) return;
+        if (resizerHandlers) {
+            document.removeEventListener('mousemove', resizerHandlers.move);
+            document.removeEventListener('mouseup', resizerHandlers.end);
+            resizerHandlers = null;
+        }
         const saved = parseInt(localStorage.getItem('vm-list-width') || '400', 10);
         if (!isNaN(saved) && saved >= 280 && saved <= 700) {
             split.style.setProperty('--list-w', saved + 'px');
@@ -278,6 +301,7 @@ const LotesView = (() => {
             split.style.setProperty('--list-w', '400px');
             localStorage.setItem('vm-list-width', '400');
         });
+        resizerHandlers = { move, end };
     }
 
     /** Llamar cuando App vacía #view-lotes (cambio de marketplace). */
@@ -478,7 +502,7 @@ const LotesView = (() => {
                     <button class="d-leg" data-strat="LIQUIDAR"><span class="d liq"></span>Liquidar ${liqN}</button>
                     ${agoN > 0 ? `<button class="d-leg" data-strat="AGOTADO"><span class="d ago"></span>Agotado ${agoN}</button>` : ''}
                     ${pauN > 0 ? `<button class="d-leg" data-strat="PAUSADA"><span class="d pau"></span>Pausada ${pauN}</button>` : ''}
-                    ${finN > 0 ? `<button class="d-leg" data-strat="FINALIZADA"><span class="d fin"></span>Finalizada ${finN}</button>` : ''}
+                    ${finN > 0 ? `<button class="d-leg" data-strat="FINALIZADA"><span class="d fin"></span>Archivadas ${finN}</button>` : ''}
                 </div>
             </div>
         `;
@@ -495,13 +519,16 @@ const LotesView = (() => {
             { key: 'LIQUIDAR', cls: 'liq', label: 'Liquidar' },
             { key: 'AGOTADO',  cls: 'ago', label: 'Agotado' },
             { key: 'PAUSADA',  cls: 'pau', label: 'Pausada' },
-            { key: 'FINALIZADA', cls: 'fin', label: 'Finalizada' },
+            { key: 'FINALIZADA', cls: 'fin', label: 'Archivadas' },
         ];
         return chips.map(c => {
             const n = counts[c.key] || 0;
             const empty = n === 0 ? ' is-empty' : '';
+            const tip = c.key === 'FINALIZADA'
+                ? `${n} archivada${n === 1 ? '' : 's'} (Finalizada · fuera del listado activo)`
+                : `${n} variante${n === 1 ? '' : 's'}`;
             return `
-            <button class="chip ${c.cls}${empty} ${local.strategies.has(c.key) ? 'active' : ''}" data-chip="${c.key}" title="${n} variante${n === 1 ? '' : 's'}">
+            <button class="chip ${c.cls}${empty} ${local.strategies.has(c.key) ? 'active' : ''}" data-chip="${c.key}" title="${tip}">
                 ${c.label} <span class="chip-n">${n}</span>
             </button>`;
         }).join('') + `
@@ -540,17 +567,22 @@ const LotesView = (() => {
         if (!list.length) {
             const isAmz = window.State.marketplace === 'amazon';
             const noCatalog = !window.State.lotes.length;
+            const onlyFin = local.strategies.size === 1 && local.strategies.has('FINALIZADA');
             return head + `<div class="lotes-empty-list">
-                <div style="font-size:32px; opacity:0.35; margin-bottom:8px">${noCatalog ? '📦' : '🔍'}</div>
+                <div style="font-size:32px; opacity:0.35; margin-bottom:8px">${noCatalog ? '📦' : (onlyFin ? '🗄' : '🔍')}</div>
                 <div>${noCatalog
                     ? (isAmz
                         ? 'Catálogo Amazon vacío. Agrega tus propios productos (no usa los de Mercado Libre).'
                         : 'Sin productos. Crea tu primer lote.')
-                    : 'Sin resultados. Ajusta filtros o crea un nuevo lote.'}</div>
+                    : onlyFin
+                        ? 'Nada archivado aún. Marca un producto como Finalizada para guardarlo fuera del listado activo.'
+                        : 'Sin resultados. Ajusta filtros o crea un nuevo lote.'}</div>
             </div>`;
         }
 
         const items = list.map(f => {
+            const archived = f.estrategia === 'FINALIZADA'
+                || f.variants.every(v => v.calc.estrategia === 'FINALIZADA');
             const colorLine = f.colores.length
                 ? (f.colores.length === 1
                     ? esc(f.colores[0])
@@ -565,6 +597,7 @@ const LotesView = (() => {
             const shipMeta = shipListLabel(f);
             const tooltipParts = [
                 esc(f.producto),
+                archived ? 'Archivada' : '',
                 colorLine,
                 f.categoria ? `Cat: ${esc(f.categoria)}` : '',
                 `Stock ${f.stockRest}/${f.stockTotal}`,
@@ -572,11 +605,11 @@ const LotesView = (() => {
                 `${Calc.fmtMXN(f.utilidad)} util · ${Calc.fmtPct(f.margen)} margen`,
             ].filter(Boolean).join(' · ');
             return `
-            <div class="lotes-row ${f.key===local.selected?'active':''}" data-select="${esc(f.key)}" title="${tooltipParts}">
+            <div class="lotes-row ${f.key===local.selected?'active':''}${archived ? ' is-archived' : ''}" data-select="${esc(f.key)}" title="${tooltipParts}">
                 <span class="lotes-dot ${cls(f.estrategia)}" title="${label(f.estrategia)}"></span>
                 ${thumb}
                 <div class="lotes-info">
-                    <div class="lotes-name">${esc(f.producto)}</div>
+                    <div class="lotes-name">${esc(displayName(f.producto))}${archived ? '<span class="lotes-archive-tag">Archivada</span>' : ''}</div>
                     <div class="lotes-sub">
                         <span class="lotes-sub-primary">${colorLine}</span>
                         ${f.categoria ? `<span class="lotes-sub-cat">·</span><span class="lotes-sub-cat">${esc(f.categoria)}</span>` : ''}
@@ -720,12 +753,17 @@ const LotesView = (() => {
                             ? `<button type="button" class="btn btn-sm" data-action="open-keepa" data-id="${lote.id}">📈 Keepa</button>`
                             : ''}
                         <button type="button" class="btn btn-sm" data-action="edit" data-id="${lote.id}">✏️ Editar</button>
+                        ${calc.estrategia === 'FINALIZADA'
+                            ? `<button type="button" class="btn btn-sm" data-action="status" data-id="${lote.id}">↩ Reactivar</button>`
+                            : `<button type="button" class="btn btn-sm ghost" data-action="status" data-id="${lote.id}">🗄 Archivar</button>`}
                         <div class="kebab" data-kebab>
                             <button class="icon-btn" data-kebab-btn aria-label="Más acciones">⋯</button>
                             <div class="kebab-menu" data-kebab-menu hidden>
                                 <button class="kebab-item" data-action="edit"    data-id="${lote.id}">✏️ Editar ficha completa</button>
                                 <button class="kebab-item" data-action="sale"    data-id="${lote.id}">🛒 Registrar venta</button>
-                                <button class="kebab-item" data-action="restock" data-id="${lote.id}">📦 Reabastecer SKU</button>
+                                ${calc.estrategia === 'FINALIZADA'
+                                    ? ''
+                                    : `<button class="kebab-item" data-action="restock" data-id="${lote.id}">📦 Reabastecer SKU</button>`}
                                 <button class="kebab-item" data-action="writeoff" data-id="${lote.id}">🗑 Baja de inventario</button>
                                 <button class="kebab-item" data-action="dup"     data-id="${lote.id}">🧬 Duplicar variante</button>
                                 <button class="kebab-item" data-action="status"  data-id="${lote.id}">🔀 Cambiar estatus</button>
@@ -752,40 +790,45 @@ const LotesView = (() => {
                 <div class="lotes-detail-title-row">
                     ${imageBlock}
                     <div class="lotes-detail-title-text">
-                        <h2 class="lotes-detail-name">${esc(lote.producto)}</h2>
+                        <h2 class="lotes-detail-name">${esc(displayName(lote.producto))}</h2>
                         ${colorPills}
                         <div class="lotes-detail-variant">
                             ${multi ? '' : `<strong>${esc(lote.variante || '—')}</strong> · `}
                             <span class="editable-price" data-edit-field="precio" data-id="${lote.id}" title="Click para editar precio">${Calc.fmtMXN(lote.precio)}</span>
                             ${lote.precioCompetencia ? `· <span class="muted">Competencia: ${Calc.fmtMXN(lote.precioCompetencia)}</span>` : ''}
-                            · <span class="badge ${cls(calc.estrategia)}">${label(calc.estrategia)}</span>
+                            · <span class="badge ${cls(calc.estrategia)}">${calc.estrategia === 'FINALIZADA' ? '🗄 Archivada' : label(calc.estrategia)}</span>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div class="kpi-grid-detail">
-                <div class="kpi-mini">
-                    <div class="kpi-mini-label">Utilidad</div>
-                    <div class="kpi-mini-value ${calc.utilidad>=0?'pos':'neg'}">${Calc.fmtMXN(calc.utilidad)}</div>
+            ${calc.estrategia === 'FINALIZADA' ? `
+            <div class="lote-archive-banner" role="status">
+                <div class="lote-archive-banner-text">
+                    <strong>Archivada</strong>
+                    <span>Fuera del listado activo · sin recompra · ventas y P&amp;G intactos</span>
                 </div>
-                <div class="kpi-mini">
-                    <div class="kpi-mini-label">Margen</div>
-                    <div class="kpi-mini-value">${Calc.fmtPct(calc.margen)}</div>
+                <button type="button" class="btn btn-sm" data-action="status" data-id="${lote.id}">Cambiar estatus</button>
+            </div>` : ''}
+
+            <div class="lotes-metrics">
+                <div class="lotes-hero-util ${calc.utilidad >= 0 ? 'pos' : 'neg'}">
+                    <div class="lotes-hero-label">Utilidad</div>
+                    <div class="lotes-hero-value">${Calc.fmtMXN(calc.utilidad)}</div>
                 </div>
-                <div class="kpi-mini">
-                    <div class="kpi-mini-label">Stock</div>
-                    <div class="kpi-mini-value editable-stock" data-edit-field="stock" data-id="${lote.id}" title="Click para editar unidades del lote">${calc.inventarioRestante}<small style="opacity:0.5">/${lote.unidades}</small></div>
-                </div>
-                <div class="kpi-mini">
-                    <div class="kpi-mini-label">ROI</div>
-                    <div class="kpi-mini-value">${Calc.fmtPct(calc.roi)}</div>
+                <div class="lotes-metrics-row">
+                    <span>Margen <strong>${Calc.fmtPct(calc.margen)}</strong></span>
+                    <span>Stock <strong class="editable-stock" data-edit-field="stock" data-id="${lote.id}" title="Click para editar unidades del lote">${calc.inventarioRestante}<small style="opacity:0.5">/${lote.unidades}</small></strong></span>
+                    <span>ROI <strong>${Calc.fmtPct(calc.roi)}</strong></span>
                 </div>
             </div>
 
             ${isAmzMarketplace() && lote.asin && !window.Keepa?.panelPrefs?.().off
-                ? `<div class="lotes-keepa" data-keepa-asin="${esc(lote.asin)}"
-                    data-keepa-product-id="${esc(lote.id)}"></div>`
+                ? `<div class="lotes-float-block">
+                    <h4 class="lotes-float-block-title">Keepa</h4>
+                    <div class="lotes-keepa" data-keepa-asin="${esc(lote.asin)}"
+                        data-keepa-product-id="${esc(lote.id)}"></div>
+                   </div>`
                 : ''}
 
             <nav class="detail-tabs" role="tablist">
@@ -837,22 +880,24 @@ const LotesView = (() => {
             : (isAmz && calc.fbaMeta?.source === 'manual' ? ' · override' : '');
 
         return `
-            <h4>Desglose por unidad</h4>
-            <div class="breakdown">
-                <div class="breakdown-row"><span class="label">Precio de venta</span><span class="val">${Calc.fmtMXN(lote.precio)}</span></div>
-                <div class="breakdown-row"><span class="label">Costo unitario</span><span class="val">− ${Calc.fmtMXN(lote.costo)}</span></div>
-                <div class="breakdown-row"><span class="label">${comLabel}${isAmz && calc.referidoMinimo ? ` · mín ${Calc.fmtMXN(calc.referidoMinimo)}` : ''}</span><span class="val">− ${Calc.fmtMXN(calc.comisionVariable)}</span></div>
-                ${!isAmz && calc.cargoFijo ? `<div class="breakdown-row"><span class="label">Cargo fijo publicación</span><span class="val">− ${Calc.fmtMXN(calc.cargoFijo)}</span></div>` : ''}
-                <div class="breakdown-row"><span class="label">${envioLabel}${fbaNote}</span><span class="val">− ${Calc.fmtMXN(envioVal)}</span></div>
-                ${isAmz && (calc.almacenamiento > 0) ? `<div class="breakdown-row"><span class="label">Almacenamiento FBA</span><span class="val">− ${Calc.fmtMXN(calc.almacenamiento)}</span></div>` : ''}
-                ${isAmz && (calc.varios > 0) ? `<div class="breakdown-row"><span class="label">Varios / Otros</span><span class="val">− ${Calc.fmtMXN(calc.varios)}</span></div>` : ''}
-                ${!isAmz ? `
-                <div class="breakdown-row"><span class="label">Retención IVA SAT</span><span class="val">− ${Calc.fmtMXN(calc.retIVA)}</span></div>
-                <div class="breakdown-row"><span class="label">Retención ISR SAT</span><span class="val">− ${Calc.fmtMXN(calc.retISR)}</span></div>
-                ` : ''}
-                <div class="breakdown-row total">
-                    <span class="label">Utilidad neta por unidad</span>
-                    <span class="val ${calc.utilidad>=0?'pos':'neg'}">${Calc.fmtMXN(calc.utilidad)}</span>
+            <div class="lotes-float-block">
+                <h4 class="lotes-float-block-title">Costos</h4>
+                <div class="breakdown">
+                    <div class="breakdown-row"><span class="label">Precio de venta</span><span class="val">${Calc.fmtMXN(lote.precio)}</span></div>
+                    <div class="breakdown-row"><span class="label">Costo unitario</span><span class="val">− ${Calc.fmtMXN(lote.costo)}</span></div>
+                    <div class="breakdown-row"><span class="label">${comLabel}${isAmz && calc.referidoMinimo ? ` · mín ${Calc.fmtMXN(calc.referidoMinimo)}` : ''}</span><span class="val">− ${Calc.fmtMXN(calc.comisionVariable)}</span></div>
+                    ${!isAmz && calc.cargoFijo ? `<div class="breakdown-row"><span class="label">Cargo fijo publicación</span><span class="val">− ${Calc.fmtMXN(calc.cargoFijo)}</span></div>` : ''}
+                    <div class="breakdown-row"><span class="label">${envioLabel}${fbaNote}</span><span class="val">− ${Calc.fmtMXN(envioVal)}</span></div>
+                    ${isAmz && (calc.almacenamiento > 0) ? `<div class="breakdown-row"><span class="label">Almacenamiento FBA</span><span class="val">− ${Calc.fmtMXN(calc.almacenamiento)}</span></div>` : ''}
+                    ${isAmz && (calc.varios > 0) ? `<div class="breakdown-row"><span class="label">Varios / Otros</span><span class="val">− ${Calc.fmtMXN(calc.varios)}</span></div>` : ''}
+                    ${!isAmz ? `
+                    <div class="breakdown-row"><span class="label">Retención IVA SAT</span><span class="val">− ${Calc.fmtMXN(calc.retIVA)}</span></div>
+                    <div class="breakdown-row"><span class="label">Retención ISR SAT</span><span class="val">− ${Calc.fmtMXN(calc.retISR)}</span></div>
+                    ` : ''}
+                    <div class="breakdown-row total">
+                        <span class="label">Utilidad neta por unidad</span>
+                        <span class="val ${calc.utilidad>=0?'pos':'neg'}">${Calc.fmtMXN(calc.utilidad)}</span>
+                    </div>
                 </div>
             </div>
 
@@ -1850,28 +1895,83 @@ const LotesView = (() => {
     async function changeStatus(id) {
         const l = window.State.lotes.find(x => x.id === id);
         if (!l) return;
-        const opts = ['✅ Activa / En Venta', '⏸️ Pausada', '📦 Sin stock', '❌ Finalizada'];
+        const opts = [
+            {
+                value: '✅ Activa / En Venta',
+                tone: 'activa',
+                title: 'Activa',
+                desc: 'En venta · aparece en el listado',
+            },
+            {
+                value: '⏸️ Pausada',
+                tone: 'pausada',
+                title: 'Pausada',
+                desc: 'Pausa temporal · sigue visible',
+            },
+            {
+                value: '📦 Sin stock',
+                tone: 'sin_stock',
+                title: 'Sin stock',
+                desc: 'Agotada · puedes reponer después',
+            },
+            {
+                value: '❌ Finalizada',
+                tone: 'finalizada',
+                title: 'Finalizada · archivar',
+                desc: 'Sale del listado activo · conserva ventas · sin recompra',
+            },
+        ];
+        let picked = null;
         const choice = await UI.dialog({
-            title: 'Cambiar estatus de publicación',
-            body: `<div class="dlg-radios">${opts.map(o => `
-                <label class="dlg-radio ${l.estatus === o ? 'active' : ''}">
-                    <input type="radio" name="status-opt" value="${esc(o)}" ${l.estatus === o ? 'checked' : ''}>
-                    ${esc(o)}
+            title: 'Estatus de publicación',
+            body: `
+                <div class="dlg-radios dlg-status-opts">${opts.map(o => `
+                <label class="dlg-radio dlg-status-opt is-${o.tone} ${l.estatus === o.value ? 'active' : ''}">
+                    <input type="radio" name="status-opt" value="${esc(o.value)}" ${l.estatus === o.value ? 'checked' : ''}>
+                    <span class="dlg-status-copy">
+                        <span class="dlg-status-title">${esc(o.title)}</span>
+                        <span class="dlg-status-desc">${esc(o.desc)}</span>
+                    </span>
                 </label>
             `).join('')}</div>`,
             actions: [
                 { label: 'Cancelar', variant: 'ghost', value: null },
-                { label: 'Guardar', variant: 'primary', value: 'save' },
+                {
+                    label: 'Guardar',
+                    variant: 'primary',
+                    value: 'save',
+                    // Leer el radio ANTES de que el diálogo destruya el DOM
+                    onClick: (wrapper) => {
+                        const selected = wrapper.querySelector('input[name="status-opt"]:checked');
+                        if (!selected) {
+                            UI.toast('Elige un estatus', 'error');
+                            return false;
+                        }
+                        picked = selected.value;
+                        return true;
+                    },
+                },
             ],
+            onMount: (wrapper) => {
+                wrapper.querySelectorAll('.dlg-radio').forEach(label => {
+                    label.addEventListener('change', () => {
+                        wrapper.querySelectorAll('.dlg-radio').forEach(x => x.classList.remove('active'));
+                        label.classList.add('active');
+                    });
+                });
+            },
         });
-        if (choice !== 'save') return;
-        const selected = document.querySelector('input[name="status-opt"]:checked');
-        if (!selected) return;
-        l.estatus = selected.value;
+        if (choice !== 'save' || !picked) return;
+        l.estatus = picked;
         window.State.lotes = Data.upsertLote(window.State.lotes, l);
         window.State.save();
         renderContent();
-        UI.toast('Estatus actualizado');
+        window.App?.refreshNavCounts?.();
+        if (String(picked).includes('Finalizada')) {
+            UI.toast('Archivada · ventas conservadas; no se recomienda recompra');
+        } else {
+            UI.toast('Estatus actualizado');
+        }
     }
 
     async function restock(id) {
@@ -2439,7 +2539,7 @@ const LotesView = (() => {
         window.State.save();
         closeModal();
         renderContent();
-        UI.toast(isNew ? 'Lote creado' : 'Lote actualizado');
+        UI.toast(isNew ? 'Lote creado' : 'Lote actualizado', 'success', { pulse: true });
     }
 
     // ---- API pública para otros módulos --------------------------------
@@ -2494,12 +2594,19 @@ const LotesView = (() => {
         if (item.linkAmazon) noteParts.push(`Amazon: ${item.linkAmazon}`);
         if (item.nota) noteParts.push(item.nota);
 
+        const tipo = item.tipo === 'FBM' ? 'FBM' : 'FBA';
+        const storageHint = typeof Calc.estimateStorageMxnPerUnit === 'function'
+            ? Calc.estimateStorageMxnPerUnit({
+                pesoKg: settings.pesoKgDefault,
+                tamanoFba: settings.tamanoFbaDefault,
+            }, settings)
+            : 0;
         const lote = {
             ...blankLote(),
             id: Data.newId(),
             sku,
             producto,
-            tipo: item.tipo === 'FBM' ? 'FBM' : 'FBA',
+            tipo,
             categoria: catLabel,
             categoriaAmazon: catKey,
             costo: Number(item.costo) || 0,
@@ -2508,6 +2615,8 @@ const LotesView = (() => {
             asin: String(item.asin || '').trim().toUpperCase(),
             linkCompra: String(item.linkCompra || '').trim(),
             linkAmazon: String(item.linkAmazon || '').trim(),
+            almacenamiento: storageHint > 0 ? storageHint : 0,
+            fbaInboundEstado: tipo === 'FBA' ? 'creando' : '',
             notas: noteParts.join('\n'),
             historial: [{
                 ts: Date.now(),

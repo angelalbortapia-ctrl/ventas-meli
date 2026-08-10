@@ -288,7 +288,39 @@ const WishlistView = (() => {
             : (idx >= 0 ? 'Guardado' : 'Agregado'));
     }
 
-    function markComprado(id) {
+    async function seedInboundPipeline(lote) {
+        if (!lote || String(lote.tipo || '').toUpperCase() !== 'FBA') return;
+        try {
+            if (!lote.fbaInboundEstado && Data.setLoteFbaInboundEstado) {
+                Data.setLoteFbaInboundEstado(lote, 'creando');
+                window.State.lotes = Data.upsertLote(window.State.lotes, lote);
+                window.State.save();
+            }
+        } catch (err) {
+            console.warn('[Wishlist] inbound seed', err);
+        }
+        const raw = await UI.prompt?.({
+            title: 'Costo de envío a FBA (opcional)',
+            message: 'Si Amazon ya te cobró (o sabes el monto), regístralo como cargo. Déjalo vacío para saltar.',
+            placeholder: 'ej. 130',
+            primaryLabel: 'Registrar cargo',
+            cancelLabel: 'Ahora no',
+        });
+        if (raw == null || String(raw).trim() === '') return;
+        try {
+            const entry = Freight.addCharge({
+                amount: raw,
+                note: `Wishlist · ${lote.producto || lote.sku || 'inbound'}`,
+                loteId: lote.id,
+            });
+            UI.toast(`Inbound listo · cargo ${Calc.fmtMXN(entry.amount)}`);
+            window.App?.switchTab?.('envios');
+        } catch (err) {
+            UI.toast(err.message || 'No se pudo registrar el flete', 'error');
+        }
+    }
+
+    async function markComprado(id) {
         const items = loadItems();
         const idx = items.findIndex(i => i.id === id);
         if (idx < 0) return;
@@ -298,8 +330,10 @@ const WishlistView = (() => {
             items[idx] = { ...item, status: 'comprado', updatedAt: new Date().toISOString() };
             saveItems(items);
             local.filter = 'comprado';
+            const lote = window.State.lotes.find(l => l.id === item.loteId);
             window.App?.switchTab('lotes');
             LotesView.openModal(item.loteId);
+            await seedInboundPipeline(lote);
             return;
         }
 
@@ -319,6 +353,52 @@ const WishlistView = (() => {
         }
         local.filter = 'comprado';
         window.App?.refreshNavCounts?.();
+        await seedInboundPipeline(lote);
+    }
+
+    /** Alta rápida desde Keepa Lab (Deal / Finder / Research). */
+    function addFromKeepa({ asin, title = '', precio = 0, note = '' } = {}) {
+        const code = String(asin || '').trim().toUpperCase();
+        if (!/^[A-Z0-9]{10}$/.test(code)) {
+            UI.toast('ASIN inválido', 'error');
+            return null;
+        }
+        if (!isAmazonView()) {
+            window.App?.applyMarketplaceView?.('amazon', { toast: false });
+        }
+        const items = loadItems();
+        const existing = items.find(i => String(i.asin || '').toUpperCase() === code && i.status !== 'no_procede');
+        if (existing) {
+            local.filter = existing.status === 'comprado' ? 'comprado' : 'listo';
+            local.editingId = existing.id;
+            window.App?.switchTab?.('wishlist');
+            render();
+            UI.toast('Ya estaba en Wishlist');
+            return existing;
+        }
+        const next = normalizeItem({
+            id: `wl-${Date.now().toString(36)}`,
+            asin: code,
+            titulo: title || `ASIN ${code}`,
+            precioMercado: Number(precio) || 0,
+            costo: 0,
+            linkAmazon: `https://www.amazon.com.mx/dp/${code}`,
+            nota: note || 'Desde Keepa Lab',
+            status: 'listo',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        });
+        if (!next) {
+            UI.toast('No se pudo agregar', 'error');
+            return null;
+        }
+        saveItems([next, ...items]);
+        local.filter = 'listo';
+        local.editingId = next.id;
+        window.App?.switchTab?.('wishlist');
+        render();
+        UI.toast('Agregado a Wishlist · completa costo');
+        return next;
     }
 
     function setStatus(id, status) {
@@ -649,6 +729,7 @@ const WishlistView = (() => {
         render,
         pendingCount,
         isEnabled: isAmazonView,
+        addFromKeepa,
     };
 })();
 window.WishlistView = WishlistView;

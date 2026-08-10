@@ -752,6 +752,39 @@ const Calc = (() => {
         } catch { return String(d); }
     }
 
+    /**
+     * Estimación simple de storage FBA MXN/ud/mes (heurística, no tarifa oficial).
+     * Sobre ≈ barato · Estándar · Grande más caro; escala suave con peso.
+     */
+    function estimateStorageMxnPerUnit(lote = {}, settings = {}) {
+        const s = effectiveSettings(settings);
+        const peso = Math.max(0.05, Number(lote.pesoKg) || Number(s.pesoKgDefault) || 0.3);
+        const size = String(lote.tamanoFba || s.tamanoFbaDefault || 'estandar').toLowerCase();
+        let base = 8;
+        if (/sobre|envelope|sobre_/.test(size) || size === 'sobre') base = 3.5;
+        else if (/grande|oversize|large/.test(size)) base = 22;
+        const fee = Math.round(base * Math.max(0.6, Math.min(3, Math.sqrt(peso))) * 100) / 100;
+        return fee;
+    }
+
+    /** Días desde última venta (o desde captura / inbound recibido). */
+    function daysSinceActivity(lote) {
+        const ventas = Array.isArray(lote?.ventas) ? lote.ventas : [];
+        let latest = 0;
+        ventas.forEach(v => {
+            const t = Date.parse(v.fecha || '');
+            if (Number.isFinite(t) && t > latest) latest = t;
+        });
+        if (!latest && lote?.fbaInboundEstado === 'recibido') {
+            const hit = (lote.historial || []).slice().reverse()
+                .find(h => h?.tipo === 'fba-inbound' && h?.meta?.to === 'recibido');
+            if (hit?.ts) latest = hit.ts;
+        }
+        if (!latest && lote?.fecha) latest = Date.parse(lote.fecha);
+        if (!latest) return null;
+        return Math.floor((Date.now() - latest) / 86400000);
+    }
+
     return {
         DEFAULT_SETTINGS,
         DEFAULT_SETTINGS_MELI,
@@ -776,6 +809,8 @@ const Calc = (() => {
         resolveAmzCategoryKey,
         amzReferralFeeAmount,
         amzFbaFee,
+        estimateStorageMxnPerUnit,
+        daysSinceActivity,
     };
 })();
 window.Calc = Calc;

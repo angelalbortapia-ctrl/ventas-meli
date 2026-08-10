@@ -7,14 +7,33 @@ const Keepa = (() => {
     const DOMAIN_MX = 11;
     const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 h · ahorra tokens
     const RESEARCH_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+    const LIBRARY_MAX = 60;
+    const LIBRARY_POINTS = 160; // puntos/serie al persistir (ahorra localStorage)
     const IDX = {
         AMAZON: 0,
         NEW: 1,
+        USED: 2,
         SALES: 3,
+        FBM: 7,
+        LIGHTNING: 8,
+        FBA: 10,
         RATING: 16,
         REVIEWS: 17,
         BUY_BOX: 18,
     };
+    /** Epoch Keepa: 21 oct 2011 UTC (minutos → ms). */
+    const KEEPA_EPOCH_MS = Date.UTC(2011, 9, 21);
+    const HISTORY_SERIES = [
+        { key: 'amazon', idx: IDX.AMAZON, label: 'Amazon', kind: 'price' },
+        { key: 'new', idx: IDX.NEW, label: 'Nuevo 3P', kind: 'price' },
+        { key: 'used', idx: IDX.USED, label: 'Usado', kind: 'price' },
+        { key: 'bb', idx: IDX.BUY_BOX, label: 'Buy Box', kind: 'price' },
+        { key: 'fba', idx: IDX.FBA, label: 'FBA', kind: 'price' },
+        { key: 'fbm', idx: IDX.FBM, label: 'FBM', kind: 'price' },
+        { key: 'salesrank', idx: IDX.SALES, label: 'BSR', kind: 'rank' },
+        { key: 'ld', idx: IDX.LIGHTNING, label: 'Lightning', kind: 'price' },
+        // “Oferta semanal” solo existe en graphimage Keepa; no hay columna csv estable.
+    ];
     const pendingProduct = new Map();
     const pendingResearch = new Map();
     const pendingGraph = new Map();
@@ -52,7 +71,7 @@ const Keepa = (() => {
         const key = getApiKey();
         if (!key) throw new Error('Falta API key de Keepa en Ajustes');
         if (!keyLooksValid(key)) {
-            throw new Error('La API key guardada no tiene formato de Keepa (64 caracteres alfanuméricos). Vuelve a pegarla en Ajustes → Keepa.');
+            throw new Error('La API key guardada no tiene formato de Keepa (40–80 caracteres alfanuméricos). Vuelve a pegarla en Ajustes → Keepa.');
         }
         return key;
     }
@@ -200,11 +219,15 @@ const Keepa = (() => {
             vs90,
             signal,
             signalLabel,
-            image: Array.isArray(product.imagesCSV)
-                ? null
-                : (typeof product.imagesCSV === 'string' && product.imagesCSV
-                    ? `https://images-na.ssl-images-amazon.com/images/I/${product.imagesCSV.split(',')[0]}`
-                    : null),
+            image: (() => {
+                const csv = product.imagesCSV;
+                const first = Array.isArray(csv)
+                    ? csv[0]
+                    : (typeof csv === 'string' ? csv.split(',')[0] : '');
+                return first
+                    ? `https://images-na.ssl-images-amazon.com/images/I/${String(first).replace(/^I\//, '')}`
+                    : null;
+            })(),
             fetchedAt: new Date().toISOString(),
         };
     }
@@ -315,6 +338,46 @@ const Keepa = (() => {
         return Number.isFinite(stock) && stock >= 0 ? stock : null;
     }
 
+    function keepaMinutesToMs(minutes) {
+        const n = Number(minutes);
+        if (!Number.isFinite(n)) return null;
+        return KEEPA_EPOCH_MS + n * 60 * 1000;
+    }
+
+    /**
+     * csv[i] = [t0,v0,t1,v1,…] en minutos Keepa.
+     * Precios en centavos; −1 = sin dato.
+     */
+    function parseCsvColumn(arr, kind = 'price') {
+        if (!Array.isArray(arr) || arr.length < 2) return [];
+        const points = [];
+        for (let i = 0; i < arr.length - 1; i += 2) {
+            const t = keepaMinutesToMs(arr[i]);
+            let v = Number(arr[i + 1]);
+            if (t == null || !Number.isFinite(v) || v < 0) continue;
+            if (kind === 'price') v = v / 100;
+            points.push({ t, v });
+        }
+        return points;
+    }
+
+    function parseHistory(product) {
+        const csv = Array.isArray(product?.csv) ? product.csv : [];
+        const series = {};
+        HISTORY_SERIES.forEach(meta => {
+            const points = parseCsvColumn(csv[meta.idx], meta.kind);
+            if (points.length) {
+                series[meta.key] = {
+                    key: meta.key,
+                    label: meta.label,
+                    kind: meta.kind,
+                    points,
+                };
+            }
+        });
+        return series;
+    }
+
     function summarizeResearch(product) {
         const summary = summarizeProduct(product);
         if (!summary) return null;
@@ -354,6 +417,7 @@ const Keepa = (() => {
             availabilityAmazon: product.availabilityAmazon ?? null,
             offerCount: offers.length,
             offers,
+            history: parseHistory(product),
             rootCategory: product.rootCategory ?? null,
             categoryTree: Array.isArray(product.categoryTree) ? product.categoryTree : [],
         };
@@ -363,7 +427,8 @@ const Keepa = (() => {
         const code = String(asin || '').trim().toUpperCase();
         if (!/^[A-Z0-9]{10}$/.test(code)) throw new Error('ASIN inválido');
         const offerCount = Math.max(0, Math.min(100, Number(offers) || 0));
-        const cacheKey = `${code}:o${offerCount}:s${statsDays}`;
+        // h1 = historial csv para gráfica interactiva (no va al caché persistente).
+        const cacheKey = `${code}:o${offerCount}:s${statsDays}:h1`;
         if (!force) {
             const hit = researchCache.get(cacheKey);
             if (hit && Date.now() - hit.at < RESEARCH_CACHE_TTL_MS) return hit.data;
@@ -374,7 +439,7 @@ const Keepa = (() => {
                 domain: String(DOMAIN_MX),
                 asin: code,
                 stats: String(statsDays),
-                history: '0',
+                history: '1',
                 rating: '1',
                 buybox: '1',
             });
@@ -388,6 +453,7 @@ const Keepa = (() => {
             const data = summarizeResearch(product);
             writeCache(code, summarizeProduct(product));
             researchCache.set(cacheKey, { at: Date.now(), data });
+            saveToLibrary(data);
             return data;
         })();
         pendingResearch.set(cacheKey, pending);
@@ -396,6 +462,113 @@ const Keepa = (() => {
         } finally {
             pendingResearch.delete(cacheKey);
         }
+    }
+
+    function libraryStore() {
+        if (!window.State.ui) window.State.ui = {};
+        if (!window.State.ui.keepaLibrary || typeof window.State.ui.keepaLibrary !== 'object') {
+            window.State.ui.keepaLibrary = {};
+        }
+        return window.State.ui.keepaLibrary;
+    }
+
+    function downsampleSeriesPoints(points, max = LIBRARY_POINTS) {
+        if (!Array.isArray(points) || points.length <= max) return points || [];
+        const step = (points.length - 1) / (max - 1);
+        const out = [];
+        for (let i = 0; i < max; i++) out.push(points[Math.round(i * step)]);
+        return out;
+    }
+
+    function packHistory(history) {
+        const out = {};
+        Object.entries(history || {}).forEach(([key, series]) => {
+            if (!series?.points?.length) return;
+            out[key] = {
+                key: series.key || key,
+                label: series.label || key,
+                kind: series.kind || (key === 'salesrank' ? 'rank' : 'price'),
+                points: downsampleSeriesPoints(series.points),
+            };
+        });
+        return out;
+    }
+
+    /** Persiste investigación local (no Sync): reabrir sin tokens + actualizar on-demand. */
+    function saveToLibrary(data) {
+        if (!data?.asin) return;
+        const code = String(data.asin).toUpperCase();
+        const entry = {
+            at: Date.now(),
+            asin: code,
+            title: data.title || code,
+            image: data.image || '',
+            brand: data.brand || '',
+            signal: data.signal || '',
+            signalLabel: data.signalLabel || '',
+            buyBox: data.buyBox ?? data.marketPrice ?? data.currentPrice ?? null,
+            amazonRetail: data.amazonRetail ?? null,
+            avg30: data.avg30 ?? null,
+            avg90: data.avg90 ?? null,
+            vs90: data.vs90 ?? null,
+            bsr: data.bsr ?? null,
+            bsrAvg90: data.bsrAvg90 ?? null,
+            bsrVs90: data.bsrVs90 ?? null,
+            monthlySold: data.monthlySold ?? null,
+            rating: data.rating ?? null,
+            reviews: data.reviews ?? null,
+            buyBoxSellerId: data.buyBoxSellerId || '',
+            buyBoxIsAmazon: !!data.buyBoxIsAmazon,
+            buyBoxIsFBA: !!data.buyBoxIsFBA,
+            categoryTree: Array.isArray(data.categoryTree) ? data.categoryTree.slice(-3) : [],
+            history: packHistory(data.history),
+            fetchedAt: data.fetchedAt || new Date().toISOString(),
+        };
+        const store = { ...libraryStore(), [code]: entry };
+        const entries = Object.entries(store).sort((a, b) => (b[1].at || 0) - (a[1].at || 0));
+        window.State.ui = {
+            ...window.State.ui,
+            keepaLibrary: Object.fromEntries(entries.slice(0, LIBRARY_MAX)),
+        };
+        const prevB = window.__skipBackupDirty;
+        const prevS = window.__skipSync;
+        window.__skipBackupDirty = true;
+        window.__skipSync = true;
+        try { window.State.saveUI(); }
+        finally {
+            window.__skipBackupDirty = prevB;
+            window.__skipSync = prevS;
+        }
+    }
+
+    function listLibrary() {
+        return Object.values(libraryStore())
+            .filter(Boolean)
+            .sort((a, b) => (b.at || 0) - (a.at || 0));
+    }
+
+    function readLibrary(asin) {
+        const code = String(asin || '').trim().toUpperCase();
+        const row = libraryStore()[code];
+        return row || null;
+    }
+
+    function removeLibrary(asin) {
+        const code = String(asin || '').trim().toUpperCase();
+        if (!code || !libraryStore()[code]) return false;
+        const next = { ...libraryStore() };
+        delete next[code];
+        window.State.ui = { ...window.State.ui, keepaLibrary: next };
+        const prevB = window.__skipBackupDirty;
+        const prevS = window.__skipSync;
+        window.__skipBackupDirty = true;
+        window.__skipSync = true;
+        try { window.State.saveUI(); }
+        finally {
+            window.__skipBackupDirty = prevB;
+            window.__skipSync = prevS;
+        }
+        return true;
     }
 
     const GRAPH_LINES = ['amazon', 'new', 'used', 'salesrank', 'bb', 'fba', 'fbm', 'ld', 'wd'];
@@ -540,12 +713,12 @@ const Keepa = (() => {
                     data-product-id="${safe(productId)}" data-price="${safe(currentPrice ?? '')}"
                     ${currentPrice == null ? 'disabled' : ''}>Usar como competencia</button>
                 <button type="button" class="btn ghost sm" data-keepa-action="details"
-                    title="Buy Box y ventas mensuales; la respuesta se conserva 6 horas">
-                    ${detailed ? 'Actualizar detalle · 3–5 tokens' : 'Cargar Buy Box · 3–5 tokens'}
+                    title="Buy Box, historial y gráfica interactiva; se conserva 6 horas">
+                    ${detailed ? 'Actualizar detalle · 3–5 tokens' : 'Cargar Buy Box + gráfica · 3–5 tokens'}
                 </button>
                 <button type="button" class="btn ghost sm" data-keepa-action="refresh"
                     title="Ignora la caché y vuelve a consultar el resumen">Actualizar resumen · ~1 token</button>
-                <button type="button" class="btn ghost sm" data-keepa-action="lab">Gráfica y análisis ↗</button>
+                <button type="button" class="btn ghost sm" data-keepa-action="lab">Abrir en Keepa Lab ↗</button>
             </div>` : '';
         return `
             <div class="keepa-panel keepa-product-summary" data-keepa-signal="${safe(summary.signal)}">
@@ -580,7 +753,31 @@ const Keepa = (() => {
                     <div><span class="muted">Logística Buy Box</span><strong class="mono">${fulfillment}</strong></div>
                 </div>
                 ${controls}
+                <div class="keepa-ix-host keepa-ix-host-panel" data-keepa-ix-slot></div>
             </div>`;
+    }
+
+    function mountPanelChart(host, data) {
+        if (!host || !data?.history || !window.KeepaChart) return;
+        const slot = host.querySelector('[data-keepa-ix-slot]');
+        if (!slot) return;
+        const productId = host.getAttribute('data-keepa-product-id') || '';
+        const lote = (window.State?.lotes || []).find(l => String(l.id) === String(productId))
+            || KeepaChart.linkedLote(data.asin);
+        const graph = {
+            range: 90,
+            ...(window.KeepaChart.PRESET_MIA || {}),
+            ...(window.State?.ui?.keepaGraph || {}),
+            // Compacto: forzar preset operación si no hay preferencia fuerte
+            bb: true,
+            salesrank: true,
+        };
+        KeepaChart.mount(slot, {
+            data,
+            graph,
+            compact: true,
+            overlays: KeepaChart.overlaysFromLote(lote),
+        });
     }
 
     async function confirmTokenUse(title, message, primaryLabel) {
@@ -689,15 +886,15 @@ const Keepa = (() => {
         }
         if (action === 'details') {
             const ok = await confirmTokenUse(
-                'Cargar Buy Box y demanda',
-                'Se consultarán Buy Box, vendedor, logística y ventas mensuales. Puede consumir aproximadamente 3–5 tokens; el resultado se reutiliza durante 6 horas.',
+                'Cargar Buy Box y gráfica',
+                'Se consultarán Buy Box, historial de precios/BSR y demanda. Puede consumir aproximadamente 3–5 tokens; el resultado se reutiliza durante 6 horas.',
                 'Usar tokens'
             );
             if (!ok) return;
             await fetchInto(
                 host,
                 () => fetchResearch(asin, { force: detailed }),
-                'Consultando Buy Box y demanda…',
+                'Consultando Buy Box, historial y gráfica…',
                 true
             );
         }
@@ -711,6 +908,7 @@ const Keepa = (() => {
             const data = await task();
             host.setAttribute('data-keepa-detailed', detailed ? '1' : '0');
             host.innerHTML = renderPanel(data, { compact, productId, detailed });
+            if (detailed && data?.history) mountPanelChart(host, data);
         } catch (err) {
             host.innerHTML = `<div class="keepa-panel keepa-error muted small">${UI.escapeHTML(err.message || 'Error Keepa')}</div>`;
         }
@@ -758,7 +956,7 @@ const Keepa = (() => {
             return;
         }
         if (!keyLooksValid()) {
-            el.innerHTML = `<div class="keepa-panel keepa-error muted small">La API key guardada no tiene formato de Keepa (64 caracteres alfanuméricos). Vuelve a pegarla en Ajustes → Keepa.</div>`;
+            el.innerHTML = `<div class="keepa-panel keepa-error muted small">La API key guardada no tiene formato de Keepa (40–80 caracteres alfanuméricos). Vuelve a pegarla en Ajustes → Keepa.</div>`;
             return;
         }
         el.innerHTML = `<div class="keepa-panel keepa-loading muted small">Consultando Keepa…</div>`;
@@ -778,8 +976,102 @@ const Keepa = (() => {
         }
     }
 
+    /**
+     * Escaneo batch del catálogo Amazon (ASINs con stock).
+     * Guarda alertas en State.ui.keepaOpsAlerts (no sync: van en keepaCache strip? — alerts sí sync via ui).
+     * Señales: stock bajo + BSR empeora vs 90d · precio cae vs 90d · recompra ESCALAR.
+     */
+    async function scanCatalogAlerts({ limit = 12, force = false } = {}) {
+        if (!keyLooksValid()) throw new Error('Configura una API key Keepa válida');
+        const lotes = (window.State.marketplace === 'amazon'
+            ? (window.State.lotes || [])
+            : Data.loadLotes('amazon'))
+            .filter(l => {
+                const stock = Math.max(0, (Number(l.unidades) || 0) - (Number(l.vendidas) || 0));
+                return stock > 0 && /^[A-Z0-9]{10}$/i.test(String(l.asin || ''));
+            })
+            .slice(0, Math.max(1, Math.min(30, limit)));
+
+        const alerts = [];
+        let scanned = 0;
+        for (const lote of lotes) {
+            const asin = String(lote.asin).toUpperCase();
+            try {
+                const data = await fetchProduct(asin, { force });
+                scanned += 1;
+                const stock = Math.max(0, (Number(lote.unidades) || 0) - (Number(lote.vendidas) || 0));
+                const calc = Calc.computeLote(lote, window.State.settings);
+                const bsrWorse = Number.isFinite(data.bsrVs90) && data.bsrVs90 > 0.25;
+                const priceDrop = Number.isFinite(data.vs90) && data.vs90 < -0.12;
+                if (calc.estrategia === 'ESCALAR' && stock <= 3) {
+                    alerts.push({
+                        id: `ka-restock-${lote.id}`,
+                        severity: 'high',
+                        kind: 'keepa-restock',
+                        asin,
+                        loteId: lote.id,
+                        title: `Recompra · ${lote.producto}`,
+                        text: `Stock ${stock} · BSR ${data.bsr != null ? data.bsr : '—'} · ${data.signalLabel || ''}`.trim(),
+                        at: Date.now(),
+                    });
+                }
+                if (bsrWorse && stock > 0) {
+                    alerts.push({
+                        id: `ka-bsr-${lote.id}`,
+                        severity: 'medium',
+                        kind: 'keepa-bsr',
+                        asin,
+                        loteId: lote.id,
+                        title: `BSR empeora · ${lote.producto}`,
+                        text: `BSR +${Math.round(data.bsrVs90 * 100)}% vs avg 90d · revisa demanda.`,
+                        at: Date.now(),
+                    });
+                }
+                if (priceDrop) {
+                    alerts.push({
+                        id: `ka-price-${lote.id}`,
+                        severity: 'medium',
+                        kind: 'keepa-price',
+                        asin,
+                        loteId: lote.id,
+                        title: `Precio abajo · ${lote.producto}`,
+                        text: `${Math.round(data.vs90 * 100)}% vs avg 90d · revisa margen.`,
+                        at: Date.now(),
+                    });
+                }
+            } catch (err) {
+                console.warn('[Keepa] scan', asin, err);
+            }
+        }
+
+        const prev = window.__skipSync;
+        window.__skipSync = true;
+        try {
+            window.State.ui = {
+                ...(window.State.ui || {}),
+                keepaOpsAlerts: {
+                    at: Date.now(),
+                    scanned,
+                    alerts,
+                },
+            };
+            window.State.saveUI();
+        } finally {
+            window.__skipSync = prev;
+        }
+        window.App?.refreshNavCounts?.();
+        return { scanned, alerts };
+    }
+
+    function readOpsAlerts() {
+        const raw = window.State.ui?.keepaOpsAlerts;
+        if (!raw || !Array.isArray(raw.alerts)) return [];
+        return raw.alerts;
+    }
+
     return {
         DOMAIN_MX,
+        HISTORY_SERIES,
         getApiKey,
         setApiKey,
         hasKey,
@@ -787,6 +1079,11 @@ const Keepa = (() => {
         extractAsin,
         fetchProduct,
         fetchResearch,
+        parseHistory,
+        saveToLibrary,
+        listLibrary,
+        readLibrary,
+        removeLibrary,
         graphImage,
         graphParams,
         productFinder,
@@ -798,6 +1095,8 @@ const Keepa = (() => {
         readCache,
         panelPrefs,
         setPanelPref,
+        scanCatalogAlerts,
+        readOpsAlerts,
     };
 })();
 window.Keepa = Keepa;

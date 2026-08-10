@@ -237,7 +237,7 @@ const SettingsView = (() => {
         document.getElementById('btn-sync-now')?.addEventListener('click', async () => {
             try {
                 await S.pushNow();
-                UI.toast('Subido a Supabase');
+                UI.toast('Subido a Supabase', 'success', { pulse: true });
             } catch (err) {
                 UI.toast(err.message || 'Error al subir', 'error');
             }
@@ -257,7 +257,7 @@ const SettingsView = (() => {
         }
         el.textContent = window.Keepa?.keyLooksValid?.()
             ? 'Key guardada en este dispositivo. Usa python3 serve.py para consultar.'
-            : 'La key guardada no tiene formato de Keepa (64 caracteres alfanuméricos). Vuelve a pegarla.';
+            : 'La key guardada no tiene formato de Keepa (40–80 caracteres alfanuméricos). Vuelve a pegarla.';
     }
 
     function initKeepaUi() {
@@ -274,7 +274,7 @@ const SettingsView = (() => {
                 return;
             }
             if (key.trim() && !Keepa.keyLooksValid(key)) {
-                UI.toast('Esa no parece una API key de Keepa (64 caracteres alfanuméricos)', 'error');
+                UI.toast('Esa no parece una API key de Keepa (40–80 caracteres alfanuméricos)', 'error');
                 return;
             }
             Keepa.setApiKey(key.trim());

@@ -24,6 +24,19 @@ const Sync = (() => {
         localDirtyAt = Date.now();
     }
 
+    /** JSON estable: ordena claves de objetos (arrays conservan orden). */
+    function canonicalize(value) {
+        if (Array.isArray(value)) return value.map(canonicalize);
+        if (value && typeof value === 'object') {
+            const out = {};
+            Object.keys(value).sort().forEach(k => {
+                out[k] = canonicalize(value[k]);
+            });
+            return out;
+        }
+        return value;
+    }
+
     /** Hash estable del payload de sync, sin marcas volátiles (packedAt / updated_at). */
     function contentFingerprint(row) {
         if (!row || !Array.isArray(row.lotes)) return '';
@@ -38,7 +51,7 @@ const Sync = (() => {
             marketplace: raw._marketplace || 'meli',
         };
         try {
-            return hashString(JSON.stringify(payload));
+            return hashString(JSON.stringify(canonicalize(payload)));
         } catch {
             return '';
         }
@@ -576,6 +589,7 @@ const Sync = (() => {
         // Key de Keepa y caché de tokens: solo en este dispositivo
         delete out.keepaApiKey;
         delete out.keepaCache;
+        delete out.keepaLibrary;
         return out;
     }
 
@@ -691,6 +705,7 @@ const Sync = (() => {
             if (remoteUI) {
                 delete remoteUI.keepaApiKey;
                 delete remoteUI.keepaCache;
+                delete remoteUI.keepaLibrary;
             }
             const meliSettings = stripSyncMeta(rawSettings);
 
@@ -740,9 +755,12 @@ const Sync = (() => {
             // Conservar vista General si el usuario (o la nube) la tenía abierta
             const keepGeneral = window.State.ui?.mpView === 'general'
                 || remoteUI?.mpView === 'general';
+            // Merge ledger flete por-id (no last-write-wins ciego)
+            const mergedUi = (window.Freight?.mergeFreightState
+                ? Freight.mergeFreightState(window.State.ui, remoteUI)
+                : { ...(window.State.ui || {}), ...(remoteUI || {}) });
             window.State.ui = {
-                ...window.State.ui,
-                ...(remoteUI || {}),
+                ...mergedUi,
                 marketplace,
                 mpView: keepGeneral ? 'general' : marketplace,
             };

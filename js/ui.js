@@ -273,18 +273,42 @@ const UI = (() => {
         return { close };
     }
 
+    /** Ring arcoíris — 1 ciclo al completar sync / guardar. */
+    let _pulseTimer = 0;
+    let _pulseCooldownAt = 0;
+    function pulseRainbow() {
+        if (typeof window.matchMedia === 'function'
+            && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            return;
+        }
+        const now = Date.now();
+        if (now - _pulseCooldownAt < 900) return;
+        _pulseCooldownAt = now;
+        const root = document.documentElement;
+        root.classList.remove('is-rainbow-pulse');
+        // Forzar reflow para reiniciar la animación si ya estaba activa.
+        void root.offsetWidth;
+        root.classList.add('is-rainbow-pulse');
+        clearTimeout(_pulseTimer);
+        _pulseTimer = setTimeout(() => {
+            root.classList.remove('is-rainbow-pulse');
+        }, 1200);
+    }
+
     // Toast (única instancia).
     // BC: toast(msg, kind, 2400) sigue funcionando.
-    // Nueva firma: toast(msg, kind, { duration, action: { label, handler, ttl } }).
+    // Nueva firma: toast(msg, kind, { duration, action, pulse }).
     function toast(msg, kind = 'success', options) {
         const el = document.getElementById('toast');
         if (!el) return;
         let duration = 2400;
         let action = null;
+        let pulse = false;
         if (typeof options === 'number') {
             duration = options;
         } else if (options && typeof options === 'object') {
             if (Number.isFinite(options.duration)) duration = options.duration;
+            if (options.pulse) pulse = true;
             if (options.action && typeof options.action.handler === 'function') {
                 action = options.action;
                 // Con acción, damos margen para reaccionar.
@@ -316,6 +340,7 @@ const UI = (() => {
         el.hidden = false;
         clearTimeout(el._t);
         el._t = setTimeout(() => { el.hidden = true; }, duration);
+        if (pulse && kind !== 'error') pulseRainbow();
     }
 
     // --- Helpers ---
@@ -366,6 +391,7 @@ const UI = (() => {
         backupChoice,
         bottomSheet,
         toast,
+        pulseRainbow,
         escapeHTML,
         playMoneySound,
     };

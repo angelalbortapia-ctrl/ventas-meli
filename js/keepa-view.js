@@ -38,6 +38,9 @@ const KeepaView = (() => {
         precio: { amazon: true, new: true, bb: true, used: false, fba: false, fbm: false, salesrank: false, ld: false, wd: false },
         demanda: { amazon: true, new: true, bb: true, used: false, fba: false, fbm: false, salesrank: true, ld: false, wd: false },
         competencia: { amazon: true, new: false, bb: true, used: false, fba: true, fbm: true, salesrank: false, ld: false, wd: false },
+        mia: { ...(window.KeepaChart?.PRESET_MIA || {
+            amazon: false, new: false, bb: true, used: false, fba: false, fbm: false, salesrank: true, ld: false, wd: false, yzoom: true,
+        }) },
     };
 
     /** Caché de imágenes ya pagadas: alternar filtros vistos no vuelve a cobrar tokens. */
@@ -55,6 +58,9 @@ const KeepaView = (() => {
         seller: null,
         deals: [],
         researchSeq: 0,
+        compareResearch: null,
+        compareAsin: '',
+        ixState: null,
     };
 
     const esc = value => UI.escapeHTML(String(value ?? ''));
@@ -158,10 +164,16 @@ const KeepaView = (() => {
                     <h2>Keepa Lab</h2>
                     <p class="muted">Precio histórico, demanda, Buy Box, ofertas, Finder y vendedores · Amazon MX.</p>
                 </div>
-                <div class="keepa-token-pill" id="keepa-token-pill">
-                    <span class="muted small">Tokens</span>
-                    <strong>${configured ? '…' : 'Sin key'}</strong>
-                    ${configured ? '<button type="button" class="icon-btn" data-kv-action="tokens" title="Actualizar tokens">↻</button>' : ''}
+                <div class="keepa-head-actions">
+                    ${configured ? `
+                        <button type="button" class="btn ghost btn-sm" data-kv-action="scan-catalog"
+                            title="Escanea ASINs del catálogo con stock (recompra / BSR / precio)">Escanear catálogo</button>
+                    ` : ''}
+                    <div class="keepa-token-pill" id="keepa-token-pill">
+                        <span class="muted small">Tokens</span>
+                        <strong>${configured ? '…' : 'Sin key'}</strong>
+                        ${configured ? '<button type="button" class="icon-btn" data-kv-action="tokens" title="Actualizar tokens">↻</button>' : ''}
+                    </div>
                 </div>
             </div>
 
@@ -169,17 +181,18 @@ const KeepaView = (() => {
                 <div class="card keepa-config-alert">
                     <strong>${hasKey ? 'La API key no es válida' : 'Falta configurar Keepa'}</strong>
                     <span class="muted">${hasKey
-                        ? 'La key guardada no tiene formato de Keepa (64 caracteres alfanuméricos). Vuelve a pegarla.'
+                        ? 'La key guardada no tiene formato de Keepa (40–80 caracteres alfanuméricos). Vuelve a pegarla.'
                         : 'Pega tu Data API key en Ajustes → Keepa.'}</span>
                     <button type="button" class="btn primary sm" data-kv-action="settings">Abrir Ajustes</button>
                 </div>`}
 
             <nav class="keepa-view-tabs" role="tablist">
                 ${[
-                    ['research', '🔎 Investigador'],
-                    ['finder', '🧭 Product Finder'],
-                    ['seller', '🏪 Vendedor'],
-                    ['deals', '⚡ Deals'],
+                    ['research', 'Investigador'],
+                    ['library', 'Biblioteca'],
+                    ['finder', 'Product Finder'],
+                    ['seller', 'Vendedor'],
+                    ['deals', 'Deals'],
                 ].map(([key, label]) => `
                     <button type="button" class="detail-tab ${local.section === key ? 'active' : ''}"
                         data-kv-section="${key}" role="tab">${label}</button>
@@ -195,10 +208,73 @@ const KeepaView = (() => {
     }
 
     function renderSection(configured) {
+        if (local.section === 'library') return renderLibrary(configured);
         if (local.section === 'finder') return renderFinder(configured);
         if (local.section === 'seller') return renderSeller(configured);
         if (local.section === 'deals') return renderDeals(configured);
         return renderResearch(configured);
+    }
+
+    function renderLibrary() {
+        const rows = window.Keepa?.listLibrary?.() || [];
+        if (!rows.length) {
+            return `
+                <section class="keepa-workspace">
+                    <div class="card keepa-query-card">
+                        <div class="keepa-card-title">
+                            <div>
+                                <h3>Biblioteca Keepa</h3>
+                                <p class="muted small">Cada vez que investigas un ASIN se guarda aquí (local, sin Sync). Reabrir no gasta tokens; actualizar sí.</p>
+                            </div>
+                        </div>
+                        <div class="keepa-empty-state">
+                            <strong>Aún no hay ASINs guardados</strong>
+                            <span class="muted small">Investiga uno en la pestaña Investigador y vuelve aquí.</span>
+                            <button type="button" class="btn primary sm" data-kv-jump="research">Ir a Investigar</button>
+                        </div>
+                    </div>
+                </section>`;
+        }
+        return `
+            <section class="keepa-workspace">
+                <div class="card keepa-query-card">
+                    <div class="keepa-card-title">
+                        <div>
+                            <h3>Biblioteca · ${rows.length} ASIN${rows.length === 1 ? '' : 's'}</h3>
+                            <p class="muted small">Guardado local en este dispositivo. Abrir = gratis · Actualizar = vuelve a gastar tokens Keepa.</p>
+                        </div>
+                    </div>
+                    <div class="keepa-lib-grid">
+                        ${rows.map(row => {
+                            const when = row.at
+                                ? new Date(row.at).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })
+                                : '—';
+                            return `
+                            <article class="keepa-lib-card float-surface">
+                                <div class="keepa-lib-card-top">
+                                    ${row.image ? `<img src="${esc(row.image)}" alt="">` : '<div class="keepa-lib-card-top" style="width:56px;height:56px;border-radius:10px;background:var(--ios-gray6)"></div>'}
+                                    <div class="keepa-grow">
+                                        <code class="muted small">${esc(row.asin)}</code>
+                                        <h4>${esc(row.title || row.asin)}</h4>
+                                        <span class="keepa-badge" data-signal="${esc(row.signal || '')}">${esc(row.signalLabel || '—')}</span>
+                                    </div>
+                                </div>
+                                <div class="keepa-lib-meta">
+                                    <div><span class="muted">Buy Box</span><strong>${mxn(row.buyBox)}</strong></div>
+                                    <div><span class="muted">Avg 90d</span><strong>${mxn(row.avg90)}</strong></div>
+                                    <div><span class="muted">BSR</span><strong>${num(row.bsr)}</strong></div>
+                                    <div><span class="muted">Guardado</span><strong class="muted" style="font-weight:500">${esc(when)}</strong></div>
+                                </div>
+                                <div class="keepa-lib-actions">
+                                    <button type="button" class="btn primary sm" data-kv-lib-open="${esc(row.asin)}">Abrir</button>
+                                    <button type="button" class="btn ghost sm" data-kv-lib-update="${esc(row.asin)}">Actualizar</button>
+                                    <button type="button" class="btn ghost sm" data-kv-lib-remove="${esc(row.asin)}">Quitar</button>
+                                </div>
+                            </article>`;
+                        }).join('')}
+                    </div>
+                </div>
+            </section>`;
     }
 
     function renderResearch(configured) {
@@ -209,7 +285,7 @@ const KeepaView = (() => {
             <section class="keepa-workspace">
                 <div class="card keepa-query-card">
                     <div class="keepa-card-title">
-                        <div><h3>Investigar ASIN</h3><p class="muted small">Investigar ≈ 3–5 tokens (Buy Box + rating + gráfica). Reconsultar el mismo ASIN usa caché 6h.</p></div>
+                        <div><h3>Investigar ASIN</h3><p class="muted small">≈ 3–5 tokens (Buy Box + historial). Se guarda solo en Biblioteca (este dispositivo). Reabrir desde ahí es gratis; Actualizar vuelve a gastar tokens.</p></div>
                     </div>
                     <form id="keepa-research-form" class="keepa-inline-form">
                         <label class="keepa-grow"><span>ASIN o link de Amazon</span>
@@ -291,6 +367,7 @@ const KeepaView = (() => {
                     <a class="btn ghost sm" href="https://keepa.com/#!product/11-${esc(data.asin)}" target="_blank" rel="noopener">Keepa ↗</a>
                 </div>
                 ${graphHtml(data)}
+                <div id="keepa-ix-host" class="keepa-ix-host"></div>
                 <div class="keepa-result-actions">
                     <button type="button" class="btn" data-kv-action="offers">Cargar 20 ofertas + stock</button>
                     <span class="muted small">Esta consulta es más cara (aprox. +6 tokens por cada 10 ofertas).</span>
@@ -326,6 +403,7 @@ const KeepaView = (() => {
                             <button type="button" class="keepa-chip" data-kg-preset="precio">Solo precios</button>
                             <button type="button" class="keepa-chip" data-kg-preset="demanda">Precio + BSR</button>
                             <button type="button" class="keepa-chip" data-kg-preset="competencia">FBA vs FBM</button>
+                            <button type="button" class="keepa-chip" data-kg-preset="mia">Mi operación</button>
                         </div>
                     </div>
                     <div class="keepa-graph-row">
@@ -353,11 +431,43 @@ const KeepaView = (() => {
                         ? `<img src="${esc(local.graphUrl)}" alt="Gráfica Keepa de ${esc(data.asin)}">`
                         : '<div class="keepa-graph-loading muted">Cargando gráfica Keepa…</div>'}
                 </div>
+                <p class="muted small keepa-graph-caption">Arriba: gráfica oficial Keepa (PNG). Abajo: nuestra lectura interactiva del historial — sin tokens extra al cambiar series/rango.</p>
             </div>`;
     }
 
-    function refreshGraphControls() {
-        if (!local.research) return;
+    function mountInteractiveChart() {
+        const host = document.getElementById('keepa-ix-host');
+        if (!host || !local.research || !window.KeepaChart) return;
+        const prev = local.ixState || {};
+        // Sync compare from chart state if user loaded it inside the chart.
+        if (prev.compareData) {
+            local.compareResearch = prev.compareData;
+            local.compareAsin = prev.compareAsin || '';
+        }
+        local.ixState = KeepaChart.mount(host, {
+            data: local.research,
+            compareData: local.compareResearch,
+            compareAsin: local.compareAsin,
+            graph: local.graph,
+            compact: false,
+            hidden: prev.hidden || {},
+            brush: prev.brush || null,
+            pins: prev.pins || [],
+            showAreas: prev.showAreas !== false,
+            overlays: KeepaChart.overlaysFromLote(KeepaChart.linkedLote(local.research.asin)),
+            onGraphChange: (g) => {
+                local.graph = { ...local.graph, ...g };
+                saveGraphPrefs();
+                syncGraphChipsOnly();
+            },
+        });
+    }
+
+    function refreshInteractiveChart() {
+        mountInteractiveChart();
+    }
+
+    function syncGraphChipsOnly() {
         const panel = document.getElementById('keepa-graph-controls');
         if (!panel) return;
         const g = local.graph;
@@ -374,6 +484,13 @@ const KeepaView = (() => {
             button.disabled = apply.disabled;
             button.textContent = apply.label;
         }
+    }
+
+    function refreshGraphControls() {
+        if (!local.research) return;
+        syncGraphChipsOnly();
+        // La gráfica propia reacciona al instante; el PNG sigue pidiendo “Aplicar”.
+        refreshInteractiveChart();
     }
 
     function kpi(label, value) {
@@ -431,9 +548,12 @@ const KeepaView = (() => {
                 <div class="keepa-card-title"><h3>${local.finder.length} ASINs encontrados</h3><span class="muted small">Investigar uno cuesta tokens adicionales.</span></div>
                 <div class="keepa-finder-results">
                     ${local.finder.map((asin, i) => `
-                        <button type="button" class="keepa-finder-result" data-kv-asin="${esc(asin)}">
-                            <span>${i + 1}</span><code>${esc(asin)}</code><strong>Investigar →</strong>
-                        </button>`).join('')}
+                        <div class="keepa-finder-row">
+                            <button type="button" class="keepa-finder-result" data-kv-asin="${esc(asin)}">
+                                <span>${i + 1}</span><code>${esc(asin)}</code><strong>Investigar →</strong>
+                            </button>
+                            <button type="button" class="btn ghost btn-sm" data-kv-wishlist="${esc(asin)}" title="Agregar a Wishlist">+ Wishlist</button>
+                        </div>`).join('')}
                 </div>
             </div>`;
     }
@@ -515,11 +635,14 @@ const KeepaView = (() => {
                         );
                         const price = Number.isFinite(priceRaw) && priceRaw >= 0 ? priceRaw / 100 : null;
                         return `
-                            <button type="button" class="keepa-deal-card" data-kv-asin="${esc(asin)}" ${asin ? '' : 'disabled'}>
-                                <div><code>${esc(asin || 'Sin ASIN')}</code><span class="keepa-badge">${discount != null ? `−${num(discount)}%` : 'Deal'}</span></div>
-                                <strong>${esc(deal.title || deal.product?.title || 'Producto Keepa')}</strong>
-                                <span class="muted">${price == null ? 'Precio al investigar' : mxn(price)}</span>
-                            </button>`;
+                            <div class="keepa-deal-wrap">
+                                <button type="button" class="keepa-deal-card" data-kv-asin="${esc(asin)}" ${asin ? '' : 'disabled'}>
+                                    <div><code>${esc(asin || 'Sin ASIN')}</code><span class="keepa-badge">${discount != null ? `−${num(discount)}%` : 'Deal'}</span></div>
+                                    <strong>${esc(deal.title || deal.product?.title || 'Producto Keepa')}</strong>
+                                    <span class="muted">${price == null ? 'Precio al investigar' : mxn(price)}</span>
+                                </button>
+                                ${asin ? `<button type="button" class="btn ghost btn-sm" data-kv-wishlist="${esc(asin)}" data-kv-wish-title="${esc(deal.title || deal.product?.title || '')}" data-kv-wish-price="${price != null ? price : ''}">+ Wishlist</button>` : ''}
+                            </div>`;
                     }).join('')}
                 </div>
             </div>`;
@@ -546,26 +669,74 @@ const KeepaView = (() => {
         }
     }
 
-    async function runResearch(asin, range) {
+    function showResearchData(data, { loadPng = true } = {}) {
+        local.research = data;
+        local.asin = data?.asin || local.asin;
+        local.section = 'research';
+        const root = document.getElementById('view-keepa');
+        if (root && !document.getElementById('keepa-research-result')) {
+            render();
+        }
+        const box = document.getElementById('keepa-research-result');
+        if (box) {
+            box.innerHTML = researchHtml(data);
+            bind(box);
+            mountInteractiveChart();
+        } else {
+            render();
+            const again = document.getElementById('keepa-research-result');
+            if (again && local.research) {
+                again.innerHTML = researchHtml(local.research);
+                bind(again);
+                mountInteractiveChart();
+            }
+        }
+        if (loadPng) loadGraph();
+    }
+
+    async function runResearch(asin, range, { force = false, fromLibrary = false } = {}) {
         const code = extractAsin(asin);
         if (!code) {
             UI.toast('Escribe un ASIN válido o pega el link de Amazon', 'error');
             return;
         }
+        // Abrir desde biblioteca sin gastar tokens
+        if (fromLibrary && !force) {
+            const saved = Keepa.readLibrary?.(code);
+            if (saved?.history) {
+                const requestSeq = ++local.researchSeq;
+                if (code !== local.asin) {
+                    clearGraphCache();
+                    local.compareResearch = null;
+                    local.compareAsin = '';
+                    local.ixState = null;
+                }
+                local.asin = code;
+                if (range) local.graph.range = Number(range);
+                if (requestSeq !== local.researchSeq) return;
+                showResearchData(saved, { loadPng: false });
+                UI.toast('Abierto desde biblioteca · sin tokens');
+                return;
+            }
+        }
         const requestSeq = ++local.researchSeq;
-        if (code !== local.asin) clearGraphCache();
+        if (code !== local.asin) {
+            clearGraphCache();
+            local.compareResearch = null;
+            local.compareAsin = '';
+            local.ixState = null;
+        }
         local.asin = code;
         if (range) local.graph.range = Number(range);
+        local.section = 'research';
+        if (!document.getElementById('keepa-research-result')) render();
         const box = document.getElementById('keepa-research-result');
-        if (box) box.innerHTML = '<div class="keepa-empty-state"><span class="keepa-spinner"></span><strong>Consultando Keepa…</strong><span class="muted small">Resumen + Buy Box y gráfica.</span></div>';
+        if (box) box.innerHTML = '<div class="keepa-empty-state"><span class="keepa-spinner"></span><strong>Consultando Keepa…</strong><span class="muted small">Resumen + historial + gráfica Keepa.</span></div>';
         try {
-            const data = await Keepa.fetchResearch(code);
+            const data = await Keepa.fetchResearch(code, { force });
             if (requestSeq !== local.researchSeq) return;
-            local.research = data;
-            if (box) box.innerHTML = researchHtml(data);
-            bind(box);
-            await loadGraph({ seq: requestSeq });
-            if (requestSeq !== local.researchSeq) return;
+            showResearchData(data, { loadPng: true });
+            if (force) UI.toast('Biblioteca actualizada', 'success', { pulse: true });
             refreshTokens(false);
         } catch (err) {
             if (requestSeq !== local.researchSeq) return;
@@ -673,6 +844,7 @@ const KeepaView = (() => {
             if (box) {
                 box.innerHTML = researchHtml(local.research);
                 bind(box);
+                mountInteractiveChart();
             }
             refreshTokens(false);
         } catch (err) {
@@ -804,6 +976,34 @@ const KeepaView = (() => {
                 runResearch(local.asin);
             });
         });
+        root.querySelectorAll('[data-kv-wishlist]').forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const asin = button.dataset.kvWishlist;
+                const title = button.dataset.kvWishTitle || '';
+                const precio = Number(button.dataset.kvWishPrice) || 0;
+                WishlistView?.addFromKeepa?.({
+                    asin,
+                    title,
+                    precio,
+                    note: 'Desde Keepa Lab',
+                });
+            });
+        });
+        root.querySelector('[data-kv-action="scan-catalog"]')?.addEventListener('click', async () => {
+            const btn = root.querySelector('[data-kv-action="scan-catalog"]');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await Keepa.scanCatalogAlerts({ limit: 12 });
+                UI.toast(`Keepa · ${res.scanned} ASINs · ${res.alerts.length} alerta${res.alerts.length === 1 ? '' : 's'}`);
+                window.App?.switchTab?.('insights');
+            } catch (err) {
+                UI.toast(err.message || 'No se pudo escanear', 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        });
         root.querySelectorAll('[data-kv-seller]').forEach(button => {
             button.addEventListener('click', () => {
                 const id = button.dataset.kvSeller;
@@ -829,6 +1029,30 @@ const KeepaView = (() => {
         root.querySelector('#keepa-research-form')?.addEventListener('submit', event => {
             event.preventDefault();
             runResearch(document.getElementById('keepa-research-asin')?.value);
+        });
+        root.querySelectorAll('[data-kv-lib-open]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                runResearch(btn.dataset.kvLibOpen, null, { fromLibrary: true });
+            });
+        });
+        root.querySelectorAll('[data-kv-lib-update]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const asin = btn.dataset.kvLibUpdate;
+                const ok = await UI.confirm({
+                    title: 'Actualizar ASIN',
+                    message: 'Se volverá a consultar Keepa (~3–5 tokens) y se reemplazará lo guardado en la biblioteca.',
+                    primaryLabel: 'Actualizar',
+                });
+                if (!ok) return;
+                runResearch(asin, null, { force: true });
+            });
+        });
+        root.querySelectorAll('[data-kv-lib-remove]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                Keepa.removeLibrary?.(btn.dataset.kvLibRemove);
+                UI.toast('Quitado de la biblioteca');
+                if (local.section === 'library') render();
+            });
         });
         root.querySelector('#keepa-finder-form')?.addEventListener('submit', event => {
             event.preventDefault();

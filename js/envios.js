@@ -44,15 +44,260 @@ const EnviosView = (() => {
     const ORDER_FBA = { creando: 0, por_enviar: 1, en_transito: 2, recibido: 3 };
     const ORDER_FBM = { por_preparar: 0, empaquetado: 1, etiqueta: 2, listo: 3, enviado: 4 };
 
-    const local = { showDone: false };
+    const local = { showDone: false, freightForm: null, freightSaving: false }; // form: 'charge' | 'payment' | null
 
     function esc(s) {
         return UI.escapeHTML(String(s ?? ''));
     }
 
+    const round2 = (...a) => Freight.round2(...a);
+    const parseMoney = (...a) => Freight.parseMoney(...a);
+    const readFreight = (...a) => Freight.readFreight(...a);
+    const writeFreight = (...a) => Freight.writeFreight(...a);
+    const freightTotals = (...a) => Freight.freightTotals(...a);
+    const balance = (...a) => Freight.balance(...a);
+    const addCharge = (...a) => Freight.addCharge(...a);
+    const addPayment = (...a) => Freight.addPayment(...a);
+    const removeEntry = (...a) => Freight.removeEntry(...a);
+
+    /** Colas FBA/FBM (prep). La deuda de flete vive aparte. */
     function isEnabled() {
         if (window.State.marketplace !== 'amazon') return false;
         return window.State.settings?.prepEnvioActivo !== false;
+    }
+
+    /** Vista Envíos disponible en Amazon (deuda aunque prep esté apagada). */
+    function canOpen() {
+        return window.State.marketplace === 'amazon';
+    }
+
+    function loteLabel(loteId) {
+        if (!loteId) return '';
+        const lote = (window.State.lotes || []).find(l => String(l.id) === String(loteId));
+        if (!lote) return 'Lote eliminado';
+        const name = lote.producto || 'Producto';
+        const sku = lote.sku ? ` · ${lote.sku}` : '';
+        const v = lote.variante ? ` · ${lote.variante}` : '';
+        return `${name}${v}${sku}`;
+    }
+
+    function fbaLoteOptionsHtml(selected = '') {
+        const lotes = (window.State.lotes || [])
+            .filter(l => String(l.tipo || '').toUpperCase() === 'FBA')
+            .slice()
+            .sort((a, b) => String(a.producto || '').localeCompare(String(b.producto || ''), 'es'));
+        const opts = lotes.map(l => {
+            const label = `${l.producto || 'Producto'}${l.variante ? ` · ${l.variante}` : ''} (${l.sku || 'sin SKU'})`;
+            const sel = String(l.id) === String(selected) ? ' selected' : '';
+            return `<option value="${esc(l.id)}"${sel}>${esc(label)}</option>`;
+        }).join('');
+        return `<option value="">Sin vincular a un lote</option>${opts}`;
+    }
+
+    function fmtFreightDate(at) {
+        try {
+            return new Date(at).toLocaleDateString('es-MX', {
+                year: 'numeric', month: 'short', day: 'numeric',
+            });
+        } catch {
+            return '';
+        }
+    }
+
+    function layFreightDebt() {
+        const state = readFreight();
+        const totals = freightTotals(state);
+        const sorted = state.ledger.slice().sort((a, b) => (b.at || 0) - (a.at || 0));
+        const formMode = local.freightForm;
+
+        const formHtml = formMode === 'charge' ? `
+            <form class="envios-freight-form" id="envios-freight-form" data-mode="charge">
+                <div class="envios-freight-form-grid">
+                    <label>
+                        <span>Monto del cargo (MXN)</span>
+                        <input type="number" min="0.01" step="0.01" name="amount" required placeholder="ej. 130" inputmode="decimal">
+                    </label>
+                    <label>
+                        <span>Nota (opcional)</span>
+                        <input type="text" name="note" maxlength="120" placeholder="histórico inbound, envío marzo…">
+                    </label>
+                    <label class="envios-freight-form-full">
+                        <span>Lote FBA (opcional)</span>
+                        <select name="loteId">${fbaLoteOptionsHtml()}</select>
+                    </label>
+                    <label class="envios-freight-form-full envios-freight-check">
+                        <input type="checkbox" name="allocateCost">
+                        <span>Repartir al costo/ud del lote (sube <code>costo</code> del producto)</span>
+                    </label>
+                </div>
+                <div class="envios-freight-form-actions">
+                    <button type="submit" class="btn primary btn-sm">Guardar cargo</button>
+                    <button type="button" class="btn ghost btn-sm" data-freight-cancel>Cancelar</button>
+                </div>
+            </form>
+        ` : formMode === 'payment' ? `
+            <form class="envios-freight-form" id="envios-freight-form" data-mode="payment">
+                <div class="envios-freight-form-grid">
+                    <label>
+                        <span>Monto que pagaste (MXN)</span>
+                        <input type="number" min="0.01" step="0.01" name="amount" required placeholder="ej. 130" inputmode="decimal">
+                    </label>
+                    <label>
+                        <span>Nota (opcional)</span>
+                        <input type="text" name="note" maxlength="120" placeholder="pago tarjeta, descuento en payout…">
+                    </label>
+                </div>
+                <p class="muted small" style="margin:0 0 8px">Saldo actual: ${Calc.fmtMXN(totals.balanceDisplay)}. El pago baja lo que le debes.</p>
+                <div class="envios-freight-form-actions">
+                    <button type="submit" class="btn primary btn-sm">Registrar pago</button>
+                    <button type="button" class="btn ghost btn-sm" data-freight-cancel>Cancelar</button>
+                </div>
+            </form>
+        ` : '';
+
+        const listHtml = sorted.length ? `
+            <ul class="envios-freight-list">
+                ${sorted.map(e => {
+                    const isCharge = e.type === 'charge';
+                    const loteTxt = isCharge && e.loteId ? loteLabel(e.loteId) : '';
+                    return `
+                        <li class="envios-freight-row envios-freight-${esc(e.type)}">
+                            <div class="envios-freight-row-main">
+                                <span class="envios-freight-badge">${isCharge ? 'Cargo' : 'Pago'}</span>
+                                <span class="envios-freight-amt">${isCharge ? '+' : '−'}${Calc.fmtMXN(e.amount)}</span>
+                                <span class="envios-freight-date muted small">${esc(fmtFreightDate(e.at))}</span>
+                            </div>
+                            <div class="envios-freight-row-meta muted small">
+                                ${e.note ? `<span>${esc(e.note)}</span>` : ''}
+                                ${loteTxt ? `<span>${esc(loteTxt)}</span>` : ''}
+                                ${e.allocatedCost ? '<span>En costo/ud</span>' : ''}
+                                ${!e.note && !loteTxt && !e.allocatedCost ? '<span>—</span>' : ''}
+                            </div>
+                            <div class="envios-freight-row-actions">
+                                ${isCharge && e.loteId && !e.allocatedCost ? `
+                                    <button type="button" class="btn ghost btn-sm" data-freight-alloc="${esc(e.id)}">→ Costo/ud</button>
+                                ` : ''}
+                                <button type="button" class="btn ghost btn-sm envios-freight-del"
+                                    data-freight-del="${esc(e.id)}" aria-label="Eliminar movimiento">Eliminar</button>
+                            </div>
+                        </li>
+                    `;
+                }).join('')}
+            </ul>
+        ` : `
+            <p class="muted small envios-freight-empty-hint">
+                Si Amazon ya te cobró envíos pasados, registra un cargo con el total (ej. $130).
+            </p>
+        `;
+
+        return `
+            <section class="envios-freight" aria-label="Deuda de envío a FBA">
+                <div class="envios-freight-head">
+                    <div>
+                        <h3 class="envios-freight-title">Deuda envío a FBA</h3>
+                        <p class="muted small" style="margin:0">
+                            Flete de mandar inventario al almacén. Opcional: repartirlo al costo/ud del lote.
+                        </p>
+                    </div>
+                    <div class="envios-freight-kpi${totals.balanceDisplay > 0 ? ' is-owe' : ''}">
+                        <div class="envios-freight-kpi-label">Le debes a Amazon</div>
+                        <div class="envios-freight-kpi-value">${Calc.fmtMXN(totals.balanceDisplay)}</div>
+                        <div class="envios-freight-kpi-sub muted small">
+                            Cargos ${Calc.fmtMXN(totals.charges)} · Pagos ${Calc.fmtMXN(totals.payments)}
+                        </div>
+                    </div>
+                </div>
+                <div class="envios-freight-actions">
+                    <button type="button" class="btn primary btn-sm" data-freight-open="charge">+ Cargo de envío</button>
+                    <button type="button" class="btn btn-sm" data-freight-open="payment">+ Pago</button>
+                </div>
+                ${formHtml}
+                ${listHtml}
+            </section>
+        `;
+    }
+
+    function bindFreight(root) {
+        root.querySelectorAll('[data-freight-open]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                local.freightForm = btn.dataset.freightOpen === 'payment' ? 'payment' : 'charge';
+                render();
+                document.querySelector('#envios-freight-form input[name="amount"]')?.focus();
+            });
+        });
+        root.querySelectorAll('[data-freight-cancel]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                local.freightForm = null;
+                render();
+            });
+        });
+        const form = root.querySelector('#envios-freight-form');
+        form?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (local.freightSaving) return;
+            local.freightSaving = true;
+            const submitBtn = form.querySelector('[type="submit"]');
+            if (submitBtn) submitBtn.disabled = true;
+            const mode = form.dataset.mode;
+            const amount = parseMoney(form.querySelector('[name="amount"]')?.value);
+            const note = form.querySelector('[name="note"]')?.value || '';
+            try {
+                if (mode === 'payment') {
+                    const entry = addPayment({ amount, note });
+                    UI.toast(`Pago ${Calc.fmtMXN(entry.amount)} registrado`);
+                } else {
+                    const loteId = form.querySelector('[name="loteId"]')?.value || null;
+                    const allocateCost = !!form.querySelector('[name="allocateCost"]')?.checked;
+                    if (allocateCost && !loteId) {
+                        throw new Error('Elige un lote FBA para repartir al costo');
+                    }
+                    const entry = addCharge({ amount, note, loteId, allocateCost });
+                    UI.toast(allocateCost
+                        ? `Cargo ${Calc.fmtMXN(entry.amount)} · sumado al costo/ud`
+                        : `Cargo ${Calc.fmtMXN(entry.amount)} registrado`);
+                }
+                local.freightForm = null;
+                render();
+            } catch (err) {
+                UI.toast(err.message || 'No se pudo guardar', 'error');
+                if (submitBtn) submitBtn.disabled = false;
+            } finally {
+                local.freightSaving = false;
+            }
+        });
+        root.querySelectorAll('[data-freight-alloc]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const ok = await UI.confirm({
+                    title: 'Repartir flete al costo/ud',
+                    message: 'Suma (monto ÷ unidades del lote) al costo unitario. No se puede deshacer desde aquí.',
+                    primaryLabel: 'Sumar al costo',
+                });
+                if (!ok) return;
+                try {
+                    const res = Freight.allocateChargeToLoteCost(btn.dataset.freightAlloc);
+                    UI.toast(`+${Calc.fmtMXN(res.perUnit)}/ud → costo ${Calc.fmtMXN(res.nextCosto)}`);
+                    render();
+                    if (window.State.view === 'lotes') LotesView?.render?.();
+                } catch (err) {
+                    UI.toast(err.message || 'No se pudo repartir', 'error');
+                }
+            });
+        });
+        root.querySelectorAll('[data-freight-del]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const ok = await UI.confirm({
+                    title: 'Eliminar movimiento',
+                    message: 'Se quita de la deuda de envío a FBA. No se puede deshacer.',
+                    primaryLabel: 'Eliminar',
+                    danger: true,
+                });
+                if (!ok) return;
+                if (removeEntry(btn.dataset.freightDel)) {
+                    UI.toast('Movimiento eliminado');
+                    render();
+                }
+            });
+        });
     }
 
     function collectFbaInbound({ includeDone = false } = {}) {
@@ -144,60 +389,43 @@ const EnviosView = (() => {
         const root = document.getElementById('view-envios');
         if (!root) return;
 
-        if (!isEnabled()) {
+        if (!canOpen()) {
             root.innerHTML = `
                 <div class="view-head">
                     <div>
                         <h2>Envíos</h2>
-                        <p class="muted">FBA (a Amazon) y FBM (al cliente).</p>
+                        <p class="muted">Solo disponible en Amazon.</p>
                     </div>
-                </div>
-                <div class="card envios-off">
-                    <p><strong>Esta función está apagada.</strong></p>
-                    <p class="muted">Actívala en Ajustes → Tarifas Amazon → <em>Preparación de envíos</em>.</p>
-                    <button type="button" class="btn primary btn-sm" id="envios-goto-settings">Ir a Ajustes</button>
-                </div>
-            `;
-            document.getElementById('envios-goto-settings')?.addEventListener('click', () => {
-                window.App?.switchTab?.('settings');
-            });
+                </div>`;
             return;
         }
 
-        const fbaPending = collectFbaInbound();
-        const fbmPending = collectFbmSales();
-        const fbaDone = local.showDone
+        const prepOn = isEnabled();
+        const fbaPending = prepOn ? collectFbaInbound() : [];
+        const fbmPending = prepOn ? collectFbmSales() : [];
+        const fbaDone = prepOn && local.showDone
             ? collectFbaInbound({ includeDone: true }).filter(r => r.estado === 'recibido').slice(0, 20)
             : [];
-        const fbmDone = local.showDone
+        const fbmDone = prepOn && local.showDone
             ? collectFbmSales({ includeEnviado: true }).filter(r => r.estado === 'enviado').slice(0, 20)
             : [];
 
-        const unmarkedFba = (window.State.lotes || []).filter(l =>
-            String(l.tipo || '').toUpperCase() === 'FBA' && !l.fbaInboundEstado
-        );
+        const unmarkedFba = prepOn
+            ? (window.State.lotes || []).filter(l =>
+                String(l.tipo || '').toUpperCase() === 'FBA' && !l.fbaInboundEstado
+            )
+            : [];
         const unmarkedFbm = [];
-        (window.State.lotes || []).forEach(lote => {
-            if (String(lote.tipo || '').toUpperCase() === 'FBA') return;
-            (lote.ventas || []).forEach(v => {
-                if (!v.envioEstado) unmarkedFbm.push({ lote, venta: v });
+        if (prepOn) {
+            (window.State.lotes || []).forEach(lote => {
+                if (String(lote.tipo || '').toUpperCase() === 'FBA') return;
+                (lote.ventas || []).forEach(v => {
+                    if (!v.envioEstado) unmarkedFbm.push({ lote, venta: v });
+                });
             });
-        });
+        }
 
-        root.innerHTML = `
-            <div class="view-head">
-                <div>
-                    <h2>Envíos</h2>
-                    <p class="muted"><strong>FBA</strong> = tú mandas stock a Amazon · <strong>FBM</strong> = tú mandas al cliente</p>
-                </div>
-                <div class="view-actions">
-                    <button type="button" class="btn ghost btn-sm" id="envios-toggle-done">
-                        ${local.showDone ? 'Ocultar enviados' : 'Ver enviados'}
-                    </button>
-                    <button type="button" class="btn ghost btn-sm" id="envios-disable">Apagar envíos</button>
-                </div>
-            </div>
-
+        const prepQueuesHtml = prepOn ? `
             <div class="envios-stats">
                 <div class="envios-stat">
                     <div class="envios-stat-n">${fbaPending.length}</div>
@@ -259,9 +487,38 @@ const EnviosView = (() => {
                     ${fbmDone.map(r => cardFbm(r, true)).join('')}
                 </div>
             ` : ''}
+        ` : `
+            <div class="card envios-off" style="margin-top:12px">
+                <p><strong>Colas de preparación apagadas.</strong></p>
+                <p class="muted small">La deuda de envío a FBA sigue activa arriba. Para ver pendientes FBA/FBM, activa Preparación de envíos en Ajustes.</p>
+                <button type="button" class="btn primary btn-sm" id="envios-goto-settings">Ir a Ajustes</button>
+            </div>
+        `;
+
+        root.innerHTML = `
+            <div class="view-head">
+                <div>
+                    <h2>Envíos</h2>
+                    <p class="muted"><strong>FBA</strong> = tú mandas stock a Amazon · <strong>FBM</strong> = tú mandas al cliente</p>
+                </div>
+                <div class="view-actions">
+                    ${prepOn ? `
+                        <button type="button" class="btn ghost btn-sm" id="envios-toggle-done">
+                            ${local.showDone ? 'Ocultar enviados' : 'Ver enviados'}
+                        </button>
+                        <button type="button" class="btn ghost btn-sm" id="envios-disable">Apagar preparación</button>
+                    ` : ''}
+                </div>
+            </div>
+            ${layFreightDebt()}
+            ${prepQueuesHtml}
         `;
 
         bind(root);
+        bindFreight(root);
+        document.getElementById('envios-goto-settings')?.addEventListener('click', () => {
+            window.App?.switchTab?.('settings');
+        });
     }
 
     function cardFba(row) {
@@ -320,8 +577,8 @@ const EnviosView = (() => {
         document.getElementById('envios-disable')?.addEventListener('click', async () => {
             const ok = await UI.confirm({
                 title: 'Apagar preparación de envíos',
-                message: 'Se oculta esta vista. Puedes volver a activarla en Ajustes.',
-                primaryLabel: 'Apagar',
+                message: 'Se ocultan las colas FBA/FBM. La deuda de envío a FBA sigue disponible aquí.',
+                primaryLabel: 'Apagar preparación',
             });
             if (!ok) return;
             window.State.settings.prepEnvioActivo = false;
@@ -329,8 +586,8 @@ const EnviosView = (() => {
             window.App?.refreshMarketplaceChrome?.();
             window.App?.refreshNavCounts?.();
             SettingsView.loadIntoForm?.();
-            UI.toast('Envíos apagado');
-            window.App?.switchTab?.('lotes');
+            UI.toast('Preparación de envíos apagada');
+            render();
         });
         root.querySelectorAll('[data-envios-adv-fba]').forEach(btn => {
             btn.addEventListener('click', () => advanceFba(btn.dataset.lote, btn.dataset.estado));
@@ -354,6 +611,17 @@ const EnviosView = (() => {
 
     function init() {}
 
-    return { render, init, pendingCount, isEnabled };
+    return {
+        render,
+        init,
+        pendingCount,
+        isEnabled,
+        canOpen,
+        readFreight,
+        addCharge,
+        addPayment,
+        removeEntry,
+        balance,
+    };
 })();
 window.EnviosView = EnviosView;

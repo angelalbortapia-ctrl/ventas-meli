@@ -24,9 +24,12 @@ const App = (() => {
 
     function switchTab(tab) {
         if (!TAB_LABELS[tab]) return;
-        // Envíos solo existe en Amazon con la función activa
-        if (tab === 'envios' && (!window.EnviosView || !window.EnviosView.isEnabled())) {
-            tab = 'settings';
+        // Envíos (deuda FBA + colas) solo en Amazon
+        if (tab === 'envios' && (!window.EnviosView || !window.EnviosView.canOpen?.())) {
+            if (window.State.marketplace !== 'amazon') {
+                applyMarketplaceView('amazon', { toast: false });
+            }
+            if (!window.EnviosView?.canOpen?.()) tab = 'settings';
         }
         if (['wishlist', 'keepa'].includes(tab) && window.State.marketplace !== 'amazon') {
             // Desde Meli/General: cambia a Amazon en vez de caer a Productos.
@@ -157,10 +160,12 @@ const App = (() => {
         if (!pill) return;
         const label = pill.querySelector('.tb-sync-label');
         let okHideTimer = 0;
+        let prevState = window.Sync?.getStatus?.()?.state || 'off';
 
         function paint() {
             const online = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
             const st = window.Sync?.getStatus?.() || { state: 'off' };
+            const nextState = st.state || 'off';
             pill.classList.remove('is-offline', 'is-error', 'is-syncing', 'is-ok', 'is-idle');
             if (!online) {
                 pill.hidden = false;
@@ -168,6 +173,7 @@ const App = (() => {
                 label.textContent = 'Sin conexión';
                 pill.title = 'Estás offline. Tus cambios se guardan localmente y suben al reconectar.';
                 clearTimeout(okHideTimer);
+                prevState = nextState;
                 return;
             }
             if (st.state === 'syncing') {
@@ -176,6 +182,7 @@ const App = (() => {
                 label.textContent = 'Sincronizando…';
                 pill.title = 'Subiendo cambios a Supabase.';
                 clearTimeout(okHideTimer);
+                prevState = nextState;
                 return;
             }
             if (st.state === 'error') {
@@ -184,6 +191,7 @@ const App = (() => {
                 label.textContent = 'Sync error';
                 pill.title = st.detail || 'Falla de sincronización. Click para abrir Ajustes.';
                 clearTimeout(okHideTimer);
+                prevState = nextState;
                 return;
             }
             if (st.state === 'synced') {
@@ -191,12 +199,17 @@ const App = (() => {
                 pill.classList.add('is-ok');
                 label.textContent = 'Sync OK';
                 pill.title = st.email ? `Sincronizado · ${st.email}` : 'Sincronizado.';
+                if (prevState === 'syncing') {
+                    UI.pulseRainbow?.();
+                }
                 clearTimeout(okHideTimer);
                 okHideTimer = setTimeout(() => { pill.hidden = true; }, 3000);
+                prevState = nextState;
                 return;
             }
             // Estados "sin cuenta / esperando login": ocultamos para no ensuciar.
             pill.hidden = true;
+            prevState = nextState;
         }
 
         pill.addEventListener('click', () => {
@@ -222,9 +235,9 @@ const App = (() => {
         const alerts = window.InsightsView?.alertCount?.() || 0;
 
         const items = [];
-        if (isAmazon && prepOn) {
+        if (isAmazon) {
             items.push({ id: 'envios', icon: 'envios', label: 'Envíos',
-                hint: 'FBA + FBM pendientes',
+                hint: prepOn ? 'FBA + FBM + deuda flete' : 'Deuda envío a FBA',
                 badge: pendingShip || null });
         }
         if (isAmazon) {
@@ -539,6 +552,7 @@ const App = (() => {
                     const uiFromBackup = (data.ui && typeof data.ui === 'object') ? { ...data.ui } : {};
                     delete uiFromBackup.keepaApiKey;
                     delete uiFromBackup.keepaCache;
+                    delete uiFromBackup.keepaLibrary;
                     window.State.ui = {
                         ...window.State.ui,
                         ...uiFromBackup,
@@ -569,6 +583,7 @@ const App = (() => {
                         const legacyUI = { ...data.ui };
                         delete legacyUI.keepaApiKey;
                         delete legacyUI.keepaCache;
+                        delete legacyUI.keepaLibrary;
                         window.State.ui = { ...window.State.ui, ...legacyUI, marketplace: legacyMp };
                         window.State.saveUI();
                     }
@@ -612,6 +627,7 @@ const App = (() => {
         // Credencial y caché efímero de Keepa nunca salen en respaldos exportables.
         delete backupUI.keepaApiKey;
         delete backupUI.keepaCache;
+        delete backupUI.keepaLibrary;
         return {
             version: 5,
             exportedAt: new Date().toISOString(),
@@ -645,9 +661,10 @@ const App = (() => {
             const stored = JSON.parse(raw);
             const ui = stored?.data?.ui;
             if (!ui || typeof ui !== 'object') return;
-            if (!('keepaApiKey' in ui) && !('keepaCache' in ui)) return;
+            if (!('keepaApiKey' in ui) && !('keepaCache' in ui) && !('keepaLibrary' in ui)) return;
             delete ui.keepaApiKey;
             delete ui.keepaCache;
+            delete ui.keepaLibrary;
             localStorage.setItem('vm.autoBackup', JSON.stringify(stored));
         } catch (err) {
             console.warn('[backup] no se pudo sanear Keepa', err);
@@ -1048,12 +1065,12 @@ const App = (() => {
         document.querySelectorAll('[data-mp-field]').forEach(el => {
             el.hidden = el.dataset.mpField !== mp;
         });
-        // Feature flags (p.ej. menú Envíos)
-        const prepOn = !isGeneral && mp === 'amazon' && window.State.settings?.prepEnvioActivo !== false;
+        // Envíos visible en Amazon (deuda FBA siempre; colas prep opcionales)
+        const enviosOn = !isGeneral && mp === 'amazon';
         document.querySelectorAll('[data-feature="prep-envio"]').forEach(el => {
-            el.hidden = !prepOn;
+            el.hidden = !enviosOn;
         });
-        if (!isGeneral && window.State.view === 'envios' && !prepOn) {
+        if (!isGeneral && window.State.view === 'envios' && !enviosOn) {
             switchTab('lotes');
         }
         if (!isGeneral && ['wishlist', 'keepa'].includes(window.State.view) && mp !== 'amazon') {

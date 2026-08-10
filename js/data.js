@@ -1240,11 +1240,18 @@ const Data = (() => {
     }
 
     function addVenta(lote, venta) {
+        const uds = Math.max(0, Math.floor(Number(venta.unidades) || 1));
+        const stock = Math.max(0, (Number(lote.unidades) || 0) - (Number(lote.vendidas) || 0));
+        if (uds > stock) {
+            throw new Error(stock > 0
+                ? `Solo hay ${stock} uds disponibles`
+                : 'Sin stock disponible');
+        }
         const v = normalizeVenta({
             id: newId(),
             fecha: venta.fecha || new Date().toISOString().slice(0, 10),
             precio: Number(venta.precio) || Number(lote.precio) || 0,
-            unidades: Number(venta.unidades) || 1,
+            unidades: uds || 1,
             notas: venta.notas || '',
             // Congela costo + fees al vender (restock / editar lote no reescribe P&L)
             costoUnitario: venta.costoUnitario != null
@@ -1539,14 +1546,19 @@ const Data = (() => {
             const existingIds = new Set((l.ventas || []).map(x => x.id));
             const existingSig = new Set((l.ventas || []).map(x => `${x.fecha}|${x.unidades}|${x.precio}`));
             const add = [];
+            let stockLeft = Math.max(0, (Number(l.unidades) || 0) - (Number(l.vendidas) || 0));
             rows.forEach(r => {
                 const sig = `${r.fecha}|${r.unidades}|${r.precio}`;
                 if (r.id && existingIds.has(r.id)) return;
                 if (existingSig.has(sig)) return;
+                let uds = Math.max(0, Math.floor(Number(r.unidades) || 1));
+                if (uds > stockLeft) uds = stockLeft;
+                if (uds <= 0) return;
+                stockLeft -= uds;
                 add.push(normalizeVenta({
                     id: r.id || newId(),
                     fecha: r.fecha || new Date().toISOString().slice(0, 10),
-                    unidades: Number(r.unidades) || 1,
+                    unidades: uds,
                     precio: Number(r.precio) || 0,
                     notas: r.notas || '',
                     costoUnitario: r.costoUnitario != null ? r.costoUnitario : (Number(l.costo) || 0),
