@@ -1110,25 +1110,24 @@ const Data = (() => {
     }
 
     /**
-     * Borra todas las ventas y restaura unidades al seed original (por SKU).
-     * En Amazon (sin seed) solo limpia ventas y mantiene unidades.
+     * Borra todas las ventas y pone vendidas en 0.
+     * Conserva unidades (restocks del usuario no se pisan con el seed).
+     * Si el estatus era «Sin stock» y quedan piezas, lo reactiva.
      */
     function clearVentasRestoreStock(lotes, mp = currentMarketplace()) {
-        const useSeed = mpMeta(mp).useSeed;
-        const bySku = useSeed ? Object.fromEntries(SEED.map(s => [s.sku, s])) : {};
+        void mp;
         let ventasCleared = 0;
         const next = (lotes || []).map(l => {
-            const seed = bySku[l.sku];
             const hadVentas = (Array.isArray(l.ventas) && l.ventas.length) || (Number(l.vendidas) || 0) > 0;
             if (hadVentas) ventasCleared += Array.isArray(l.ventas) ? l.ventas.length : 1;
-            const estatus = seed
-                ? (seed.estatus || '✅ Activa / En Venta')
-                : (String(l.estatus || '').toLowerCase().includes('sin stock')
-                    ? '✅ Activa / En Venta'
-                    : l.estatus);
+            const unidades = Number(l.unidades) || 0;
+            let estatus = l.estatus;
+            if (unidades > 0 && String(estatus || '').toLowerCase().includes('sin stock')) {
+                estatus = '✅ Activa / En Venta';
+            }
             return normalize({
                 ...l,
-                unidades: seed ? seed.unidades : (Number(l.unidades) || 0),
+                unidades,
                 ventas: [],
                 vendidas: 0,
                 estatus,

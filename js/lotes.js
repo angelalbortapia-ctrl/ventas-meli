@@ -193,7 +193,15 @@ const LotesView = (() => {
 
     // ---- Shell (una vez) ------------------------------------------------
     function renderShell() {
-        document.getElementById('lotes-canvas').innerHTML = `
+        const view = document.getElementById('view-lotes');
+        if (!view) return;
+        // App vacía #view-lotes al cambiar MP: hay que recrear el wrapper.
+        let canvas = document.getElementById('lotes-canvas');
+        if (!canvas) {
+            view.innerHTML = '<div id="lotes-canvas"></div>';
+            canvas = document.getElementById('lotes-canvas');
+        }
+        canvas.innerHTML = `
             <div class="view-head">
                 <div>
                     <h2>Productos</h2>
@@ -272,9 +280,18 @@ const LotesView = (() => {
         });
     }
 
+    /** Llamar cuando App vacía #view-lotes (cambio de marketplace). */
+    function invalidate() {
+        shellMounted = false;
+    }
+
     // ---- Render principal ----------------------------------------------
     function render() {
-        if (!shellMounted) renderShell();
+        // Si App vació el DOM o el canvas desapareció, remonta el shell.
+        if (!shellMounted || !document.getElementById('lotes-canvas')) {
+            shellMounted = false;
+            renderShell();
+        }
         syncToolbar();
         renderContent();
     }
@@ -2138,13 +2155,8 @@ const LotesView = (() => {
 
         if (uds <= 0 || precio <= 0) { UI.toast('Datos incompletos', 'error'); return; }
         if (uds > stock) {
-            const ok = await UI.confirm({
-                title: 'Stock insuficiente',
-                message: `Registraste <strong>${uds}</strong> uds de <strong>${esc(l.variante || l.producto)}</strong> pero solo hay <strong>${stock}</strong> disponibles. ¿Continuar de todos modos?`,
-                primaryLabel: 'Continuar',
-                danger: true,
-            });
-            if (!ok) return;
+            UI.toast(`Solo hay ${stock} uds disponibles. Ajusta unidades del lote o baja la venta.`, 'error');
+            return;
         }
 
         const venta = Data.addVenta(l, { fecha, precio, unidades: uds, notas, envioEstado });
@@ -2437,13 +2449,13 @@ const LotesView = (() => {
         if (!lote) {
             local.selected = null;
             local.selectedVariant = null;
-            if (shellMounted) renderContent();
+            render();
             UI.toast?.('Producto no encontrado en este catálogo', 'error');
             return false;
         }
         local.selected = familyKey(lote);
         local.selectedVariant = lote.id;
-        if (shellMounted) renderContent();
+        render();
         return true;
     }
 
@@ -2537,6 +2549,6 @@ const LotesView = (() => {
         render();
     }
 
-    return { init, render, openModal, selectAndGo, createFromWishlist };
+    return { init, render, invalidate, openModal, selectAndGo, createFromWishlist };
 })();
 window.LotesView = LotesView;

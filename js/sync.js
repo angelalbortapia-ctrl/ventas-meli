@@ -50,31 +50,40 @@ const Sync = (() => {
         return (h >>> 0).toString(36);
     }
 
+    // Selectores (no nodos): tras re-render el DOM se recrea y las refs mueren.
+    const SCROLL_SELECTORS = [
+        '.gx-body',
+        '.dash-body',
+        '#view-lotes .lotes-list',
+        '#view-lotes',
+        '.content',
+    ];
+
     function captureScroll() {
-        const roots = [
-            document.querySelector('.gx-body'),
-            document.querySelector('.dash-body'),
-            document.querySelector('#view-lotes .lotes-list'),
-            document.querySelector('#view-lotes'),
-            document.querySelector('.content'),
-            document.scrollingElement,
-        ].filter(Boolean);
+        const snap = [];
         const seen = new Set();
-        return roots.reduce((acc, el) => {
-            if (seen.has(el) || !el.scrollTop) return acc;
+        SCROLL_SELECTORS.forEach(sel => {
+            const el = document.querySelector(sel);
+            if (!el || seen.has(el) || !el.scrollTop) return;
             seen.add(el);
-            acc.push({ el, top: el.scrollTop, left: el.scrollLeft || 0 });
-            return acc;
-        }, []);
+            snap.push({ sel, top: el.scrollTop, left: el.scrollLeft || 0 });
+        });
+        const root = document.scrollingElement;
+        if (root && root.scrollTop) {
+            snap.push({ sel: ':root', top: root.scrollTop, left: root.scrollLeft || 0 });
+        }
+        return snap;
     }
 
     function restoreScroll(snap) {
         if (!Array.isArray(snap) || !snap.length) return;
-        // Doble rAF: deja que el re-render pinte antes de restaurar.
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-                snap.forEach(({ el, top, left }) => {
-                    if (!el || !el.isConnected) return;
+                snap.forEach(({ sel, top, left }) => {
+                    const el = sel === ':root'
+                        ? document.scrollingElement
+                        : document.querySelector(sel);
+                    if (!el) return;
                     el.scrollTop = top;
                     el.scrollLeft = left;
                 });

@@ -29,7 +29,11 @@ const App = (() => {
             tab = 'settings';
         }
         if (['wishlist', 'keepa'].includes(tab) && window.State.marketplace !== 'amazon') {
-            tab = 'lotes';
+            // Desde Meli/General: cambia a Amazon en vez de caer a Productos.
+            applyMarketplaceView('amazon', { toast: false });
+            if (window.State.marketplace !== 'amazon') {
+                tab = 'lotes';
+            }
         }
         // General es solo resumen: al ir a catálogo, vuelve al último MP real.
         // Ajustes (Sync) sí. Caja está oculta en el menú General; si se abre, su vista pide catálogo.
@@ -885,8 +889,8 @@ const App = (() => {
     }
 
     /**
-     * Borra ventas de AMBOS marketplaces (Meli + Amazon), restaura piezas del seed
-     * (donde aplica), purga las bolsitas ligadas a esas ventas y sube a Sync.
+     * Borra ventas de AMBOS marketplaces (Meli + Amazon), conserva unidades
+     * (restocks intactos), purga bolsitas ligadas a esas ventas y sube a Sync.
      * Operar sobre un solo MP era un bug: el hermano conservaba ventas y el
      * bundle dual las reintroducía.
      */
@@ -894,7 +898,7 @@ const App = (() => {
         if (confirm) {
             const ok = await UI.confirm({
                 title: 'Borrar todas las ventas',
-                message: 'Se eliminarán <strong>todas las ventas registradas en ambos marketplaces</strong> (Mercado Libre y Amazon), el stock volverá a las piezas originales del catálogo y las bolsitas de capital ligadas a esas ventas se limpiarán. Si Sync está activo, se subirá el cambio a Supabase.',
+                message: 'Se eliminarán <strong>todas las ventas registradas en ambos marketplaces</strong> (Mercado Libre y Amazon). Las <strong>unidades del lote se conservan</strong>; solo se ponen vendidas en 0 y se limpian las bolsitas ligadas a esas ventas. Si Sync está activo, se subirá el cambio a Supabase.',
                 primaryLabel: 'Borrar en ambos MPs',
                 danger: true,
             });
@@ -1114,14 +1118,14 @@ const App = (() => {
         }
         refreshMarketplaceChrome();
         SettingsView.loadIntoForm();
-        // Invalida el HTML de vistas ocultas para que no muestren catálogos del
-        // marketplace anterior si algo (snapshot, preview, hidden overlay)
-        // inspecciona el DOM antes de que el usuario navegue a ellas.
+        // Invalida vistas ocultas: vacía el DOM y avisa a LotesView para que
+        // remonte su shell (si no, shellMounted=true escribe en nodos null).
         ['view-lotes', 'view-envios', 'view-wishlist', 'view-keepa', 'view-insights', 'view-caja']
             .forEach(id => {
                 const el = document.getElementById(id);
                 if (el && el.hidden) el.innerHTML = '';
             });
+        window.LotesView?.invalidate?.();
         if (window.State.view === 'dashboard') DashboardView.render();
         else if (window.State.view === 'insights') InsightsView.render();
         else if (window.State.view === 'lotes') LotesView.render();

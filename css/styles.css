@@ -306,9 +306,9 @@ body[data-mp-view="general"] {
     --gx-teal-soft: var(--gx-accent-soft);
     --gx-meli: #3483fa;
     --gx-amz: #ff9900;
-    --gx-ok: #34a853;
-    --gx-warn: #d68f2a;
-    --gx-bad: #c93e3e;
+    --gx-ok: var(--success);
+    --gx-warn: var(--warning);
+    --gx-bad: var(--danger);
     --bg: #f5f5f5;
     --surface: #ffffff;
     --surface-alt: #eeeef0;

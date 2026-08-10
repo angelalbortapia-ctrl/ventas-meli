@@ -396,8 +396,8 @@ const WishlistView = (() => {
                     ${item.asin ? `<div class="wl-keepa" data-keepa-asin="${esc(item.asin)}" data-keepa-compact="1"></div>` : ''}
                 </div>
                 <div class="wl-card-actions">
-                    ${item.linkCompra ? `<a class="btn ghost btn-sm" href="${esc(item.linkCompra)}" target="_blank" rel="noopener">Compra</a>` : ''}
-                    ${item.linkAmazon ? `<a class="btn ghost btn-sm" href="${esc(item.linkAmazon)}" target="_blank" rel="noopener">Amazon</a>` : ''}
+                    ${safeUrl(item.linkCompra) ? `<a class="btn ghost btn-sm" href="${esc(safeUrl(item.linkCompra))}" target="_blank" rel="noopener">Compra</a>` : ''}
+                    ${safeUrl(item.linkAmazon) ? `<a class="btn ghost btn-sm" href="${esc(safeUrl(item.linkAmazon))}" target="_blank" rel="noopener">Amazon</a>` : ''}
                     ${primary}
                     <details class="wl-more">
                         <summary class="btn ghost btn-sm" aria-label="Más">⋯</summary>
