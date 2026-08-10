@@ -16,11 +16,70 @@ const Sync = (() => {
     let localDirtyAt = 0;       // Date.now() de último save local pendiente de confirmar en nube
     let conflictBusy = false;   // evita diálogos apilados
     let holdRemoteUntil = 0;    // tras reset local forzado, ignora pull/realtime un rato
+    let lastAppliedFingerprint = ''; // contenido real aplicado/pushed (ignora updated_at)
     let status = { state: 'off', detail: 'Sin configurar', email: '' };
     const listeners = new Set();
 
     function markLocalDirty() {
         localDirtyAt = Date.now();
+    }
+
+    /** Hash estable del payload de sync, sin marcas volátiles (packedAt / updated_at). */
+    function contentFingerprint(row) {
+        if (!row || !Array.isArray(row.lotes)) return '';
+        const raw = (row.settings && typeof row.settings === 'object') ? row.settings : {};
+        const amazon = raw._amazon && typeof raw._amazon === 'object' ? raw._amazon : null;
+        const payload = {
+            meli: row.lotes,
+            amazonLotes: amazon && Array.isArray(amazon.lotes) ? amazon.lotes : [],
+            amazonSettings: amazon ? stripSyncMeta(amazon.settings) : {},
+            meliSettings: stripSyncMeta(raw),
+            ui: syncableUI(raw._ui),
+            marketplace: raw._marketplace || 'meli',
+        };
+        try {
+            return hashString(JSON.stringify(payload));
+        } catch {
+            return '';
+        }
+    }
+
+    function hashString(str) {
+        let h = 5381;
+        for (let i = 0; i < str.length; i++) h = ((h << 5) + h) ^ str.charCodeAt(i);
+        return (h >>> 0).toString(36);
+    }
+
+    function captureScroll() {
+        const roots = [
+            document.querySelector('.gx-body'),
+            document.querySelector('.dash-body'),
+            document.querySelector('#view-lotes .lotes-list'),
+            document.querySelector('#view-lotes'),
+            document.querySelector('.content'),
+            document.scrollingElement,
+        ].filter(Boolean);
+        const seen = new Set();
+        return roots.reduce((acc, el) => {
+            if (seen.has(el) || !el.scrollTop) return acc;
+            seen.add(el);
+            acc.push({ el, top: el.scrollTop, left: el.scrollLeft || 0 });
+            return acc;
+        }, []);
+    }
+
+    function restoreScroll(snap) {
+        if (!Array.isArray(snap) || !snap.length) return;
+        // Doble rAF: deja que el re-render pinte antes de restaurar.
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                snap.forEach(({ el, top, left }) => {
+                    if (!el || !el.isConnected) return;
+                    el.scrollTop = top;
+                    el.scrollLeft = left;
+                });
+            });
+        });
     }
 
     function loadConfig() {
@@ -303,8 +362,15 @@ const Sync = (() => {
 
     async function handleIncomingRemote(row, { fromRealtime = false } = {}) {
         if (!row || pushing || applyingRemote) return;
+        // Eco del propio push / pull idéntico: mismo contenido → silencio, sin re-render.
+        const fp = contentFingerprint(row);
+        if (fp && fp === lastAppliedFingerprint) {
+            lastRemoteAt = row.updated_at || lastRemoteAt;
+            return;
+        }
         if (Date.now() < holdRemoteUntil) {
             // Preferir local: re-subir en vez de reaplicar ventas viejas
+            // (solo si el remoto sí trae un diff real).
             await pushNow({ force: true }).catch(() => {});
             return;
         }
@@ -322,9 +388,11 @@ const Sync = (() => {
                 return;
             }
         }
-        applyRemote(row, { silent: fromRealtime });
-        localDirtyAt = 0;
-        if (fromRealtime && window.UI) UI.toast('☁️ Actualizado desde otro dispositivo');
+        const applied = applyRemote(row, {
+            silent: !fromRealtime,
+            toastRealtime: fromRealtime,
+        });
+        if (applied) localDirtyAt = 0;
     }
 
     async function pushNow({ force = false } = {}) {
@@ -386,6 +454,9 @@ const Sync = (() => {
         }
         lastRemoteAt = updated_at;
         localDirtyAt = 0;
+        lastAppliedFingerprint = contentFingerprint({ lotes: packed.lotes, settings: packed.settings });
+        // Evita que el eco realtime del propio upsert re-aplique y resetee el scroll.
+        holdRemote(2500);
         const counts = remoteCatalogCounts({ lotes: packed.lotes, settings: packed.settings });
         setStatus({
             state: 'synced',
@@ -586,13 +657,21 @@ const Sync = (() => {
         };
     }
 
-    function applyRemote(row, { silent } = {}) {
-        if (!row || !Array.isArray(row.lotes)) return;
+    function applyRemote(row, { silent = false, toastRealtime = false } = {}) {
+        if (!row || !Array.isArray(row.lotes)) return false;
+
+        const fp = contentFingerprint(row);
+        if (fp && fp === lastAppliedFingerprint) {
+            lastRemoteAt = row.updated_at || lastRemoteAt;
+            return false;
+        }
+
         applyingRemote = true;
         window.__skipBackupDirty = true;
         window.__skipSync = true;
         let healNeeded = false;
         const protectedMsg = [];
+        const scrollSnap = captureScroll();
         try {
             const rawSettings = (row.settings && typeof row.settings === 'object') ? row.settings : {};
             const marketplace = rawSettings._marketplace === 'amazon' ? 'amazon' : 'meli';
@@ -663,6 +742,15 @@ const Sync = (() => {
             window.State.settings = Data.loadSettings(marketplace);
 
             lastRemoteAt = row.updated_at || new Date().toISOString();
+            lastAppliedFingerprint = fp || contentFingerprint({
+                lotes: meliGuard.lotes,
+                settings: {
+                    ...stripSyncMeta(meliGuard.settings),
+                    _amazon: { lotes: amzGuard.lotes, settings: amzGuard.settings },
+                    _ui: remoteUI,
+                    _marketplace: marketplace,
+                },
+            });
             window.State.notify();
             if (window.App?.refreshMarketplaceChrome) App.refreshMarketplaceChrome();
             if (window.SettingsView?.loadIntoForm) SettingsView.loadIntoForm();
@@ -674,6 +762,7 @@ const Sync = (() => {
             if (window.State.view === 'keepa' && window.KeepaView?.render) KeepaView.render();
             if (window.State.view === 'caja' && window.CajaView?.render) CajaView.render();
             if (window.App?.refreshNavCounts) App.refreshNavCounts();
+            restoreScroll(scrollSnap);
 
             const counts = {
                 meli: Data.loadLotes('meli').length,
@@ -686,7 +775,9 @@ const Sync = (() => {
                     : `Desde nube · Meli ${counts.meli} · Amazon ${counts.amazon}`,
                 email: status.email,
             });
-            if (!silent && window.UI) {
+            if (toastRealtime && window.UI) {
+                UI.toast('☁️ Actualizado desde otro dispositivo');
+            } else if (!silent && window.UI) {
                 UI.toast(`☁️ Nube aplicada · Meli ${counts.meli} · Amazon ${counts.amazon}`);
             }
             if (healNeeded && window.UI) {
@@ -704,6 +795,7 @@ const Sync = (() => {
                 pushNow({ force: true }).catch(err => console.warn('[sync] heal push', err));
             }, 900);
         }
+        return true;
     }
 
     async function init() {
