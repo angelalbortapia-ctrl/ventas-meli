@@ -98,10 +98,14 @@ const DashboardView = (() => {
                         <h2 class="dash-section-title">Top 3 · utilidad <span class="dash-mp-tag">${esc(mpLabel)}</span></h2>
                         ${layRankingTop3(ctx)}
                     </section>
+                    <section class="dash-section" id="dash-asignacion">
+                        <h2 class="dash-section-title">Asignación <span class="dash-mp-tag">${esc(mpLabel)}</span></h2>
+                        ${layAsignacion(ctx)}
+                    </section>
                     <div class="dash-hint-general">
-                        <p class="muted small">Caja, Portafolio, Bolsitas y ranking completo se movieron a
-                            <button type="button" class="dash-link-inline" data-dash-goto-mp="general">General</button>
-                            para consolidar Meli + Amazon en un solo lugar.</p>
+                        <p class="muted small">Estas bolsitas son de <strong>${esc(mpLabel)}</strong> y alimentan el consolidado de
+                            <button type="button" class="dash-link-inline" data-dash-goto-mp="general">General</button>.
+                            Caja, Portafolio y ranking completo también viven ahí.</p>
                     </div>
                 </div>
             </div>
@@ -242,7 +246,8 @@ const DashboardView = (() => {
                                     ${layPortafolio(ctx)}
                                 </div>
                                 <div>
-                                    <h3 class="gx-fin-h">Bolsitas (ambos catálogos)</h3>
+                                    <h3 class="gx-fin-h">Bolsitas (consolidado Meli + Amazon)</h3>
+                                    <p class="muted small" style="margin:0 0 10px">Suma de lo que repartes en cada marketplace. Para usar o ajustar %, abre Meli o Amazon.</p>
                                     ${layAsignacionDualReadonly()}
                                 </div>
                                 <div>
@@ -1285,7 +1290,7 @@ const DashboardView = (() => {
                 <div class="dash-alloc-head">
                     <div>
                         <h3>${esc(label)}</h3>
-                        <p class="muted small">Solo lectura · gestiona en el catálogo</p>
+                        <p class="muted small">Solo lectura · edita en Inicio de este marketplace</p>
                     </div>
                     <button type="button" class="dash-chip-btn" data-dash-goto-mp="${mp}">Abrir ${esc(shortBtn)}</button>
                 </div>
