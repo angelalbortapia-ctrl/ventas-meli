@@ -12,43 +12,70 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=174">
+    <link rel="stylesheet" href="css/styles.css?v=240">
 </head>
 <body>
 
 <div class="nav-overlay" id="nav-overlay" hidden></div>
 
 <!-- ==================== SIDEBAR ==================== -->
-<aside class="sidebar" id="sidebar">
-    <div class="sb-brand">
-        <span class="sb-brand-dot"></span>
-        <div class="sb-brand-text">
-            <div class="name">Ventas Meli</div>
-            <div class="sub">Catálogo Mercado Libre</div>
-        </div>
+<aside class="sidebar is-fx" id="sidebar">
+    <div class="sb-fx-stage" aria-hidden="true">
+        <span class="sb-fx-wash"></span>
+        <span class="sb-fx-orb sb-fx-orb-a"></span>
+        <span class="sb-fx-orb sb-fx-orb-b"></span>
     </div>
-
-    <div class="sb-section">
-        <h5>Marketplace</h5>
+    <div class="sb-head">
+        <div class="sb-brand">
+            <span class="sb-brand-dot" aria-hidden="true"></span>
+            <div class="sb-brand-text">
+                <div class="name">Ventas Meli</div>
+                <div class="sub">Catálogo MX</div>
+            </div>
+        </div>
+        <span class="sb-brand-mark" aria-hidden="true"></span>
         <div class="sb-mp" role="tablist" aria-label="Marketplace">
-            <button type="button" class="sb-mp-btn active" data-marketplace="meli" role="tab" aria-selected="true">Mercado Libre</button>
+            <button type="button" class="sb-mp-btn active" data-marketplace="meli" role="tab" aria-selected="true">Meli</button>
             <button type="button" class="sb-mp-btn" data-marketplace="amazon" role="tab" aria-selected="false">Amazon</button>
             <button type="button" class="sb-mp-btn" data-marketplace="general" role="tab" aria-selected="false">General</button>
         </div>
-        <p class="sb-mp-hint muted small">General = pulso del día. Productos viven en cada catálogo.</p>
     </div>
 
     <div class="sb-section sb-general-panel" data-show-on-general hidden>
-        <h5>Navegación</h5>
-        <nav class="sb-gx-nav" aria-label="Secciones General">
-            <button type="button" class="sb-gx-link" data-gx-jump="gx-pulso">Hoy</button>
-            <button type="button" class="sb-gx-link" data-gx-jump="gx-checklist">Checklist</button>
-            <button type="button" class="sb-gx-link" data-gx-jump="gx-acciones">Agenda</button>
-            <button type="button" class="sb-gx-link" data-gx-jump="gx-invmap">Sano vs flojo</button>
-            <button type="button" class="sb-gx-link" data-gx-jump="gx-metas">Metas</button>
-            <button type="button" class="sb-gx-link" data-gx-jump="gx-canales">Más</button>
-            <button type="button" class="sb-gx-link" data-gx-jump="gx-progreso">Progreso</button>
-            <button type="button" class="sb-gx-link" data-gx-jump="gx-finanzas">Finanzas</button>
+        <h5>Vistas</h5>
+        <nav class="sb-nav sb-gx-nav" aria-label="Secciones General">
+            <button type="button" class="sb-item" data-gx-jump="gx-pulso">
+                <span class="sb-icon" data-icon="dashboard"></span>
+                <span>Hoy</span>
+            </button>
+            <button type="button" class="sb-item" data-gx-jump="gx-checklist">
+                <span class="sb-icon" data-icon="checklist"></span>
+                <span>Checklist</span>
+            </button>
+            <button type="button" class="sb-item" data-gx-jump="gx-acciones">
+                <span class="sb-icon" data-icon="agenda"></span>
+                <span>Agenda</span>
+            </button>
+            <button type="button" class="sb-item" data-gx-jump="gx-invmap">
+                <span class="sb-icon" data-icon="insights"></span>
+                <span>Sano vs flojo</span>
+            </button>
+            <button type="button" class="sb-item" data-gx-jump="gx-metas">
+                <span class="sb-icon" data-icon="metas"></span>
+                <span>Metas</span>
+            </button>
+            <button type="button" class="sb-item" data-gx-jump="gx-canales">
+                <span class="sb-icon" data-icon="more"></span>
+                <span>Más</span>
+            </button>
+            <button type="button" class="sb-item" data-gx-jump="gx-progreso">
+                <span class="sb-icon" data-icon="keepa"></span>
+                <span>Progreso</span>
+            </button>
+            <button type="button" class="sb-item" data-gx-jump="gx-finanzas">
+                <span class="sb-icon" data-icon="caja"></span>
+                <span>Finanzas</span>
+            </button>
         </nav>
     </div>
 
@@ -102,7 +129,7 @@
         </nav>
     </div>
 
-    <div class="sb-section" data-hide-on-general>
+    <div class="sb-section">
         <h5>Datos</h5>
         <nav class="sb-nav">
             <button class="sb-item" id="btn-import">
@@ -123,8 +150,10 @@
     <div class="sb-spacer"></div>
 
     <div class="sb-foot">
-        <span class="dot"></span>
-        <span>Guardado localmente</span>
+        <span class="sb-foot-status">
+            <span class="dot" aria-hidden="true"></span>
+            <span>Guardado en este dispositivo</span>
+        </span>
     </div>
 
     <input type="file" id="file-import" accept=".xlsx,.xls" hidden>
@@ -520,26 +549,26 @@
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/calc.js?v=23"></script>
-<script src="js/data.js?v=55"></script>
+<script src="js/calc.js?v=24"></script>
+<script src="js/data.js?v=57"></script>
 <script src="js/excel.js?v=8"></script>
-<script src="js/icons.js?v=1"></script>
+<script src="js/icons.js?v=2"></script>
 <script src="js/ui.js?v=9"></script>
 <script src="js/freight.js?v=1"></script>
 <script src="js/alloc.js?v=1"></script>
-<script src="js/keepa.js?v=18"></script>
-<script src="js/keepa-chart.js?v=4"></script>
-<script src="js/keepa-view.js?v=17"></script>
+<script src="js/keepa.js?v=22"></script>
+<script src="js/keepa-chart.js?v=13"></script>
+<script src="js/keepa-view.js?v=27"></script>
 <script src="js/palette.js?v=13"></script>
-<script src="js/insights.js?v=12"></script>
-<script src="js/lotes.js?v=81"></script>
+<script src="js/insights.js?v=14"></script>
+<script src="js/lotes.js?v=89"></script>
 <script src="js/envios.js?v=12"></script>
 <script src="js/wishlist.js?v=12"></script>
-<script src="js/dashboard.js?v=86"></script>
+<script src="js/dashboard.js?v=114"></script>
 <script src="js/caja.js?v=15"></script>
 <script src="js/sync.js?v=21"></script>
 <script src="js/settings.js?v=23"></script>
-<script src="js/app.js?v=68"></script>
+<script src="js/app.js?v=74"></script>
 
 </body>
 </html>

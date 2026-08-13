@@ -3,6 +3,7 @@
    ========================================================================== */
 
 const KeepaView = (() => {
+    const GRAPH_HEIGHT = 520;
     const GRAPH_DEFAULTS = {
         range: 90,
         amazon: true,
@@ -15,7 +16,7 @@ const KeepaView = (() => {
         ld: false,
         wd: false,
         yzoom: false,
-        height: 380,
+        height: GRAPH_HEIGHT,
     };
 
     const GRAPH_LINES = [
@@ -54,7 +55,17 @@ const KeepaView = (() => {
         graphUrl: '',
         graphKey: '',
         graph: { ...GRAPH_DEFAULTS },
-        finder: [],
+        graphView: 'compare', /* official | ours | compare */
+        finder: {
+            asins: [],
+            cards: {},
+            page: 0,
+            pageSize: 12,
+            totalResults: null,
+            searched: false,
+            selection: null,
+        },
+        libQuery: '',
         seller: null,
         deals: [],
         researchSeq: 0,
@@ -69,21 +80,258 @@ const KeepaView = (() => {
 
     function loadGraphPrefs() {
         const saved = window.State?.ui?.keepaGraph;
-        if (!saved || typeof saved !== 'object') return;
-        const merged = { ...GRAPH_DEFAULTS, ...saved };
-        if (GRAPH_LINES.some(([key]) => merged[key])) {
-            local.graph = merged;
-            return;
+        if (saved && typeof saved === 'object') {
+            const merged = { ...GRAPH_DEFAULTS, ...saved, height: GRAPH_HEIGHT };
+            if (GRAPH_LINES.some(([key]) => merged[key])) {
+                local.graph = merged;
+            } else {
+                // Sin ninguna serie la gráfica saldría vacía: volvemos al set por defecto.
+                local.graph = { ...GRAPH_DEFAULTS };
+                saveGraphPrefs();
+            }
         }
-        // Sin ninguna serie la gráfica saldría vacía: volvemos al set por defecto.
-        local.graph = { ...GRAPH_DEFAULTS };
-        saveGraphPrefs();
+        const view = window.State?.ui?.keepaGraphView;
+        if (view === 'official' || view === 'ours' || view === 'compare') {
+            local.graphView = view;
+        }
     }
 
     function saveGraphPrefs() {
         if (!window.State?.ui) return;
         window.State.ui.keepaGraph = { ...local.graph };
+        window.State.ui.keepaGraphView = local.graphView;
         window.State.save?.();
+    }
+
+    function rangeLabel(days) {
+        const n = Number(days) || 90;
+        const hit = GRAPH_RANGES.find(([v]) => v === n)
+            || [[3650, 'Máx']].find(([v]) => v === n);
+        return hit ? hit[1] : `${n}d`;
+    }
+
+    function bbPointsInRange(data, rangeDays) {
+        const pts = data?.history?.bb?.points;
+        if (!Array.isArray(pts) || !pts.length) return [];
+        const days = Math.max(1, Number(rangeDays) || 90);
+        const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+        return pts.filter(p => p?.t >= cutoff && Number.isFinite(p.v));
+    }
+
+    function bbExtremaInRange(data, rangeDays) {
+        const inRange = bbPointsInRange(data, rangeDays);
+        if (!inRange.length) return null;
+        let min = inRange[0];
+        let max = inRange[0];
+        inRange.forEach(p => {
+            if (p.v < min.v) min = p;
+            if (p.v > max.v) max = p;
+        });
+        return { min: min.v, max: max.v, minT: min.t, maxT: max.t };
+    }
+
+    function pctTxt(v) {
+        if (v == null || !Number.isFinite(Number(v))) return '—';
+        const n = Number(v);
+        return `${n >= 0 ? '+' : ''}${(n * 100).toFixed(1)}%`;
+    }
+
+    function daysAgoLabel(ts) {
+        if (!Number.isFinite(ts)) return '—';
+        const days = Math.max(0, Math.round((Date.now() - ts) / 86400000));
+        if (days <= 0) return 'hoy';
+        if (days === 1) return 'hace 1 día';
+        return `hace ${days} días`;
+    }
+
+    function linkedLoteFor(data) {
+        return window.KeepaChart?.linkedLote?.(data?.asin)
+            || (window.State?.lotes || []).find(l =>
+                String(l.asin || '').trim().toUpperCase() === String(data?.asin || '').trim().toUpperCase()
+            )
+            || null;
+    }
+
+    function buildOfficialInsights(data) {
+        const range = Number(local.graph.range) || 90;
+        const bb = data?.buyBox ?? data?.marketPrice ?? data?.currentPrice ?? null;
+        const avg90 = data?.avg90 ?? null;
+        const vsAvg = (bb != null && avg90 > 0) ? (bb - avg90) / avg90 : (data?.vs90 ?? null);
+        const extrema = bbExtremaInRange(data, range);
+        const lookbackPts = bbPointsInRange(data, 90);
+
+        let daysUnder = 0;
+        if (avg90 > 0 && lookbackPts.length) {
+            const daySet = new Set();
+            lookbackPts.forEach(p => {
+                if (p.v < avg90 * 0.995) daySet.add(new Date(p.t).toDateString());
+            });
+            daysUnder = daySet.size;
+        }
+
+        const lote = linkedLoteFor(data);
+        const overlays = window.KeepaChart?.overlaysFromLote?.(lote) || {};
+        const breakEven = overlays.breakEven ?? null;
+        const costo = Number(lote?.costo) || null;
+        const tuPrecio = Number(lote?.precio) || null;
+        let utilBb = null;
+        let margenBb = null;
+        let roiBb = null;
+        if (lote && bb != null && window.Calc?.utilidadAtPrice) {
+            try {
+                const u = Calc.utilidadAtPrice(lote, bb, window.State?.settings);
+                utilBb = u.utilidad;
+                margenBb = u.margen;
+                if (costo > 0 && utilBb != null) roiBb = utilBb / costo;
+            } catch { /* ignore */ }
+        }
+
+        const gapBe = (bb != null && breakEven != null) ? bb - breakEven : null;
+        const gapTuPrecio = (bb != null && tuPrecio != null) ? tuPrecio - bb : null;
+
+        const bsr = data?.bsr ?? null;
+        const bsrVs90 = data?.bsrVs90 ?? null;
+        let demandaTone = 'neutral';
+        let demandaTxt = 'Sin señal clara de BSR';
+        if (bsrVs90 != null) {
+            // BSR: negativo = mejora (número más bajo)
+            if (bsrVs90 <= -0.05) {
+                demandaTone = 'good';
+                demandaTxt = 'Demanda mejora vs 90d';
+            } else if (bsrVs90 >= 0.08) {
+                demandaTone = 'bad';
+                demandaTxt = 'Demanda empeora vs 90d';
+            } else {
+                demandaTone = 'neutral';
+                demandaTxt = 'Demanda estable vs 90d';
+            }
+        }
+
+        return {
+            range,
+            bb,
+            avg90,
+            vsAvg,
+            extrema,
+            daysUnder,
+            minT: extrema?.minT ?? null,
+            tuPrecio,
+            gapTuPrecio,
+            gapBe,
+            utilBb,
+            margenBb,
+            roiBb,
+            hasLote: Boolean(lote),
+            bsr,
+            bsrVs90,
+            monthlySold: data?.monthlySold ?? null,
+            demandaTone,
+            demandaTxt,
+        };
+    }
+
+    function indCell(label, value, hint = '') {
+        return `
+            <div class="keepa-ind-cell">
+                <span class="keepa-ind-label">${esc(label)}</span>
+                <strong class="keepa-ind-value">${value}</strong>
+                ${hint ? `<span class="keepa-ind-hint">${esc(hint)}</span>` : ''}
+            </div>`;
+    }
+
+    function officialInsightsHtml(data) {
+        const s = buildOfficialInsights(data);
+
+        return `
+            <div class="keepa-official-insights" id="keepa-official-insights">
+                <section class="keepa-ind-block">
+                    <h4>Snapshot · ${esc(rangeLabel(s.range))}</h4>
+                    <div class="keepa-ind-grid">
+                        ${indCell('BB actual', esc(mxn(s.bb)))}
+                        ${indCell('Avg 90d', esc(mxn(s.avg90)))}
+                        ${indCell('Min', esc(mxn(s.extrema?.min)), s.minT != null ? daysAgoLabel(s.minT) : '')}
+                        ${indCell('Max', esc(mxn(s.extrema?.max)))}
+                        ${indCell('vs avg90', esc(pctTxt(s.vsAvg)))}
+                        ${indCell('Días bajo avg', s.avg90 != null ? esc(String(s.daysUnder)) : '—', 'en 90d')}
+                    </div>
+                </section>
+
+                <section class="keepa-ind-block">
+                    <h4>Tu operación vs mercado</h4>
+                    ${s.hasLote ? `
+                        <div class="keepa-ind-grid">
+                            ${indCell('Tu precio', esc(mxn(s.tuPrecio)), s.gapTuPrecio != null
+                                ? (s.gapTuPrecio > 0 ? `${mxn(s.gapTuPrecio)} sobre BB` : `${mxn(Math.abs(s.gapTuPrecio))} bajo BB`)
+                                : '')}
+                            ${indCell('vs break-even', s.gapBe == null ? '—' : esc(`${s.gapBe >= 0 ? '+' : ''}${mxn(s.gapBe)}`))}
+                            ${indCell('Utilidad @ BB', esc(mxn(s.utilBb)), s.margenBb != null ? pctTxt(s.margenBb) : '')}
+                            ${indCell('ROI @ BB', esc(pctTxt(s.roiBb)))}
+                        </div>` : `
+                        <p class="muted small keepa-ind-empty">Sin lote con este ASIN. Vincúlalo en Productos para ver margen y break-even.</p>`}
+                </section>
+
+                <section class="keepa-ind-block">
+                    <h4>Demanda</h4>
+                    <div class="keepa-ind-grid keepa-ind-grid-3">
+                        ${indCell('BSR', s.bsr == null ? '—' : esc(Number(s.bsr).toLocaleString('es-MX')))}
+                        ${indCell('BSR vs 90d', esc(pctTxt(s.bsrVs90)))}
+                        ${indCell('Ventas/mes', s.monthlySold == null ? '—' : esc(`${s.monthlySold}+`))}
+                    </div>
+                    <p class="keepa-ind-demand tone-${esc(s.demandaTone)}">${esc(s.demandaTxt)}</p>
+                </section>
+            </div>`;
+    }
+
+    function refreshOfficialInsights() {
+        const host = document.getElementById('keepa-official-insights');
+        if (host && local.research) {
+            const holder = document.createElement('div');
+            holder.innerHTML = officialInsightsHtml(local.research);
+            const next = holder.firstElementChild;
+            if (next) host.replaceWith(next);
+        }
+        const syncBtn = document.getElementById('keepa-dual-sync');
+        if (syncBtn) {
+            const apply = graphApplyState(local.asin);
+            syncBtn.disabled = apply.disabled;
+            syncBtn.textContent = apply.disabled && local.graphUrl
+                ? 'PNG sincronizado'
+                : (graphCache.has(graphKeyFor(local.asin, local.graph))
+                    ? 'Sincronizar PNG (caché)'
+                    : 'Sincronizar PNG · 1 token');
+        }
+    }
+
+    function dualChartsHtml(data) {
+        const view = local.graphView || 'compare';
+        const apply = graphApplyState(data.asin);
+        const syncLabel = apply.disabled && local.graphUrl
+            ? 'PNG sincronizado'
+            : (graphCache.has(graphKeyFor(data.asin, local.graph))
+                ? 'Sincronizar PNG (caché)'
+                : 'Sincronizar PNG · 1 token');
+        return `
+            <div class="keepa-dual" id="keepa-dual" data-view="${esc(view)}">
+                <div class="keepa-dual-toolbar">
+                    <div class="keepa-chip-group" role="group" aria-label="Vista de gráficas">
+                        <button type="button" class="keepa-chip${view === 'official' ? ' active' : ''}" data-kv-graph-view="official">Solo oficial</button>
+                        <button type="button" class="keepa-chip${view === 'ours' ? ' active' : ''}" data-kv-graph-view="ours">Solo nuestra</button>
+                        <button type="button" class="keepa-chip${view === 'compare' ? ' active' : ''}" data-kv-graph-view="compare">Oficial + nuestra</button>
+                    </div>
+                    <button type="button" class="btn primary sm" id="keepa-dual-sync" ${apply.disabled ? 'disabled' : ''}>${esc(syncLabel)}</button>
+                </div>
+                <div class="keepa-dual-grid">
+                    <div class="keepa-dual-official keepa-dual-col">
+                        <div class="keepa-dual-col-label">Oficial Keepa</div>
+                        ${graphHtml(data)}
+                        ${officialInsightsHtml(data)}
+                    </div>
+                    <div class="keepa-dual-ours keepa-dual-col">
+                        <div class="keepa-dual-col-label">Nuestra lectura</div>
+                        <div id="keepa-ix-host" class="keepa-ix-host keepa-ix-host-panel"></div>
+                    </div>
+                </div>
+            </div>`;
     }
 
     function graphKeyFor(asin, settings) {
@@ -215,65 +463,128 @@ const KeepaView = (() => {
         return renderResearch(configured);
     }
 
+    function vitrineTone(i) {
+        return `tone-${(i % 4) + 1}`;
+    }
+
+    function ageLabel(at) {
+        if (!at) return '';
+        const days = Math.max(0, Math.round((Date.now() - Number(at)) / 86400000));
+        if (days <= 0) return 'Hoy';
+        if (days === 1) return 'Hace 1 día';
+        if (days < 14) return `Hace ${days} días`;
+        if (days < 60) return `Hace ${Math.round(days / 7)} sem.`;
+        const months = Math.max(1, Math.round(days / 30));
+        return `Hace ${months} mes${months === 1 ? '' : 'es'}`;
+    }
+
+    /** Foto de Productos (familia/lote) por ASIN — prioriza lo subido en el catálogo. */
+    function catalogImageForAsin(asin) {
+        const code = String(asin || '').trim().toUpperCase();
+        if (!code) return '';
+        const lotes = window.State?.lotes || [];
+        const hit = lotes.find(l => String(l.asin || '').trim().toUpperCase() === code);
+        if (!hit) return '';
+        const fam = window.Data?.familyImage?.(lotes, hit.productId) || '';
+        const raw = hit.imagen || fam || '';
+        const s = String(raw || '').trim();
+        if (/^data:image\/(jpeg|jpg|png|webp);base64,/i.test(s)) return s;
+        if (/^https?:\/\//i.test(s)) return s;
+        return '';
+    }
+
+    /** Tarjeta vitrina (estilo Apple Store) — Biblioteca / Finder */
+    function vitrineCardHtml(row, opts = {}) {
+        const i = opts.index || 0;
+        const asin = row.asin || '';
+        const title = row.title || asin;
+        const price = row.buyBox ?? row.currentPrice ?? row.amazon ?? null;
+        const tag = row.signalLabel
+            || (row.bsr != null ? `BSR ${num(row.bsr)}` : 'Sin señal aún');
+        const priceLine = price == null
+            ? 'Precio al abrir'
+            : `${mxn(price)}${row.avg90 != null ? ` · avg90 ${mxn(row.avg90)}` : ''}`;
+        const img = catalogImageForAsin(asin)
+            || row.image
+            || window.Keepa?.readCache?.(asin)?.image
+            || '';
+        const media = img
+            ? `<img src="${esc(img)}" alt="" loading="lazy">`
+            : `<div class="keepa-vitrine-ph" aria-hidden="true"></div>`;
+        const primary = opts.mode === 'library'
+            ? `<button type="button" class="btn primary sm" data-kv-lib-open="${esc(asin)}">Abrir</button>
+               <button type="button" class="btn ghost sm" data-kv-lib-update="${esc(asin)}">Actualizar</button>
+               <button type="button" class="btn ghost sm" data-kv-lib-remove="${esc(asin)}" title="Quitar">✕</button>`
+            : `<button type="button" class="btn primary sm" data-kv-asin="${esc(asin)}">Investigar</button>
+               <button type="button" class="btn ghost sm" data-kv-wishlist="${esc(asin)}"
+                   data-kv-wish-title="${esc(row.title || '')}"
+                   data-kv-wish-price="${price != null ? esc(String(price)) : ''}">+ Wishlist</button>`;
+        const stale = opts.mode === 'library' && row.at && (Date.now() - row.at > 7 * 86400000);
+        return `
+            <article class="keepa-vitrine-card ${vitrineTone(i)}${stale ? ' is-stale' : ''}${opts.bare ? ' is-bare' : ''}">
+                <div class="keepa-vitrine-copy">
+                    <code class="keepa-vitrine-asin">${esc(asin)}</code>
+                    <h4 class="keepa-vitrine-title">${esc(title)}</h4>
+                    <p class="keepa-vitrine-tag">${esc(tag)}${row.monthlySold != null ? ` · ${num(row.monthlySold)}+/mes` : ''}</p>
+                    <p class="keepa-vitrine-price">${esc(priceLine)}</p>
+                    ${opts.mode === 'library' && row.at
+                        ? `<p class="keepa-vitrine-age${stale ? ' is-stale' : ''}">${esc(ageLabel(row.at))}${stale ? ' · conviene actualizar' : ''}</p>`
+                        : ''}
+                </div>
+                <div class="keepa-vitrine-media">${media}</div>
+                <div class="keepa-vitrine-actions">${primary}</div>
+            </article>`;
+    }
+
     function renderLibrary() {
-        const rows = window.Keepa?.listLibrary?.() || [];
-        if (!rows.length) {
+        const q = String(local.libQuery || '').trim().toLowerCase();
+        const all = window.Keepa?.listLibrary?.() || [];
+        const rows = q
+            ? all.filter(r =>
+                String(r.asin || '').toLowerCase().includes(q)
+                || String(r.title || '').toLowerCase().includes(q)
+                || String(r.signalLabel || '').toLowerCase().includes(q))
+            : all;
+        if (!all.length) {
             return `
-                <section class="keepa-workspace">
-                    <div class="card keepa-query-card">
-                        <div class="keepa-card-title">
-                            <div>
-                                <h3>Biblioteca Keepa</h3>
-                                <p class="muted small">Cada vez que investigas un ASIN se guarda aquí (local, sin Sync). Reabrir no gasta tokens; actualizar sí.</p>
-                            </div>
-                        </div>
-                        <div class="keepa-empty-state">
-                            <strong>Aún no hay ASINs guardados</strong>
-                            <span class="muted small">Investiga uno en la pestaña Investigador y vuelve aquí.</span>
-                            <button type="button" class="btn primary sm" data-kv-jump="research">Ir a Investigar</button>
-                        </div>
+                <section class="keepa-workspace keepa-vitrine-workspace">
+                    <header class="keepa-vitrine-hero">
+                        <h2>Biblioteca.</h2>
+                        <p>Cada investigación se guarda aquí. Reabrir no gasta tokens.</p>
+                    </header>
+                    <div class="keepa-empty-state">
+                        <strong>Aún no hay ASINs guardados</strong>
+                        <span class="muted small">Investiga uno y vuelve: aquí vive tu vitrina local.</span>
+                        <button type="button" class="btn primary sm" data-kv-jump="research">Ir a Investigar</button>
                     </div>
                 </section>`;
         }
         return `
-            <section class="keepa-workspace">
-                <div class="card keepa-query-card">
-                    <div class="keepa-card-title">
-                        <div>
-                            <h3>Biblioteca · ${rows.length} ASIN${rows.length === 1 ? '' : 's'}</h3>
-                            <p class="muted small">Guardado local en este dispositivo. Abrir = gratis · Actualizar = vuelve a gastar tokens Keepa.</p>
-                        </div>
+            <section class="keepa-workspace keepa-vitrine-workspace">
+                <header class="keepa-vitrine-hero">
+                    <div>
+                        <h2>Lo guardado.</h2>
+                        <p>${all.length} ASIN${all.length === 1 ? '' : 's'} en este dispositivo · Abrir gratis · Actualizar gasta tokens.</p>
                     </div>
-                    <div class="keepa-lib-grid">
-                        ${rows.map(row => {
-                            const when = row.at
-                                ? new Date(row.at).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })
-                                : '—';
-                            return `
-                            <article class="keepa-lib-card float-surface">
-                                <div class="keepa-lib-card-top">
-                                    ${row.image ? `<img src="${esc(row.image)}" alt="">` : '<div class="keepa-lib-card-top" style="width:56px;height:56px;border-radius:10px;background:var(--ios-gray6)"></div>'}
-                                    <div class="keepa-grow">
-                                        <code class="muted small">${esc(row.asin)}</code>
-                                        <h4>${esc(row.title || row.asin)}</h4>
-                                        <span class="keepa-badge" data-signal="${esc(row.signal || '')}">${esc(row.signalLabel || '—')}</span>
-                                    </div>
-                                </div>
-                                <div class="keepa-lib-meta">
-                                    <div><span class="muted">Buy Box</span><strong>${mxn(row.buyBox)}</strong></div>
-                                    <div><span class="muted">Avg 90d</span><strong>${mxn(row.avg90)}</strong></div>
-                                    <div><span class="muted">BSR</span><strong>${num(row.bsr)}</strong></div>
-                                    <div><span class="muted">Guardado</span><strong class="muted" style="font-weight:500">${esc(when)}</strong></div>
-                                </div>
-                                <div class="keepa-lib-actions">
-                                    <button type="button" class="btn primary sm" data-kv-lib-open="${esc(row.asin)}">Abrir</button>
-                                    <button type="button" class="btn ghost sm" data-kv-lib-update="${esc(row.asin)}">Actualizar</button>
-                                    <button type="button" class="btn ghost sm" data-kv-lib-remove="${esc(row.asin)}">Quitar</button>
-                                </div>
-                            </article>`;
-                        }).join('')}
+                    <label class="keepa-vitrine-search">
+                        <span class="sr-only">Buscar en biblioteca</span>
+                        <input type="search" id="keepa-lib-search" placeholder="Buscar ASIN o título…" value="${esc(local.libQuery || '')}">
+                    </label>
+                </header>
+                ${!rows.length ? `
+                    <div class="keepa-empty-state">
+                        <strong>Sin coincidencias</strong>
+                        <span class="muted small">Prueba otro término.</span>
+                    </div>` : `
+                <div class="keepa-vitrine">
+                    <div class="keepa-vitrine-nav" aria-hidden="true">
+                        <button type="button" class="keepa-vitrine-arrow" data-kv-vitrine-scroll="-1" aria-label="Anterior">‹</button>
+                        <button type="button" class="keepa-vitrine-arrow" data-kv-vitrine-scroll="1" aria-label="Siguiente">›</button>
                     </div>
-                </div>
+                    <div class="keepa-vitrine-track" id="keepa-lib-track">
+                        ${rows.map((row, i) => vitrineCardHtml(row, { mode: 'library', index: i })).join('')}
+                    </div>
+                </div>`}
             </section>`;
     }
 
@@ -366,8 +677,7 @@ const KeepaView = (() => {
                     <a class="btn ghost sm" href="https://www.amazon.com.mx/dp/${esc(data.asin)}" target="_blank" rel="noopener">Amazon ↗</a>
                     <a class="btn ghost sm" href="https://keepa.com/#!product/11-${esc(data.asin)}" target="_blank" rel="noopener">Keepa ↗</a>
                 </div>
-                ${graphHtml(data)}
-                <div id="keepa-ix-host" class="keepa-ix-host"></div>
+                ${dualChartsHtml(data)}
                 <div class="keepa-result-actions">
                     <button type="button" class="btn" data-kv-action="offers">Cargar 20 ofertas + stock</button>
                     <span class="muted small">Esta consulta es más cara (aprox. +6 tokens por cada 10 ofertas).</span>
@@ -415,13 +725,8 @@ const KeepaView = (() => {
                             `).join('')}
                         </div>
                     </div>
-                    <div class="keepa-graph-row">
+                    <div class="keepa-graph-row keepa-graph-row-actions">
                         <button type="button" class="keepa-chip ${g.yzoom ? 'active' : ''}" data-kg-toggle="yzoom">Zoom eje Y</button>
-                        <label class="keepa-graph-height"><span class="muted small">Alto</span>
-                            <select id="keepa-graph-height">
-                                ${[300, 380, 480, 600].map(h => `<option value="${h}" ${Number(g.height) === h ? 'selected' : ''}>${h}px</option>`).join('')}
-                            </select>
-                        </label>
                         <button type="button" class="btn primary sm" id="keepa-graph-apply" ${apply.disabled ? 'disabled' : ''}>${apply.label}</button>
                         ${local.graphUrl ? `<a class="btn ghost sm" href="${esc(local.graphUrl)}" target="_blank" rel="noopener">Ver grande ↗</a>` : ''}
                     </div>
@@ -431,7 +736,7 @@ const KeepaView = (() => {
                         ? `<img src="${esc(local.graphUrl)}" alt="Gráfica Keepa de ${esc(data.asin)}">`
                         : '<div class="keepa-graph-loading muted">Cargando gráfica Keepa…</div>'}
                 </div>
-                <p class="muted small keepa-graph-caption">Arriba: gráfica oficial Keepa (PNG). Abajo: nuestra lectura interactiva del historial — sin tokens extra al cambiar series/rango.</p>
+                <p class="muted small keepa-graph-caption">PNG oficial · 1 token al aplicar. La lectura interactiva usa el historial ya cargado.</p>
             </div>`;
     }
 
@@ -451,6 +756,8 @@ const KeepaView = (() => {
             graph: local.graph,
             compact: false,
             hidden: prev.hidden || {},
+            hrefHidden: prev.hrefHidden || {},
+            mode: prev.mode || '',
             brush: prev.brush || null,
             pins: prev.pins || [],
             showAreas: prev.showAreas !== false,
@@ -459,8 +766,17 @@ const KeepaView = (() => {
                 local.graph = { ...local.graph, ...g };
                 saveGraphPrefs();
                 syncGraphChipsOnly();
+                refreshOfficialInsights();
+            },
+            onApplyBuyBox: (price, lote) => {
+                if (!lote?.id || price == null) return;
+                applyCompetitionPrice(String(lote.id), price);
             },
         });
+        if (local.ixState) {
+            local.ixState.onAfterRemount = () => refreshOfficialInsights();
+        }
+        refreshOfficialInsights();
     }
 
     function refreshInteractiveChart() {
@@ -484,6 +800,22 @@ const KeepaView = (() => {
             button.disabled = apply.disabled;
             button.textContent = apply.label;
         }
+        refreshOfficialInsights();
+    }
+
+    function setGraphView(view) {
+        if (view !== 'official' && view !== 'ours' && view !== 'compare') return;
+        local.graphView = view;
+        saveGraphPrefs();
+        const shell = document.getElementById('keepa-dual');
+        if (shell) {
+            shell.dataset.view = view;
+            shell.querySelectorAll('[data-kv-graph-view]').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.kvGraphView === view);
+            });
+        }
+        // Remount interactive if becoming visible again (host may have been empty-sized)
+        if (view !== 'official') refreshInteractiveChart();
     }
 
     function refreshGraphControls() {
@@ -491,6 +823,7 @@ const KeepaView = (() => {
         syncGraphChipsOnly();
         // La gráfica propia reacciona al instante; el PNG sigue pidiendo “Aplicar”.
         refreshInteractiveChart();
+        refreshOfficialInsights();
     }
 
     function kpi(label, value) {
@@ -541,19 +874,67 @@ const KeepaView = (() => {
             </section>`;
     }
 
+    function finderPageSlice() {
+        const f = local.finder;
+        const size = f.pageSize || 12;
+        const start = (f.page || 0) * size;
+        return {
+            start,
+            size,
+            asins: (f.asins || []).slice(start, start + size),
+            pages: Math.max(1, Math.ceil((f.asins?.length || 0) / size)),
+        };
+    }
+
+    function finderCardHtml(asin, index) {
+        const card = local.finder.cards?.[asin];
+        return vitrineCardHtml(card || { asin }, {
+            mode: 'finder',
+            index,
+            bare: !card,
+        });
+    }
+
     function finderHtml() {
-        if (!local.finder.length) return '<div class="keepa-empty-state"><span class="keepa-empty-icon">🧭</span><strong>Define tus filtros</strong><span class="muted small">El Finder devuelve ASINs; abre uno en el Investigador para analizarlo.</span></div>';
+        const f = local.finder;
+        if (!f.searched) {
+            return `
+                <div class="keepa-empty-state">
+                    <span class="keepa-empty-icon">🧭</span>
+                    <strong>Define tus filtros</strong>
+                    <span class="muted small">Busca oportunidades en Amazon MX. Luego abre una ficha en Investigador.</span>
+                </div>`;
+        }
+        if (!f.asins.length) {
+            return `
+                <div class="keepa-empty-state">
+                    <span class="keepa-empty-icon">∅</span>
+                    <strong>Sin resultados</strong>
+                    <span class="muted small">Prueba aflojar BSR, precio o palabras del título.</span>
+                </div>`;
+        }
+        const slice = finderPageSlice();
+        const totalLabel = f.totalResults != null
+            ? `${num(f.totalResults)} en Keepa · mostrando ${f.asins.length}`
+            : `${f.asins.length} ASINs`;
+        const missing = slice.asins.filter(a => !f.cards[a]).length;
         return `
-            <div class="card">
-                <div class="keepa-card-title"><h3>${local.finder.length} ASINs encontrados</h3><span class="muted small">Investigar uno cuesta tokens adicionales.</span></div>
-                <div class="keepa-finder-results">
-                    ${local.finder.map((asin, i) => `
-                        <div class="keepa-finder-row">
-                            <button type="button" class="keepa-finder-result" data-kv-asin="${esc(asin)}">
-                                <span>${i + 1}</span><code>${esc(asin)}</code><strong>Investigar →</strong>
-                            </button>
-                            <button type="button" class="btn ghost btn-sm" data-kv-wishlist="${esc(asin)}" title="Agregar a Wishlist">+ Wishlist</button>
-                        </div>`).join('')}
+            <div class="card keepa-finder-board">
+                <div class="keepa-card-title">
+                    <div>
+                        <h3>${esc(totalLabel)}</h3>
+                        <span class="muted small">Página ${slice.start / slice.size + 1} / ${slice.pages}. Investigar uno cuesta tokens extra.</span>
+                    </div>
+                    <div class="keepa-finder-pager">
+                        <button type="button" class="btn ghost sm" data-kv-finder-page="-1" ${f.page <= 0 ? 'disabled' : ''}>←</button>
+                        <button type="button" class="btn ghost sm" data-kv-finder-page="1" ${f.page >= slice.pages - 1 ? 'disabled' : ''}>→</button>
+                        ${missing ? `<button type="button" class="btn sm" data-kv-finder-enrich>~${missing} fichas · ~${missing} tok</button>` : ''}
+                    </div>
+                </div>
+                <div class="keepa-vitrine keepa-vitrine-grid">
+                    <div class="keepa-vitrine-track is-grid">
+                        ${slice.asins.map((asin, i) => finderCardHtml(asin, slice.start + i)).join('')}
+                    </div>
                 </div>
             </div>`;
     }
@@ -746,7 +1127,7 @@ const KeepaView = (() => {
 
     async function loadGraph({ seq = local.researchSeq } = {}) {
         if (!local.asin) return;
-        const settings = { ...local.graph };
+        const settings = { ...local.graph, height: GRAPH_HEIGHT };
         if (!GRAPH_LINES.some(([key]) => settings[key])) {
             UI.toast('Activa al menos una serie para dibujar la gráfica', 'error');
             return;
@@ -788,6 +1169,7 @@ const KeepaView = (() => {
         if (!next) return;
         panel.replaceWith(next);
         bindGraph(next);
+        refreshOfficialInsights();
     }
 
     function openAsin(asin, { range } = {}) {
@@ -852,10 +1234,22 @@ const KeepaView = (() => {
         }
     }
 
+    async function enrichFinderPage() {
+        const slice = finderPageSlice();
+        const need = slice.asins.filter(a => !local.finder.cards[a]);
+        if (!need.length) return 0;
+        const rows = await Keepa.fetchProductsLight(need);
+        rows.forEach(row => {
+            if (row?.asin) local.finder.cards[row.asin] = row;
+        });
+        return rows.length;
+    }
+
     async function runFinder() {
+        const pageSize = local.finder.pageSize || 12;
         const ok = await UI.confirm({
             title: 'Buscar en Product Finder',
-            message: 'Esta búsqueda cuesta aproximadamente 10 tokens. Abrir cada resultado después consume tokens adicionales.',
+            message: `La búsqueda cuesta ~10 tokens. Después cargamos fichas de la 1ª página (~${pageSize} tokens: título, BB, BSR). Investigar uno cuesta aparte.`,
             primaryLabel: 'Buscar',
         });
         if (!ok) return;
@@ -875,11 +1269,29 @@ const KeepaView = (() => {
         if (out) out.innerHTML = '<div class="keepa-empty-state"><span class="keepa-spinner"></span><strong>Buscando oportunidades…</strong></div>';
         try {
             const data = await Keepa.productFinder(selection);
-            local.finder = Array.isArray(data.asinList) ? data.asinList : [];
+            const asins = Array.isArray(data.asinList) ? data.asinList : [];
+            local.finder = {
+                asins,
+                cards: {},
+                page: 0,
+                pageSize,
+                totalResults: Number.isFinite(Number(data.totalResults)) ? Number(data.totalResults) : null,
+                searched: true,
+                selection,
+            };
+            if (asins.length) {
+                if (out) out.innerHTML = '<div class="keepa-empty-state"><span class="keepa-spinner"></span><strong>Cargando fichas…</strong></div>';
+                try { await enrichFinderPage(); }
+                catch (enrichErr) {
+                    UI.toast?.(enrichErr.message || 'Fichas parciales', 'error');
+                }
+            }
             if (out) out.innerHTML = finderHtml();
             bind(out);
             refreshTokens(false);
         } catch (err) {
+            local.finder.searched = true;
+            local.finder.asins = [];
             if (out) out.innerHTML = `<div class="keepa-empty-state keepa-error"><strong>Error Finder</strong><span>${esc(err.message || err)}</span></div>`;
         }
     }
@@ -947,10 +1359,15 @@ const KeepaView = (() => {
             chip.addEventListener('click', () => update(GRAPH_PRESETS[chip.dataset.kgPreset] || {}));
         });
         root.querySelector('[data-kg-toggle="yzoom"]')?.addEventListener('click', () => update({ yzoom: !local.graph.yzoom }));
-        root.querySelector('#keepa-graph-height')?.addEventListener('change', event => {
-            update({ height: Number(event.target.value) || GRAPH_DEFAULTS.height });
-        });
         root.querySelector('#keepa-graph-apply')?.addEventListener('click', () => loadGraph());
+        root.querySelectorAll('[data-kv-graph-view]').forEach(btn => {
+            btn.addEventListener('click', () => setGraphView(btn.dataset.kvGraphView));
+        });
+        root.querySelector('#keepa-dual-sync')?.addEventListener('click', async () => {
+            UI.toast?.('Sincronizando PNG al periodo actual…');
+            await loadGraph();
+            refreshOfficialInsights();
+        });
     }
 
     function bind(root) {
@@ -975,6 +1392,53 @@ const KeepaView = (() => {
                 render();
                 runResearch(local.asin);
             });
+        });
+        root.querySelectorAll('[data-kv-finder-page]').forEach(button => {
+            button.addEventListener('click', async () => {
+                const delta = Number(button.dataset.kvFinderPage) || 0;
+                const slice = finderPageSlice();
+                const next = Math.max(0, Math.min(slice.pages - 1, (local.finder.page || 0) + delta));
+                if (next === local.finder.page) return;
+                local.finder.page = next;
+                const out = document.getElementById('keepa-finder-results');
+                const need = finderPageSlice().asins.filter(a => !local.finder.cards[a]);
+                if (need.length) {
+                    const ok = await UI.confirm({
+                        title: 'Cargar fichas de esta página',
+                        message: `~${need.length} tokens para título, Buy Box y BSR de esta página.`,
+                        primaryLabel: 'Cargar',
+                    });
+                    if (ok) {
+                        try { await enrichFinderPage(); refreshTokens(false); }
+                        catch (err) { UI.toast?.(err.message || 'No se pudieron cargar fichas', 'error'); }
+                    }
+                }
+                if (out) {
+                    out.innerHTML = finderHtml();
+                    bind(out);
+                }
+            });
+        });
+        root.querySelector('[data-kv-finder-enrich]')?.addEventListener('click', async () => {
+            const need = finderPageSlice().asins.filter(a => !local.finder.cards[a]);
+            if (!need.length) return;
+            const ok = await UI.confirm({
+                title: 'Cargar fichas',
+                message: `~${need.length} tokens para completar título, Buy Box y BSR.`,
+                primaryLabel: 'Cargar',
+            });
+            if (!ok) return;
+            try {
+                await enrichFinderPage();
+                const out = document.getElementById('keepa-finder-results');
+                if (out) {
+                    out.innerHTML = finderHtml();
+                    bind(out);
+                }
+                refreshTokens(false);
+            } catch (err) {
+                UI.toast?.(err.message || 'No se pudieron cargar fichas', 'error');
+            }
         });
         root.querySelectorAll('[data-kv-wishlist]').forEach(button => {
             button.addEventListener('click', (e) => {
@@ -1029,6 +1493,25 @@ const KeepaView = (() => {
         root.querySelector('#keepa-research-form')?.addEventListener('submit', event => {
             event.preventDefault();
             runResearch(document.getElementById('keepa-research-asin')?.value);
+        });
+        root.querySelector('#keepa-lib-search')?.addEventListener('input', e => {
+            local.libQuery = e.target.value || '';
+            render();
+            const input = document.getElementById('keepa-lib-search');
+            if (input) {
+                input.focus();
+                const len = input.value.length;
+                input.setSelectionRange(len, len);
+            }
+        });
+        root.querySelectorAll('[data-kv-vitrine-scroll]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const track = document.getElementById('keepa-lib-track');
+                if (!track) return;
+                const delta = Number(btn.dataset.kvVitrineScroll) || 0;
+                const step = Math.min(320, track.clientWidth * 0.8) * delta;
+                track.scrollBy({ left: step, behavior: 'smooth' });
+            });
         });
         root.querySelectorAll('[data-kv-lib-open]').forEach(btn => {
             btn.addEventListener('click', () => {

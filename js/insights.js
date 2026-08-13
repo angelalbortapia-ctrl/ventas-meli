@@ -25,12 +25,11 @@ const InsightsView = (() => {
             };
         },
         ({ lote, calc }) => {
-            const fecha = lote.fecha ? new Date(lote.fecha) : null;
-            if (!fecha || calc.inventarioRestante === 0) return null;
+            if (calc.inventarioRestante === 0) return null;
             const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
             if (ventas.length > 0) return null;
-            const dias = Math.floor((Date.now() - fecha.getTime()) / 86400000);
-            if (dias < 30) return null;
+            const dias = Calc.daysSinceActivity(lote);
+            if (dias == null || dias < 30) return null;
             return {
                 severity: 'medium', kind: 'stagnant',
                 title: `${lote.producto}: ${dias} días sin ventas`,
@@ -155,6 +154,12 @@ const InsightsView = (() => {
         const momo = buildMoMo(lotes);
         root.innerHTML = `
             <div class="ins-shell">
+                <div class="view-head">
+                    <div>
+                        <h2>Insights</h2>
+                        <p class="muted">Matriz, compras, estancados y precios del catálogo activo.</p>
+                    </div>
+                </div>
                 <div class="ins-body ins-body-combined">
                     ${lotes.length ? `
                         <section class="ins-section">
@@ -211,10 +216,11 @@ const InsightsView = (() => {
         const prevMtd = empty();
 
         const settings = window.State.settings;
+        const endThis = Calc.startOfLocalDay(now);
         (lotes || []).forEach(lote => {
             const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
             ventas.forEach(v => {
-                const d = parseDate(v.fecha);
+                const d = Calc.effectiveSaleDay(v.fecha, now);
                 if (!d) return;
                 const uds = Math.max(0, Number(v.unidades) || 0);
                 if (uds <= 0) return;
@@ -226,10 +232,10 @@ const InsightsView = (() => {
                     b.uds += uds;
                     b.ventas += 1;
                 };
-                if (d >= startThis) {
+                if (d >= startThis && (!endThis || d <= endThis)) {
                     bucket(thisFull);
                     bucket(thisMtd);
-                } else if (d >= startPrev) {
+                } else if (d >= startPrev && d < startThis) {
                     bucket(prevFull);
                     if (d <= cutPrev) bucket(prevMtd);
                 }
@@ -245,19 +251,16 @@ const InsightsView = (() => {
         };
     }
 
-    /** Costo unitario histórico (si la venta lo tiene) o el actual del lote. */
+    /** Costo + feeSnap históricos (si la venta los tiene) o el lote actual. */
     function loteCostAtSale(lote, v) {
-        const costoAtSale = Number(v.costoAtSale);
-        if (Number.isFinite(costoAtSale) && costoAtSale > 0) {
-            return { ...lote, costo: costoAtSale };
+        if (typeof Data !== 'undefined' && Data.loteForVentaCalc) {
+            return Data.loteForVentaCalc(lote, v);
+        }
+        const frozen = Number(v?.costoUnitario ?? v?.costoAtSale);
+        if (Number.isFinite(frozen) && frozen >= 0) {
+            return { ...lote, costo: frozen };
         }
         return lote;
-    }
-
-    function parseDate(iso) {
-        if (!iso) return null;
-        const d = new Date(iso);
-        return Number.isNaN(d.getTime()) ? null : d;
     }
 
     function layMoMo(m) {

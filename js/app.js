@@ -52,6 +52,7 @@ const App = (() => {
         const view = document.getElementById('view-' + tab);
         if (!view) return;
         window.State.view = tab;
+        document.body.dataset.appView = tab;
         document.querySelectorAll('.sb-item[data-tab]').forEach(el => {
             const active = el.dataset.tab === tab;
             el.classList.toggle('active', active);
@@ -214,7 +215,8 @@ const App = (() => {
 
         pill.addEventListener('click', () => {
             switchTab('settings');
-            const sync = document.getElementById('view-settings')?.querySelector('#sync-panel, [data-sync-section]');
+            const sync = document.getElementById('view-settings')
+                ?.querySelector('.sync-card, #sync-status, #sync-url');
             sync?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
         });
         window.addEventListener('online', paint);
@@ -754,11 +756,10 @@ const App = (() => {
                         body: `${tag}: sin piezas. Revisa recompra.`,
                     });
                 }
-                const fecha = lote.fecha ? new Date(lote.fecha) : null;
                 const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
-                if (fecha && calc.inventarioRestante > 0 && ventas.length === 0) {
-                    const dias = Math.floor((Date.now() - fecha.getTime()) / 86400000);
-                    if (dias >= 30) {
+                if (calc.inventarioRestante > 0 && ventas.length === 0) {
+                    const dias = Calc.daysSinceActivity(lote);
+                    if (dias != null && dias >= 30) {
                         out.push({
                             id: `stagnant:${mp}:${lote.id}`,
                             kind: 'stagnant',
@@ -1021,14 +1022,15 @@ const App = (() => {
         const brand = document.querySelector('.sb-brand-text .name');
         if (brand) {
             brand.textContent = mpView === 'general'
-                ? 'Ventas Meli'
+                ? 'Ventas'
                 : (mp === 'amazon' ? 'Ventas Amazon' : 'Ventas Meli');
         }
         const sub = document.querySelector('.sb-brand-text .sub');
         if (sub) {
+            // Misma longitud visual en Meli / Amazon / General (evita tope amontonado)
             sub.textContent = mpView === 'general'
-                ? 'Hoy · capital y agenda'
-                : (mp === 'amazon' ? 'Catálogo Amazon MX' : 'Catálogo Mercado Libre');
+                ? 'Ambos canales'
+                : (mp === 'amazon' ? 'Catálogo MX' : 'Catálogo MX');
         }
         const root = document.querySelector('.tb-crumb-root');
         if (root) root.textContent = mpView === 'general' ? 'General' : meta.short;
@@ -1050,6 +1052,16 @@ const App = (() => {
         document.querySelectorAll('[data-show-on-general]').forEach(el => {
             el.hidden = !isGeneral;
         });
+        const gxItems = document.querySelectorAll('.sb-gx-nav [data-gx-jump]');
+        if (isGeneral) {
+            const anyActive = [...gxItems].some(b => b.classList.contains('active'));
+            if (!anyActive) {
+                document.querySelector('.sb-gx-nav [data-gx-jump="gx-pulso"]')?.classList.add('active');
+            }
+            window.Icons?.hydrate?.(document.querySelector('.sb-general-panel'));
+        } else {
+            gxItems.forEach(b => b.classList.remove('active'));
+        }
         const mpHint = document.querySelector('.sb-mp-hint');
         if (mpHint) {
             mpHint.textContent = isGeneral
@@ -1177,7 +1189,7 @@ const App = (() => {
         } else {
             el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
-        document.querySelectorAll('[data-gx-jump]').forEach(b => {
+        document.querySelectorAll('.sb-gx-nav [data-gx-jump]').forEach(b => {
             b.classList.toggle('active', b.dataset.gxJump === key || b.dataset.gxJump === id);
         });
     }
@@ -1196,7 +1208,10 @@ const App = (() => {
                 e.preventDefault();
                 if (window.State.ui?.mpView !== 'general') {
                     applyMarketplaceView('general', { toast: false });
-                    setTimeout(() => scrollGeneralSection(gx.dataset.gxJump), 80);
+                    const jump = gx.dataset.gxJump;
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => scrollGeneralSection(jump));
+                    });
                 } else {
                     scrollGeneralSection(gx.dataset.gxJump);
                 }

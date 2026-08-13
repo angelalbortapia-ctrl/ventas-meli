@@ -1089,6 +1089,21 @@ const Data = (() => {
             if (ui.dashChartFromPreset !== 'month' && ui.dashChartFromPreset !== 'year') {
                 delete ui.dashChartFromPreset;
             }
+            if (ui.dashPyGPeriod !== 'month' && ui.dashPyGPeriod !== 'prev' && ui.dashPyGPeriod !== 'all') {
+                delete ui.dashPyGPeriod;
+            }
+            if (ui.bonificaciones != null && typeof ui.bonificaciones !== 'object') {
+                delete ui.bonificaciones;
+            } else if (ui.bonificaciones && typeof ui.bonificaciones === 'object') {
+                const cleanList = (list) => (Array.isArray(list) ? list : [])
+                    .filter(b => b && typeof b === 'object'
+                        && /^\d{4}-\d{2}-\d{2}$/.test(String(b.fecha || '').slice(0, 10))
+                        && Number.isFinite(Number(b.monto)));
+                ui.bonificaciones = {
+                    amazon: cleanList(ui.bonificaciones.amazon),
+                    meli: cleanList(ui.bonificaciones.meli),
+                };
+            }
             if (ui.capitalAlloc != null && typeof ui.capitalAlloc !== 'object') {
                 delete ui.capitalAlloc;
             }

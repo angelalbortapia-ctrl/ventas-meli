@@ -2,3 +2,6 @@
 Meli/
 .DS_Store
 *.local
+
+# Local diagnostic dumps
+.diag/

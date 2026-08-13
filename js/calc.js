@@ -745,10 +745,50 @@ const Calc = (() => {
         return (Number(n) * 100).toFixed(1) + '%';
     }
 
+    /**
+     * Parsea fecha de venta (YYYY-MM-DD / D/M/Y) en medianoche LOCAL.
+     * Evita el sesgo UTC de `new Date('YYYY-MM-DD')` (México → día anterior).
+     */
+    function parseSaleDate(raw) {
+        if (!raw) return null;
+        const s = String(raw).trim();
+        let d = null;
+        if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+            const [y, m, day] = s.slice(0, 10).split('-').map(Number);
+            d = new Date(y, m - 1, day);
+        } else if (/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(s)) {
+            const [a, b, c] = s.split(/[\/-]/).map(Number);
+            const y = c < 100 ? 2000 + c : c;
+            d = new Date(y, b - 1, a);
+        } else {
+            const t = Date.parse(s);
+            if (!Number.isNaN(t)) d = new Date(t);
+        }
+        return d && !Number.isNaN(d.getTime()) ? d : null;
+    }
+
+    function startOfLocalDay(d) {
+        if (!d || Number.isNaN(d.getTime())) return null;
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    }
+
+    /**
+     * Día efectivo para buckets (hero / MTD / sparkline):
+     * fecha solo-día en el futuro (TZ/tipeo) → cuenta como hoy.
+     */
+    function effectiveSaleDay(raw, now = new Date()) {
+        const today = startOfLocalDay(now);
+        const day = startOfLocalDay(parseSaleDate(raw));
+        if (!day || !today) return null;
+        return day.getTime() > today.getTime() ? today : day;
+    }
+
     function fmtDate(d) {
         if (!d) return '—';
         try {
-            return new Date(d).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
+            const parsed = d instanceof Date ? d : (parseSaleDate(d) || new Date(d));
+            if (!parsed || Number.isNaN(parsed.getTime())) return String(d);
+            return parsed.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
         } catch { return String(d); }
     }
 
@@ -772,17 +812,22 @@ const Calc = (() => {
         const ventas = Array.isArray(lote?.ventas) ? lote.ventas : [];
         let latest = 0;
         ventas.forEach(v => {
-            const t = Date.parse(v.fecha || '');
-            if (Number.isFinite(t) && t > latest) latest = t;
+            const d = parseSaleDate(v.fecha);
+            if (d) latest = Math.max(latest, d.getTime());
         });
         if (!latest && lote?.fbaInboundEstado === 'recibido') {
             const hit = (lote.historial || []).slice().reverse()
                 .find(h => h?.tipo === 'fba-inbound' && h?.meta?.to === 'recibido');
             if (hit?.ts) latest = hit.ts;
         }
-        if (!latest && lote?.fecha) latest = Date.parse(lote.fecha);
+        if (!latest && lote?.fecha) {
+            const d = parseSaleDate(lote.fecha);
+            if (d) latest = d.getTime();
+        }
         if (!latest) return null;
-        return Math.floor((Date.now() - latest) / 86400000);
+        const today = startOfLocalDay(new Date())?.getTime() || Date.now();
+        // Futuro (fecha tipada mañana) → 0 días, no negativo raro
+        return Math.max(0, Math.floor((today - startOfLocalDay(new Date(latest)).getTime()) / 86400000));
     }
 
     return {
@@ -804,6 +849,9 @@ const Calc = (() => {
         fmtMXN,
         fmtPct,
         fmtDate,
+        parseSaleDate,
+        startOfLocalDay,
+        effectiveSaleDay,
         comisionPct,
         amzCategoryList,
         resolveAmzCategoryKey,

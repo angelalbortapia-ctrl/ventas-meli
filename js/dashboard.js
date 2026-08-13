@@ -14,7 +14,15 @@ const DashboardView = (() => {
         }
 
         const lotes = window.State.lotes || [];
-        const mpLabel = window.State.marketplace === 'amazon' ? 'Amazon' : 'Mercado Libre';
+        const isAmz = window.State.marketplace === 'amazon';
+        const mpLabel = isAmz ? 'Amazon' : 'Mercado Libre';
+        const themeCls = isAmz ? 'is-amz' : 'is-meli';
+        const shellCls = `dash-shell dash-shell-home is-fx ${themeCls}`;
+        const mastheadAmbience = `
+            <div class="dash-fx-stage" aria-hidden="true">
+                <span class="dash-fx-wash"></span>
+                <span class="dash-fx-mark"></span>
+            </div>`;
         persistAllocMigrations();
         // Evita bolsitas fantasma (total > 0 con liberado $0 sin ventas en ledger)
         try { reconcileAllocFromLedger(allocMpKey()); } catch { /* ignore */ }
@@ -25,16 +33,24 @@ const DashboardView = (() => {
                 costoVendido: 0,
             };
             root.innerHTML = `
-                <div class="dash-shell">
-                    <div class="dash-body dash-body-combined">
+                <div class="${shellCls}">
+                    <div class="dash-body dash-body-combined dash-home">
+                        <header class="dash-masthead">
+                            ${mastheadAmbience}
+                            <p class="dash-masthead-kicker">${esc(mpLabel)}</p>
+                            <h1 class="dash-masthead-title">Empieza aquí.</h1>
+                        </header>
                         ${layHeroKPIs([])}
                         <div class="dash-empty-full">
-                            <h2>Sin datos todavía · ${esc(mpLabel)}</h2>
-                            <p class="muted">Importa un Excel o crea un lote para ver el panel financiero. Las bolsitas ya están listas para este marketplace.</p>
+                            <h2>Sin datos todavía</h2>
+                            <p>Importa un Excel o crea un lote para ver el panel financiero.</p>
                             <button type="button" class="btn primary" data-dash-new>+ Nuevo lote</button>
                         </div>
-                        <section class="dash-section">
-                            <h2 class="dash-section-title">Asignación <span class="dash-mp-tag">${esc(mpLabel)}</span></h2>
+                        <section class="dash-section dash-section-rise">
+                            <div class="dash-section-copy">
+                                <h2 class="dash-section-title">Asignación</h2>
+                                <p class="dash-section-lead">Bolsitas listas para <span class="dash-mp-tag">${esc(mpLabel)}</span></p>
+                            </div>
                             ${layAsignacion(emptyCtx)}
                         </section>
                     </div>
@@ -58,12 +74,20 @@ const DashboardView = (() => {
         const fromResolved = resolveChartFrom(window.State.ui);
 
         root.innerHTML = `
-            <div class="dash-shell">
-                <div class="dash-body dash-body-combined">
+            <div class="${shellCls}">
+                <div class="dash-body dash-body-combined dash-home">
+                    <header class="dash-masthead">
+                        ${mastheadAmbience}
+                        <p class="dash-masthead-kicker">${esc(mpLabel)}</p>
+                        <h1 class="dash-masthead-title">Tu negocio,<br>de un vistazo.</h1>
+                    </header>
                     ${layHeroKPIs(lotes)}
-                    <section class="dash-section">
+                    <section class="dash-section dash-section-rise" id="dash-progreso">
                         <div class="dash-section-head">
-                            <h2 class="dash-section-title">Progreso <span class="dash-mp-tag">${esc(mpLabel)}</span></h2>
+                            <div class="dash-section-copy">
+                                <h2 class="dash-section-title">Progreso</h2>
+                                <p class="dash-section-lead">Tendencia en el tiempo</p>
+                            </div>
                             <div class="dash-chart-toggles">
                                 <div class="dash-seg" role="group" aria-label="Granularidad">
                                     <button type="button" class="dash-seg-btn${chartPeriod === 'weeks' ? ' active' : ''}" data-dash-period="weeks">Semanas</button>
@@ -73,10 +97,10 @@ const DashboardView = (() => {
                                 <details class="dash-chart-type-more">
                                     <summary class="dash-chart-type-btn" aria-label="Tipo de gráfica">⋯</summary>
                                     <div class="dash-chart-type-list" role="group" aria-label="Tipo de gráfica">
-                                        <button type="button" class="dash-seg-btn${chartType === 'hero' ? ' active' : ''}" data-dash-type="hero">Hero</button>
-                                        <button type="button" class="dash-seg-btn${chartType === 'bars' ? ' active' : ''}" data-dash-type="bars">Barras</button>
-                                        <button type="button" class="dash-seg-btn${chartType === 'lines' ? ' active' : ''}" data-dash-type="lines">Líneas</button>
-                                        <button type="button" class="dash-seg-btn${chartType === 'area' ? ' active' : ''}" data-dash-type="area">Área</button>
+                                        <button type="button" class="dash-type-opt${chartType === 'hero' ? ' active' : ''}" data-dash-type="hero">Hero</button>
+                                        <button type="button" class="dash-type-opt${chartType === 'bars' ? ' active' : ''}" data-dash-type="bars">Barras</button>
+                                        <button type="button" class="dash-type-opt${chartType === 'lines' ? ' active' : ''}" data-dash-type="lines">Líneas</button>
+                                        <button type="button" class="dash-type-opt${chartType === 'area' ? ' active' : ''}" data-dash-type="area">Área</button>
                                     </div>
                                 </details>
                             </div>
@@ -91,20 +115,37 @@ const DashboardView = (() => {
                             cashMode: window.State.ui?.dashCashMode === 'vendido' ? 'vendido' : 'cobrado',
                         })}
                     </section>
-                    <section class="dash-section">
-                        <h2 class="dash-section-title">P&amp;G <small class="muted">estimado</small></h2>
-                        ${layPyGCompact(ctx)}
+                    <section class="dash-section dash-section-rise">
+                        ${(() => {
+                            const pygPeriod = resolvePyGPeriod();
+                            const pygCtx = sliceCtxForPyG(ctx, pygPeriod);
+                            return `
+                        <div class="dash-section-head">
+                            <div class="dash-section-copy">
+                                <h2 class="dash-section-title">P&amp;G estimado</h2>
+                                <p class="dash-section-lead">Resultado del periodo con ganancias, pérdidas y bonificaciones.</p>
+                            </div>
+                            ${layPyGPeriodChips(pygPeriod)}
+                        </div>
+                        ${layPyGCompact(pygCtx)}`;
+                        })()}
                     </section>
-                    <section class="dash-section">
-                        <h2 class="dash-section-title">Top 3 · utilidad <span class="dash-mp-tag">${esc(mpLabel)}</span></h2>
+                    <section class="dash-section dash-section-rise">
+                        <div class="dash-section-copy">
+                            <h2 class="dash-section-title">Top 3 · utilidad</h2>
+                            <p class="dash-section-lead">Lo que más aporta en <span class="dash-mp-tag">${esc(mpLabel)}</span></p>
+                        </div>
                         ${layRankingTop3(ctx)}
                     </section>
-                    <section class="dash-section" id="dash-asignacion">
-                        <h2 class="dash-section-title">Asignación <span class="dash-mp-tag">${esc(mpLabel)}</span></h2>
+                    <section class="dash-section dash-section-rise" id="dash-asignacion">
+                        <div class="dash-section-copy">
+                            <h2 class="dash-section-title">Asignación</h2>
+                            <p class="dash-section-lead">Cómo se reparte el cobro en tus bolsitas · <span class="dash-mp-tag">${esc(mpLabel)}</span></p>
+                        </div>
                         ${layAsignacion(ctx)}
                     </section>
                     <div class="dash-hint-general">
-                        <p class="muted small">Estas bolsitas son de <strong>${esc(mpLabel)}</strong> y alimentan el consolidado de
+                        <p>Estas bolsitas son de <strong>${esc(mpLabel)}</strong> y alimentan el consolidado de
                             <button type="button" class="dash-link-inline" data-dash-goto-mp="general">General</button>.
                             Caja, Portafolio y ranking completo también viven ahí.</p>
                     </div>
@@ -177,20 +218,34 @@ const DashboardView = (() => {
             : 'hero';
         const fromResolved = resolveChartFrom(window.State.ui);
 
+        const gxAmbience = `
+            <div class="dash-fx-stage" aria-hidden="true">
+                <span class="dash-fx-wash"></span>
+                <span class="dash-fx-mark"></span>
+            </div>`;
+
         if (!lotesAll.length) {
             root.innerHTML = `
-                <div class="dash-shell">
-                    <div class="dash-body dash-body-combined">
+                <div class="dash-shell dash-shell-home dash-shell-general is-fx is-general" id="dash-general-root">
+                    <div class="dash-body dash-body-combined dash-home gx-body">
+                        <header class="dash-masthead">
+                            ${gxAmbience}
+                            <p class="dash-masthead-kicker">General</p>
+                            <h1 class="dash-masthead-title">Empieza en un canal.</h1>
+                        </header>
                         <div class="dash-empty-full">
                             <h2>Vista ejecutiva vacía</h2>
-                            <p class="muted">Agrega productos en Mercado Libre o Amazon para ver el consolidado.</p>
+                            <p>Agrega productos en Mercado Libre o Amazon para ver el consolidado.</p>
                             <div class="dash-empty-actions">
                                 <button type="button" class="btn primary" data-dash-goto-mp="meli">Abrir Mercado Libre</button>
                                 <button type="button" class="btn" data-dash-goto-mp="amazon">Abrir Amazon</button>
                             </div>
                         </div>
-                        <section class="dash-section">
-                            <h2 class="dash-section-title">Capital unificado</h2>
+                        <section class="dash-section dash-section-rise">
+                            <div class="dash-section-copy">
+                                <h2 class="dash-section-title">Capital unificado</h2>
+                                <p class="dash-section-lead">Listo cuando haya ventas en cualquiera de los dos.</p>
+                            </div>
                             ${layCapitalUnificado(allocUnified)}
                         </section>
                     </div>
@@ -199,56 +254,91 @@ const DashboardView = (() => {
             return;
         }
 
+        const pygPeriod = resolvePyGPeriod();
+        const pygCtx = sliceCtxForPyG(ctx, pygPeriod);
+
         root.innerHTML = `
-            <div class="dash-shell dash-shell-general" id="dash-general-root">
-                <div class="dash-body dash-body-combined gx-body">
+            <div class="dash-shell dash-shell-home dash-shell-general is-fx is-general" id="dash-general-root">
+                <div class="dash-body dash-body-combined dash-home gx-body">
+                    <header class="dash-masthead">
+                        ${gxAmbience}
+                        <p class="dash-masthead-kicker">General</p>
+                        <h1 class="dash-masthead-title">Ambos canales,<br>un solo pulso.</h1>
+                    </header>
                     ${layGeneralExecutive(exec)}
-                    <details class="gx-more" id="gx-progreso" data-gx-more-persist="progreso"${moreFlags.progreso ? ' open' : ''}>
-                        <summary class="gx-more-summary">Progreso (gráficas)</summary>
-                        <div class="gx-more-body">
-                            <div class="dash-chart-toggles" style="margin-bottom:12px">
+                    <section class="dash-section dash-section-rise" id="gx-progreso">
+                        <div class="dash-section-head">
+                            <div class="dash-section-copy">
+                                <h2 class="dash-section-title">Progreso</h2>
+                                <p class="dash-section-lead">Tendencia consolidada Meli + Amazon</p>
+                            </div>
+                            <div class="dash-chart-toggles">
                                 <div class="dash-seg" role="group" aria-label="Granularidad">
                                     <button type="button" class="dash-seg-btn${chartPeriod === 'weeks' ? ' active' : ''}" data-dash-period="weeks">Semanas</button>
                                     <button type="button" class="dash-seg-btn${chartPeriod === 'months' ? ' active' : ''}" data-dash-period="months">Meses</button>
                                     <button type="button" class="dash-seg-btn${chartPeriod === 'years' ? ' active' : ''}" data-dash-period="years">Años</button>
                                 </div>
-                                <div class="dash-seg" role="group" aria-label="Tipo de gráfica">
-                                    <button type="button" class="dash-seg-btn${chartType === 'hero' ? ' active' : ''}" data-dash-type="hero">Hero</button>
-                                    <button type="button" class="dash-seg-btn${chartType === 'bars' ? ' active' : ''}" data-dash-type="bars">Barras</button>
-                                    <button type="button" class="dash-seg-btn${chartType === 'lines' ? ' active' : ''}" data-dash-type="lines">Líneas</button>
-                                    <button type="button" class="dash-seg-btn${chartType === 'area' ? ' active' : ''}" data-dash-type="area">Área</button>
-                                </div>
+                                <details class="dash-chart-type-more">
+                                    <summary class="dash-chart-type-btn" aria-label="Tipo de gráfica">⋯</summary>
+                                    <div class="dash-chart-type-list" role="group" aria-label="Tipo de gráfica">
+                                        <button type="button" class="dash-type-opt${chartType === 'hero' ? ' active' : ''}" data-dash-type="hero">Hero</button>
+                                        <button type="button" class="dash-type-opt${chartType === 'bars' ? ' active' : ''}" data-dash-type="bars">Barras</button>
+                                        <button type="button" class="dash-type-opt${chartType === 'lines' ? ' active' : ''}" data-dash-type="lines">Líneas</button>
+                                        <button type="button" class="dash-type-opt${chartType === 'area' ? ' active' : ''}" data-dash-type="area">Área</button>
+                                    </div>
+                                </details>
                             </div>
-                            ${layProgreso(lotesAll, {
-                                period: chartPeriod,
-                                range: chartRange,
-                                showEmpty: chartShowEmpty,
-                                chartType,
-                                fromDate: fromResolved.iso,
-                                fromPreset: fromResolved.preset,
-                                cashMode: window.State.ui?.dashCashMode === 'vendido' ? 'vendido' : 'cobrado',
-                            })}
                         </div>
-                    </details>
-                    <details class="gx-more" id="gx-finanzas" data-gx-more-persist="finanzas"${moreFlags.finanzas ? ' open' : ''}>
-                        <summary class="gx-more-summary">Finanzas (P&amp;G · caja · portafolio · bolsitas)</summary>
+                        ${layProgreso(lotesAll, {
+                            period: chartPeriod,
+                            range: chartRange,
+                            showEmpty: chartShowEmpty,
+                            chartType,
+                            fromDate: fromResolved.iso,
+                            fromPreset: fromResolved.preset,
+                            cashMode: window.State.ui?.dashCashMode === 'vendido' ? 'vendido' : 'cobrado',
+                        })}
+                    </section>
+                    <section class="dash-section dash-section-rise" id="gx-finanzas">
+                        <div class="dash-section-head">
+                            <div class="dash-section-copy">
+                                <h2 class="dash-section-title">P&amp;G estimado</h2>
+                                <p class="dash-section-lead">Resultado consolidado del periodo</p>
+                            </div>
+                            ${layPyGPeriodChips(pygPeriod)}
+                        </div>
+                        ${layPyGCompact(pygCtx)}
+                    </section>
+                    <section class="dash-section dash-section-rise">
+                        <div class="dash-section-copy">
+                            <h2 class="dash-section-title">Top 3 · utilidad</h2>
+                            <p class="dash-section-lead">Lo que más aporta en ambos canales</p>
+                        </div>
+                        ${layRankingTop3(ctx)}
+                    </section>
+                    <details class="gx-more dash-section-rise" id="gx-finanzas-more" data-gx-more-persist="finanzas"${moreFlags.finanzas ? ' open' : ''}>
+                        <summary class="gx-more-summary">Más finanzas · detalle, caja, portafolio y ranking</summary>
                         <div class="gx-more-body">
                             <div class="gx-fin-stack">
                                 <div>
-                                    <h3 class="gx-fin-h">P&amp;G</h3>
-                                    ${layPyG(ctx)}
+                                    <h3 class="gx-fin-h">Estado de resultados</h3>
+                                    ${layPyG(pygCtx)}
+                                </div>
+                                <div>
+                                    <h3 class="gx-fin-h">Detalle por venta</h3>
+                                    ${layVentaDetalle(pygCtx, { variant: 'full' })}
                                 </div>
                                 <div>
                                     <h3 class="gx-fin-h">Caja</h3>
                                     ${layCaja(ctx)}
                                 </div>
                                 <div>
-                                    <h3 class="gx-fin-h">Portafolio (Meli + Amazon)</h3>
+                                    <h3 class="gx-fin-h">Portafolio</h3>
                                     ${layPortafolio(ctx)}
                                 </div>
                                 <div>
-                                    <h3 class="gx-fin-h">Bolsitas (consolidado Meli + Amazon)</h3>
-                                    <p class="muted small" style="margin:0 0 10px">Suma de lo que repartes en cada marketplace. Para usar o ajustar %, abre Meli o Amazon.</p>
+                                    <h3 class="gx-fin-h">Bolsitas consolidadas</h3>
+                                    <p class="dash-section-lead" style="margin:0 0 12px">Suma de Meli + Amazon. Para usar o ajustar %, abre cada marketplace.</p>
                                     ${layAsignacionDualReadonly()}
                                 </div>
                                 <div>
@@ -371,13 +461,14 @@ const DashboardView = (() => {
     }
 
     function salesUdsLastDays(lotes, days) {
-        const cut = Date.now() - days * 86400000;
+        const now = new Date();
+        const cut = Calc.startOfLocalDay(new Date(now.getTime() - days * 86400000));
         let uds = 0;
         (lotes || []).forEach(lote => {
             const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
             ventas.forEach(v => {
-                const d = parseSaleDate(v.fecha);
-                if (!d || d.getTime() < cut) return;
+                const d = Calc.effectiveSaleDay(v.fecha, now);
+                if (!d || !cut || d < cut) return;
                 uds += Math.max(0, Number(v.unidades) || 0);
             });
         });
@@ -389,6 +480,7 @@ const DashboardView = (() => {
         const y = now.getFullYear();
         const m = now.getMonth();
         const start = new Date(y, m, 1);
+        const today = Calc.startOfLocalDay(now);
         const daysInMonth = new Date(y, m + 1, 0).getDate();
         const daysElapsed = Math.max(1, now.getDate());
         let cashIn = 0;
@@ -399,8 +491,8 @@ const DashboardView = (() => {
             const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
             if (ventas.length) {
                 ventas.forEach(v => {
-                    const d = parseSaleDate(v.fecha);
-                    if (!d || d < start) return;
+                    const d = Calc.effectiveSaleDay(v.fecha, now);
+                    if (!d || d < start || (today && d > today)) return;
                     const uds = Math.max(0, Number(v.unidades) || 0);
                     const precio = Number(v.precio) || 0;
                     cashIn += precio * uds;
@@ -661,11 +753,9 @@ const DashboardView = (() => {
         const checklist = readDailyChecklist();
 
         return `
-            <section class="dash-section dash-exec gx-exec" id="gx-pulso">
+            <section class="dash-section dash-exec gx-exec dash-section-rise" id="gx-pulso">
                 <div class="gx-hero gx-hero-compact">
                     <div class="gx-hero-copy">
-                        <p class="gx-brand">Ventas</p>
-                        <h2 class="gx-title">Hoy</h2>
                         <p class="gx-sub">${esc(monthCap)} · día ${monthStats.daysElapsed}/${monthStats.daysInMonth} · ${nMeli + nAmz} productos</p>
                         <div class="gx-hero-ctas">
                             <button type="button" class="btn primary gx-btn-solid" data-lote-new>Nuevo lote</button>
@@ -710,13 +800,10 @@ const DashboardView = (() => {
                 </div>
             </section>
 
-            <section class="dash-section gx-block" id="gx-checklist">
-                <div class="gx-block-head">
-                    <div>
-                        <p class="gx-block-kicker">01</p>
-                        <h2 class="gx-block-title">Checklist · 3 minutos</h2>
-                    </div>
-                    <p class="gx-block-lead">Ventas · stock crítico · una acción. Listo y listo.</p>
+            <section class="dash-section dash-section-rise" id="gx-checklist">
+                <div class="dash-section-copy">
+                    <h2 class="dash-section-title">Checklist · 3 minutos</h2>
+                    <p class="dash-section-lead">Ventas · stock crítico · una acción</p>
                 </div>
                 <ul class="gx-daily-check">
                     <li class="${checklist.ventas ? 'is-done' : ''}">
@@ -742,16 +829,13 @@ const DashboardView = (() => {
                 </ul>
             </section>
 
-            <section class="dash-section gx-block" id="gx-acciones">
-                <div class="gx-block-head">
-                    <div>
-                        <p class="gx-block-kicker">02</p>
-                        <h2 class="gx-block-title">Agenda y prioridades</h2>
-                    </div>
-                    <p class="gx-block-lead">Qué hacer hoy con el capital.</p>
+            <section class="dash-section dash-section-rise" id="gx-acciones">
+                <div class="dash-section-copy">
+                    <h2 class="dash-section-title">Agenda y prioridades</h2>
+                    <p class="dash-section-lead">Qué hacer hoy con el capital</p>
                 </div>
                 <div class="gx-actions dash-split-2">
-                    <div class="dash-panel gx-panel">
+                    <div class="dash-panel gx-panel dash-panel-quiet">
                         <div class="gx-panel-head">
                             <h3>Prioridades</h3>
                             <p class="muted small">Escalar · liquidar</p>
@@ -767,7 +851,7 @@ const DashboardView = (() => {
                             </div>
                         </div>
                     </div>
-                    <div class="dash-panel gx-panel">
+                    <div class="dash-panel gx-panel dash-panel-quiet">
                         <div class="gx-panel-head">
                             <h3>Agenda</h3>
                             <p class="muted small">Hoy</p>
@@ -789,50 +873,48 @@ const DashboardView = (() => {
                 </div>
             </section>
 
-            <section class="dash-section gx-block" id="gx-invmap">
-                <div class="gx-block-head">
-                    <div>
-                        <p class="gx-block-kicker">03</p>
-                        <h2 class="gx-block-title">Sano vs flojo</h2>
-                    </div>
-                    <p class="gx-block-lead">Cuánto capital está en margen sano (≥20%) vs flojo.</p>
+            <section class="dash-section dash-section-rise" id="gx-invmap">
+                <div class="dash-section-copy">
+                    <h2 class="dash-section-title">Sano vs flojo</h2>
+                    <p class="dash-section-lead">Capital en margen sano (≥20%) vs flojo</p>
                 </div>
-                ${layInvMarginMap(aggCombined.rows || [])}
+                <div class="dash-panel dash-panel-quiet gx-invmap-panel">
+                    ${layInvMarginMap(aggCombined.rows || [])}
+                </div>
             </section>
 
-            <section class="dash-section gx-block" id="gx-metas">
-                <div class="gx-block-head">
-                    <div>
-                        <p class="gx-block-kicker">04</p>
-                        <h2 class="gx-block-title">Metas del mes</h2>
-                    </div>
-                    <p class="gx-block-lead">Objetivo simple. El pulso sigue el ritmo.</p>
+            <section class="dash-section dash-section-rise" id="gx-metas">
+                <div class="dash-section-copy">
+                    <h2 class="dash-section-title">Metas del mes</h2>
+                    <p class="dash-section-lead">Objetivo simple. El pulso sigue el ritmo.</p>
                 </div>
-                <div class="gx-goals">
-                    <div class="gx-goals-main">
-                        <div class="gx-goals-fields">
-                            <label class="gx-field">
-                                <span>Meta utilidad (MXN)</span>
-                                <input type="number" min="0" step="100" data-goal-utilidad value="${goalUtil || ''}" placeholder="0">
-                            </label>
-                            <label class="gx-field">
-                                <span>Meta cash in (MXN)</span>
-                                <input type="number" min="0" step="100" data-goal-cash value="${goalCash || ''}" placeholder="0">
-                            </label>
-                            <button type="button" class="btn primary gx-btn-solid" data-goal-save>Guardar metas</button>
+                <div class="dash-panel dash-panel-quiet gx-goals-panel">
+                    <div class="gx-goals">
+                        <div class="gx-goals-main">
+                            <div class="gx-goals-fields">
+                                <label class="gx-field">
+                                    <span>Meta utilidad (MXN)</span>
+                                    <input type="number" min="0" step="100" data-goal-utilidad value="${goalUtil || ''}" placeholder="0">
+                                </label>
+                                <label class="gx-field">
+                                    <span>Meta cash in (MXN)</span>
+                                    <input type="number" min="0" step="100" data-goal-cash value="${goalCash || ''}" placeholder="0">
+                                </label>
+                                <button type="button" class="btn primary gx-btn-solid" data-goal-save>Guardar metas</button>
+                            </div>
+                        </div>
+                        <div class="gx-goals-pace">
+                            ${layGoalBar('Utilidad', monthStats.ganancia, goalUtil, monthStats.projGain)}
+                            ${layGoalBar('Cash in', monthStats.cashIn, goalCash, monthStats.projCash)}
                         </div>
                     </div>
-                    <div class="gx-goals-pace">
-                        ${layGoalBar('Utilidad', monthStats.ganancia, goalUtil, monthStats.projGain)}
-                        ${layGoalBar('Cash in', monthStats.cashIn, goalCash, monthStats.projCash)}
-                    </div>
                 </div>
             </section>
 
-            <details class="gx-more" id="gx-canales" data-gx-more-persist="canales" ${moreOpen ? 'open' : ''}>
+            <details class="gx-more dash-section-rise" id="gx-canales" data-gx-more-persist="canales" ${moreOpen ? 'open' : ''}>
                 <summary class="gx-more-summary">Más detalle · canales y capital</summary>
                 <div class="gx-more-body">
-                    <div class="gx-alloc-suggest" aria-label="Asignación sugerida de capital" style="margin-bottom:16px">
+                    <div class="gx-alloc-suggest" aria-label="Asignación sugerida de capital">
                         <div class="gx-alloc-copy">
                             <span class="gx-alloc-title">Peso sugerido</span>
                             <span class="muted small">${esc(split.line)}</span>
@@ -847,7 +929,7 @@ const DashboardView = (() => {
                         </div>
                     </div>
                     ${layChannelMatrix(exec.aggMeli, exec.aggAmz, nMeli, nAmz, hardMeli, hardAmz)}
-                    <div style="margin-top:18px">${layCapitalUnificado(allocUnified)}</div>
+                    <div class="gx-canales-capital">${layCapitalUnificado(allocUnified)}</div>
                 </div>
             </details>
         `;
@@ -1354,12 +1436,6 @@ const DashboardView = (() => {
         return d && !Number.isNaN(d.getTime()) ? toISODate(d) : '';
     }
 
-    function formatFromLabel(iso) {
-        const d = parseISODate(iso);
-        if (!d) return iso || '';
-        return fmtDMY(d);
-    }
-
     /** Venta ya repartida en bolsitas (Caja). No cuenta cobrado-sin-asignar ni legacy suelto. */
     function ventaIsCobrado(v) {
         return !!(v && Data.hasAsignacion?.(v));
@@ -1369,11 +1445,13 @@ const DashboardView = (() => {
      * Estadísticas del periodo actual (últimos N días) y del periodo previo
      * de igual duración, para el Hero de KPIs con delta chip. Legacy sin
      * eventos no cae en ninguno de los buckets: no tiene fecha confiable.
+     * Fechas solo-día usan Calc.effectiveSaleDay (futuro → hoy).
      */
     function heroPeriodStats(lotes, days = 30) {
         const now = new Date();
-        const curStart = new Date(now.getTime() - days * 86400000);
-        const prevStart = new Date(now.getTime() - 2 * days * 86400000);
+        const todayStart = Calc.startOfLocalDay(now);
+        const curStart = Calc.startOfLocalDay(new Date(now.getTime() - days * 86400000));
+        const prevStart = Calc.startOfLocalDay(new Date(now.getTime() - 2 * days * 86400000));
         const cur = { cobrado: 0, vendido: 0, ganancia: 0, uds: 0 };
         const prev = { cobrado: 0, vendido: 0, ganancia: 0, uds: 0 };
         let hasAnyPrev = false;
@@ -1386,17 +1464,17 @@ const DashboardView = (() => {
                 const uds = Math.max(0, Number(v.unidades) || 0);
                 if (!uds) return;
                 const precio = Number(v.precio) || 0;
-                const dSale = parseSaleDate(v.fecha);
                 const loteAt = loteAtSaleCost(lote, v);
                 const util = Calc.utilidadAtPrice(loteAt, precio, settings).utilidad;
+                const saleDay = Calc.effectiveSaleDay(v.fecha, now);
 
-                if (dSale) {
-                    if (dSale >= curStart && dSale <= now) {
+                if (saleDay && curStart && todayStart) {
+                    if (saleDay >= curStart && saleDay <= todayStart) {
                         cur.vendido += precio * uds;
                         cur.ganancia += util * uds;
                         cur.uds += uds;
                         hasAnyCur = true;
-                    } else if (dSale >= prevStart && dSale < curStart) {
+                    } else if (prevStart && saleDay >= prevStart && saleDay < curStart) {
                         prev.vendido += precio * uds;
                         prev.ganancia += util * uds;
                         prev.uds += uds;
@@ -1404,10 +1482,11 @@ const DashboardView = (() => {
                     }
                 }
                 if (ventaIsCobrado(v)) {
-                    const dC = parseSaleDate(v.cobradoAt) || dSale;
-                    if (dC) {
-                        if (dC >= curStart && dC <= now) cur.cobrado += precio * uds;
-                        else if (dC >= prevStart && dC < curStart) {
+                    const cobroDay = Calc.effectiveSaleDay(v.cobradoAt, now) || saleDay;
+                    if (cobroDay && curStart && todayStart) {
+                        if (cobroDay >= curStart && cobroDay <= todayStart) {
+                            cur.cobrado += precio * uds;
+                        } else if (prevStart && cobroDay >= prevStart && cobroDay < curStart) {
                             prev.cobrado += precio * uds;
                             hasAnyPrev = true;
                         }
@@ -1419,9 +1498,8 @@ const DashboardView = (() => {
     }
 
     /**
-     * Hero KPIs: 3 cards (Cobrado / Vendido / Ganancia) con delta chip.
-     * Delta = (cur - prev) / prev%; si no hay periodo previo con datos, muestra
-     * "Sin datos previos" en gris.
+     * Hero KPIs: Vendido → Cobrado → Ganancia → Bonif → Total → (Deuda FBA).
+     * Delta = (cur - prev) / prev%; si no hay periodo previo con datos, "Sin datos previos".
      */
     /** Resumen deuda flete inbound FBA (Amazon Inicio). Ledger completo en Envíos. */
     function readAmazonFreightBalance() {
@@ -1436,6 +1514,12 @@ const DashboardView = (() => {
         return 0;
     }
 
+    /** Monto de hero: siempre 2 decimales (legible y uniforme al centrar). */
+    function fmtHeroMXN(n) {
+        if (n === null || n === undefined || Number.isNaN(Number(n))) return '—';
+        return Calc.fmtMXN(Number(n));
+    }
+
     function layHeroKPIs(lotes, opts = {}) {
         const days = Number.isFinite(opts.days) ? opts.days : 30;
         const stats = heroPeriodStats(lotes, days);
@@ -1443,10 +1527,39 @@ const DashboardView = (() => {
         const compareLabel = days === 30 ? 'vs mes ant.' : `vs ${days}d prev.`;
         const isAmazon = window.State.marketplace === 'amazon' && window.State.ui?.mpView !== 'general';
 
+        const bonif = bonifHeroStats(days);
+        const totalCur = round2((stats.cur.ganancia || 0) + (bonif.cur || 0));
+        const totalPrev = round2((stats.prev.ganancia || 0) + (bonif.prev || 0));
+
+        // Orden: flujo P&L → resultado → deuda (Amazon)
         const cards = [
-            { key: 'cobrado', title: 'Cobrado', tone: 'pos', value: stats.cur.cobrado, prev: stats.prev.cobrado },
             { key: 'vendido', title: 'Vendido', tone: '', value: stats.cur.vendido, prev: stats.prev.vendido },
+            { key: 'cobrado', title: 'Cobrado', tone: tone(stats.cur.cobrado), value: stats.cur.cobrado, prev: stats.prev.cobrado },
             { key: 'ganancia', title: 'Ganancia', tone: tone(stats.cur.ganancia), value: stats.cur.ganancia, prev: stats.prev.ganancia },
+            {
+                key: 'bonif',
+                title: 'Bonificaciones',
+                tone: bonif.cur > 0.009 ? 'pos' : '',
+                value: bonif.cur,
+                prev: bonif.prev,
+                clickable: true,
+                clickAttr: 'data-dash-open-bonif',
+                deltaHtml: bonif.nCur > 0
+                    ? `<div class="hero-kpi-delta is-pos">${bonif.nCur} · editar</div>`
+                    : `<div class="hero-kpi-delta is-na">Registrar</div>`,
+            },
+            {
+                key: 'total',
+                title: 'Total',
+                tone: tone(totalCur),
+                value: totalCur,
+                prev: totalPrev,
+                accent: 'total',
+                // Pie corto: el % vs periodo previo vive en el chip cuando no hay bonif.
+                deltaHtml: Math.abs(bonif.cur) > 0.009
+                    ? `<div class="hero-kpi-delta ${totalCur >= 0 ? 'is-pos' : 'is-neg'}">Ganancia + bonif.</div>`
+                    : undefined,
+            },
         ];
 
         if (isAmazon) {
@@ -1461,16 +1574,20 @@ const DashboardView = (() => {
                 tone: freightBal > 0 ? 'neg' : '',
                 value: freightBal,
                 clickable: true,
+                clickAttr: 'data-dash-goto-envios',
                 deltaHtml: freightBal > 0
-                    ? `<div class="hero-kpi-delta is-neg">Le debes a Amazon</div>`
+                    ? `<div class="hero-kpi-delta is-neg">Pendiente</div>`
                     : (ledgerLen
                         ? `<div class="hero-kpi-delta is-zero">Al día</div>`
-                        : `<div class="hero-kpi-delta is-na">Gestionar en Envíos</div>`),
+                        : `<div class="hero-kpi-delta is-na">Envíos</div>`),
             });
         }
 
         const chip = (cur, prev) => {
-            if (!stats.hasAnyPrev) {
+            if (!stats.hasAnyPrev && !(Math.abs(prev) > 0.009 || Math.abs(cur) > 0.009)) {
+                return `<div class="hero-kpi-delta is-na">Sin datos previos</div>`;
+            }
+            if (!stats.hasAnyPrev && Math.abs(prev) < 0.005) {
                 return `<div class="hero-kpi-delta is-na">Sin datos previos</div>`;
             }
             if (Math.abs(prev) < 0.005) {
@@ -1487,24 +1604,27 @@ const DashboardView = (() => {
             return `<div class="hero-kpi-delta ${cls}" title="Periodo actual: ${Calc.fmtMXN(cur)} · anterior: ${Calc.fmtMXN(prev)}">${arrow} ${pctStr}% ${compareLabel}</div>`;
         };
 
-        const colsClass = cards.length >= 4 ? ' is-4' : '';
+        const colsClass = cards.length >= 6 ? ' is-6'
+            : (cards.length >= 5 ? ' is-5' : (cards.length >= 4 ? ' is-4' : ''));
         return `
             <div class="dash-hero-kpis${colsClass}">
-                ${cards.map(c => {
+                ${cards.map((c, i) => {
                     const tag = c.clickable ? 'button' : 'div';
+                    const clickAttr = c.clickAttr || (c.clickable ? 'data-dash-goto-envios' : '');
+                    const accent = c.accent ? ` is-${c.accent}` : '';
                     const attrs = c.clickable
-                        ? ' type="button" class="hero-kpi hero-kpi-btn" data-dash-goto-envios'
-                        : ' class="hero-kpi"';
+                        ? ` type="button" class="hero-kpi hero-kpi-btn${accent}" style="--kpi-i:${i}" ${clickAttr}`
+                        : ` class="hero-kpi${accent}" style="--kpi-i:${i}"`;
                     const period = c.periodLabel || label;
                     const delta = c.deltaHtml != null ? c.deltaHtml : chip(c.value, c.prev);
                     return `
                     <${tag}${attrs}>
-                        <div class="hero-kpi-title">
-                            <span>${esc(c.title)}</span>
-                            <small>${esc(period)}</small>
+                        <div class="hero-kpi-head">
+                            <span class="hero-kpi-name">${esc(c.title)}</span>
+                            <span class="hero-kpi-period">${esc(period)}</span>
                         </div>
-                        <div class="hero-kpi-value mono ${c.tone || ''}">${Calc.fmtMXN(c.value)}</div>
-                        ${delta}
+                        <div class="hero-kpi-value ${c.tone || ''}" title="${esc(Calc.fmtMXN(c.value))}">${fmtHeroMXN(c.value)}</div>
+                        <div class="hero-kpi-foot">${delta}</div>
                     </${tag}>`;
                 }).join('')}
             </div>
@@ -1528,76 +1648,102 @@ const DashboardView = (() => {
         const totalVendido = sum(seriesVendido, 'cashIn');
         const totalCobrado = sum(seriesCobrado, 'cashIn');
         const totalCash = cashMode === 'vendido' ? totalVendido : totalCobrado;
-        const totalGain = sum(series, 'ganancia');
+        const salesGain = sum(series, 'ganancia');
+        const progRange = progressRangeFromSeries(series, period);
+        const bonifProg = sumBonificacionesInRange(bonifMarketsForView(), progRange);
+        const totalGain = round2(salesGain + (bonifProg.total || 0));
         const totalUds = sum(series, 'unidades');
-        const porCobrarAmt = round2(totalVendido - totalCobrado);
         const emptyHidden = !showEmpty && series.some(b => !(b.cashIn > 0 || b.ganancia > 0 || b.unidades > 0));
         const mpView = window.State.ui?.mpView;
         const mpLabel = mpView === 'general'
             ? 'General (ambos)'
             : (window.State.marketplace === 'amazon' ? 'Amazon' : 'Mercado Libre');
-        const rangeHint = fromDate
-            ? (fromPreset === 'month'
-                ? 'Mes corriente → hoy'
-                : fromPreset === 'year'
-                    ? 'Año corriente → hoy'
-                    : `Desde ${esc(formatFromLabel(fromDate))} hasta hoy`)
-            : (period === 'years'
-                ? 'Últimos años con actividad'
-                : `Últimos ${range} ${period === 'weeks' ? 'semanas' : 'meses'}`);
         const modeHint = cashMode === 'cobrado'
             ? 'Solo marcado Cobrado en Caja'
             : 'Todas las ventas registradas';
 
         return `
-            <div class="dash-prog-mode">
-                <div class="dash-seg" role="group" aria-label="Vendido o cobrado">
-                    <button type="button" class="dash-seg-btn${cashMode === 'cobrado' ? ' active' : ''}" data-dash-cash="cobrado">Cobrado</button>
-                    <button type="button" class="dash-seg-btn${cashMode === 'vendido' ? ' active' : ''}" data-dash-cash="vendido">Vendido</button>
-                </div>
-                <span class="muted small">${esc(modeHint)}</span>
-            </div>
             <div class="dash-panel dash-chart-panel">
-                <div class="dash-chart-filters">
-                    <div class="dash-from-row">
-                        <label class="dash-from-field"><span>Desde (año / mes / día)</span>
-                            <input type="date" data-dash-from value="${esc(fromDate)}" max="${esc(toISODate(new Date()))}">
-                        </label>
-                        <div class="dash-from-presets" role="group" aria-label="Filtros rápidos">
-                            <button type="button" class="dash-chip-btn${fromPreset === 'month' ? ' active' : ''}" data-dash-from-preset="month">Mes actual</button>
-                            <button type="button" class="dash-chip-btn${fromPreset === 'year' ? ' active' : ''}" data-dash-from-preset="year">Año actual</button>
-                            ${fromDate ? '<button type="button" class="dash-chip-btn" data-dash-from-clear>Quitar filtro</button>' : ''}
+                <div class="dash-chart-toolbar">
+                    <div class="dash-prog-mode">
+                        <div class="dash-seg" role="group" aria-label="Vendido o cobrado">
+                            <button type="button" class="dash-seg-btn${cashMode === 'cobrado' ? ' active' : ''}" data-dash-cash="cobrado">Cobrado</button>
+                            <button type="button" class="dash-seg-btn${cashMode === 'vendido' ? ' active' : ''}" data-dash-cash="vendido">Vendido</button>
+                        </div>
+                        <span class="dash-toolbar-hint">${esc(modeHint)}</span>
+                    </div>
+                    <div class="dash-chart-filters">
+                        <div class="dash-from-row">
+                            <label class="dash-from-field"><span>Desde</span>
+                                <input type="date" data-dash-from value="${esc(fromDate)}" max="${esc(toISODate(new Date()))}">
+                            </label>
+                            <div class="dash-from-presets" role="group" aria-label="Filtros rápidos">
+                                <button type="button" class="dash-chip-btn${fromPreset === 'month' ? ' active' : ''}" data-dash-from-preset="month">Mes actual</button>
+                                <button type="button" class="dash-chip-btn${fromPreset === 'year' ? ' active' : ''}" data-dash-from-preset="year">Año actual</button>
+                                ${fromDate ? '<button type="button" class="dash-chip-btn" data-dash-from-clear>Quitar</button>' : ''}
+                            </div>
+                        </div>
+                        <div class="dash-filter-right">
+                            <div class="dash-seg" role="group" aria-label="Rango rápido" ${fromDate ? 'hidden' : ''}>
+                                <button type="button" class="dash-seg-btn${range === 3 ? ' active' : ''}" data-dash-range="3">3</button>
+                                <button type="button" class="dash-seg-btn${range === 6 ? ' active' : ''}" data-dash-range="6">6</button>
+                                <button type="button" class="dash-seg-btn${range === 12 ? ' active' : ''}" data-dash-range="12">12</button>
+                                <button type="button" class="dash-seg-btn${range === 24 ? ' active' : ''}" data-dash-range="24">24</button>
+                            </div>
+                            <button type="button" class="dash-chip-btn${showEmpty ? ' active' : ''}" data-dash-empty="${showEmpty ? '0' : '1'}">
+                                ${showEmpty ? 'Ocultar vacíos' : 'Mostrar vacíos'}
+                            </button>
                         </div>
                     </div>
-                    <div class="dash-seg" role="group" aria-label="Rango rápido" ${fromDate ? 'hidden' : ''}>
-                        <button type="button" class="dash-seg-btn${range === 3 ? ' active' : ''}" data-dash-range="3">3</button>
-                        <button type="button" class="dash-seg-btn${range === 6 ? ' active' : ''}" data-dash-range="6">6</button>
-                        <button type="button" class="dash-seg-btn${range === 12 ? ' active' : ''}" data-dash-range="12">12</button>
-                        <button type="button" class="dash-seg-btn${range === 24 ? ' active' : ''}" data-dash-range="24">24</button>
-                    </div>
-                    <button type="button" class="dash-chip-btn${showEmpty ? ' active' : ''}" data-dash-empty="${showEmpty ? '0' : '1'}">
-                        ${showEmpty ? 'Ocultar vacíos' : 'Mostrar vacíos'}
-                    </button>
                 </div>
                 ${renderProgressChart(chartType, chartSeries, {
                     totalCash,
                     totalGain,
+                    salesGain,
+                    bonificaciones: bonifProg.total,
+                    bonificacionesN: bonifProg.n,
                     totalUds,
                     period,
                     cashMode,
                 })}
-                <p class="muted small dash-chart-note">
+                <p class="dash-chart-note">
                     ${emptyHidden
                         ? 'Periodos vacíos ocultos. Activa «Mostrar vacíos» para ver el calendario completo.'
-                        : `Gráfica = ${cashMode === 'cobrado' ? 'Cobrado' : 'Vendido'} · ${esc(mpLabel)}.`}
+                        : `${cashMode === 'cobrado' ? 'Cobrado' : 'Vendido'} · ${esc(mpLabel)}`}
                 </p>
             </div>
         `;
     }
 
+    /** Rango calendario cubierto por la serie de Progreso (para sumar bonificaciones). */
+    function progressRangeFromSeries(series, period) {
+        if (!series?.length) return null;
+        const startRaw = parsePeriodKey(series[0].key, period);
+        const lastRaw = parsePeriodKey(series[series.length - 1].key, period);
+        if (!startRaw || Number.isNaN(startRaw.getTime()) || !lastRaw || Number.isNaN(lastRaw.getTime())) {
+            return null;
+        }
+        const start = Calc.startOfLocalDay(startRaw);
+        const now = Calc.startOfLocalDay(new Date());
+        if (!start || !now) return null;
+        let end;
+        if (period === 'years') {
+            end = Calc.startOfLocalDay(new Date(lastRaw.getFullYear(), 11, 31));
+        } else if (period === 'weeks') {
+            end = Calc.startOfLocalDay(new Date(lastRaw.getFullYear(), lastRaw.getMonth(), lastRaw.getDate() + 6));
+        } else {
+            end = Calc.startOfLocalDay(new Date(lastRaw.getFullYear(), lastRaw.getMonth() + 1, 0));
+        }
+        if (!end) return null;
+        if (end > now) end = now;
+        if (end < start) end = start;
+        return { start, end };
+    }
+
     function buildProgressSeries(lotes, period, range = 12, fromISO = '', cashMode = 'cobrado') {
         const fromDate = parseISODate(fromISO);
         const mode = cashMode === 'vendido' ? 'vendido' : 'cobrado';
+        const now = new Date();
         const map = new Map();
         (lotes || []).forEach(lote => {
             const settings = settingsForTaggedLote(lote);
@@ -1606,10 +1752,11 @@ const DashboardView = (() => {
             if (ventas.length) {
                 ventas.forEach(v => {
                     if (mode === 'cobrado' && !ventaIsCobrado(v)) return;
-                    // Cobrado: fecha de cobro (cash-basis); Vendido: fecha de venta
+                    // Cobrado: fecha de cobro (cash-basis); Vendido: fecha de venta.
+                    // effectiveSaleDay: fechas “mañana” no caen fuera del eje (hasta hoy).
                     const d = mode === 'cobrado'
-                        ? (parseSaleDate(v.cobradoAt) || parseSaleDate(v.fecha))
-                        : parseSaleDate(v.fecha);
+                        ? (Calc.effectiveSaleDay(v.cobradoAt, now) || Calc.effectiveSaleDay(v.fecha, now))
+                        : Calc.effectiveSaleDay(v.fecha, now);
                     if (!d) return;
                     if (fromDate && d < fromDate) return;
                     const key = periodKey(d, period);
@@ -1630,7 +1777,8 @@ const DashboardView = (() => {
             // Legacy sin eventos: cuenta en ambos modos (historial viejo = ya cobrado)
             const vendidas = Math.max(0, Number(lote.vendidas) || 0);
             if (!vendidas) return;
-            const d = parseSaleDate(lote.fecha) || new Date();
+            const d = Calc.effectiveSaleDay(lote.fecha, now) || Calc.startOfLocalDay(now);
+            if (!d) return;
             if (fromDate && d < fromDate) return;
             const key = periodKey(d, period);
             if (!map.has(key)) map.set(key, emptyBucket(key, d, period));
@@ -1643,7 +1791,6 @@ const DashboardView = (() => {
             b.pedidos += 1;
         });
 
-        const now = new Date();
         const fromKey = fromDate ? periodKey(fromDate, period) : '';
         const keys = buildPeriodKeys(period, range, fromKey, now);
 
@@ -1762,21 +1909,7 @@ const DashboardView = (() => {
     }
 
     function parseSaleDate(raw) {
-        if (!raw) return null;
-        const s = String(raw).trim();
-        let d = null;
-        if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-            const [y, m, day] = s.slice(0, 10).split('-').map(Number);
-            d = new Date(y, m - 1, day);
-        } else if (/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(s)) {
-            const [a, b, c] = s.split(/[\/-]/).map(Number);
-            const y = c < 100 ? 2000 + c : c;
-            d = new Date(y, b - 1, a);
-        } else {
-            const t = Date.parse(s);
-            if (!Number.isNaN(t)) d = new Date(t);
-        }
-        return d && !Number.isNaN(d.getTime()) ? d : null;
+        return Calc.parseSaleDate(raw);
     }
 
 
@@ -1801,7 +1934,7 @@ const DashboardView = (() => {
             ? (deltaGain / Math.abs(prev.b.ganancia)) * 100
             : (prev && Math.abs(deltaGain) > 0.009 ? (deltaGain > 0 ? 100 : -100) : null);
         const periodWord = ctx.period === 'weeks' ? 'semana' : ctx.period === 'years' ? 'año' : 'periodo';
-        const spark = progressSpark(buckets, { focusIndex: cur.i, areaMode: 'gain' });
+        const spark = progressSpark(buckets, { focusIndex: cur.i, areaMode: 'both' });
         const deltaHtml = deltaPct == null
             ? '<span class="dash-hero-delta is-na">Sin periodo previo</span>'
             : `<span class="dash-hero-delta ${tone(deltaGain)}" title="vs ${esc(prev.b.label)}: ${Calc.fmtMXN(deltaGain)}">
@@ -1811,12 +1944,18 @@ const DashboardView = (() => {
         return `
             <div class="dash-hero-chart">
                 <div class="dash-hero-main">
-                    <div class="dash-hero-label">Ganancia del periodo</div>
-                    <div class="dash-hero-value ${tone(ctx.totalGain)}">${Calc.fmtMXN(ctx.totalGain || 0)}</div>
-                    ${deltaHtml}
-                    <div class="dash-hero-sub muted">
-                        ${ctx.cashMode === 'vendido' ? 'Vendido' : 'Cobrado'} ${Calc.fmtMXN(ctx.totalCash || 0)} · ${ctx.totalUds || 0} uds
-                        · Último con datos: ${esc(cur.b.tip || cur.b.label || '—')}
+                    <p class="dash-hero-label">Ganancia del periodo</p>
+                    <p class="dash-hero-value ${tone(ctx.totalGain)}">${Calc.fmtMXN(ctx.totalGain || 0)}</p>
+                    <div class="dash-hero-meta">
+                        ${deltaHtml}
+                        <p class="dash-hero-sub">
+                            <span>${ctx.cashMode === 'vendido' ? 'Vendido' : 'Cobrado'} ${Calc.fmtMXN(ctx.totalCash || 0)}</span>
+                            <span>${ctx.totalUds || 0} uds</span>
+                            <span>Último: ${esc(cur.b.tip || cur.b.label || '—')}</span>
+                        </p>
+                        ${Math.abs(ctx.bonificaciones || 0) > 0.009
+                            ? `<p class="dash-hero-bonif">Incluye ${Calc.fmtMXN(ctx.bonificaciones)} en bonificaciones</p>`
+                            : ''}
                     </div>
                 </div>
                 <div class="dash-hero-spark" data-focus-index="${cur.i}">
@@ -1917,41 +2056,70 @@ const DashboardView = (() => {
             </div>`;
     }
 
+    /** Catmull-Rom → cubic Bézier (curvas suaves tipo “producto”). */
+    function smoothLinePath(vals, xAt, yAt) {
+        const n = vals.length;
+        if (!n) return '';
+        const pts = vals.map((v, i) => ({ x: xAt(i), y: yAt(v) }));
+        if (n === 1) return `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+        if (n === 2) {
+            return `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)} L${pts[1].x.toFixed(1)},${pts[1].y.toFixed(1)}`;
+        }
+        let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+        for (let i = 0; i < n - 1; i++) {
+            const p0 = pts[i - 1] || pts[i];
+            const p1 = pts[i];
+            const p2 = pts[i + 1];
+            const p3 = pts[i + 2] || p2;
+            const cp1x = p1.x + (p2.x - p0.x) / 6;
+            const cp1y = p1.y + (p2.y - p0.y) / 6;
+            const cp2x = p2.x - (p3.x - p1.x) / 6;
+            const cp2y = p2.y - (p3.y - p1.y) / 6;
+            d += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+        }
+        return d;
+    }
+
     function progressSpark(buckets, opts = {}) {
-        const W = 640, H = 180, padL = 8, padR = 8, padT = 12, padB = 28;
+        const W = 640, H = 200, padL = 10, padR = 10, padT = 16, padB = 30;
         const n = buckets.length;
         const focusIndex = Number.isFinite(opts.focusIndex) ? opts.focusIndex : -1;
         const areaMode = opts.areaMode || 'gain'; // gain | both | none
+        const uid = `ps${Math.random().toString(36).slice(2, 9)}`;
         const xAt = i => padL + (n <= 1 ? (W - padL - padR) / 2 : (i / (n - 1)) * (W - padL - padR));
-        const maxV = Math.max(
-            ...buckets.flatMap(b => [Math.abs(b.ganancia), Math.abs(b.cashIn)]),
-            1,
-        );
-        const yAt = v => padT + (1 - Math.max(0, v) / maxV) * (H - padT - padB);
-        const gainVals = buckets.map(b => Math.max(0, b.ganancia));
-        const cashVals = buckets.map(b => Math.max(0, b.cashIn));
-        const pathFor = vals => vals.map((v, i) => `${i ? 'L' : 'M'}${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`).join(' ');
-        const gainPath = pathFor(gainVals);
-        const cashPath = pathFor(cashVals);
-        const base = H - padB;
-        const areaFor = (path) => `${path} L${xAt(n - 1).toFixed(1)},${base} L${xAt(0).toFixed(1)},${base} Z`;
+        const cashVals = buckets.map(b => Math.max(0, Number(b.cashIn) || 0));
+        const gainVals = buckets.map(b => Number(b.ganancia) || 0);
+        const yMax = Math.max(1, ...cashVals, ...gainVals);
+        const yMin = Math.min(0, ...gainVals);
+        const ySpan = Math.max(yMax - yMin, 1);
+        const yAt = v => padT + (1 - (v - yMin) / ySpan) * (H - padT - padB);
+        const zeroY = yAt(0);
+        const gainPath = smoothLinePath(gainVals, xAt, yAt);
+        const cashPath = smoothLinePath(cashVals, xAt, yAt);
+        const areaFor = (path) => (n
+            ? `${path} L${xAt(n - 1).toFixed(1)},${zeroY.toFixed(1)} L${xAt(0).toFixed(1)},${zeroY.toFixed(1)} Z`
+            : '');
 
         let areas = '';
-        if (areaMode === 'gain' || areaMode === 'both') areas += `<path class="dash-area-gain" d="${areaFor(gainPath)}" />`;
-        if (areaMode === 'both') areas += `<path class="dash-area-cash" d="${areaFor(cashPath)}" />`;
+        if (areaMode === 'both') {
+            areas += `<path class="dash-area-cash" d="${areaFor(cashPath)}" fill="url(#${uid}-cash)" />`;
+        }
+        if (areaMode === 'gain' || areaMode === 'both') {
+            areas += `<path class="dash-area-gain" d="${areaFor(gainPath)}" fill="url(#${uid}-gain)" />`;
+        }
 
-        // Franjas verticales (no círculos): con preserveAspectRatio=none los
-        // círculos se aplastan y el hit activo se veía como un óvalo azul inútil.
-        const band = n <= 1 ? (W - padL - padR) : (W - padL - padR) / (n - 1);
-        const hitW = Math.max(18, Math.min(48, band * 0.9));
+        // Hits en SVG (estirado); puntos redondos en HTML overlay (sin óvalos).
+        const band = n <= 1 ? (W - padL - padR) : (W - padL - padR) / Math.max(1, n - 1);
+        const hitW = Math.max(20, Math.min(52, band * 0.92));
         const marks = buckets.map((b, i) => {
             const gx = xAt(i);
-            const gy = yAt(gainVals[i]);
-            const cy = yAt(cashVals[i]);
             const active = i === focusIndex ? ' is-focus' : '';
             const hx = Math.max(0, gx - hitW / 2);
             return `
                 <g class="dash-pt${active}" data-dash-point="${i}">
+                    <rect class="dash-focus-band"
+                        x="${hx.toFixed(1)}" y="${padT}"
+                        width="${hitW.toFixed(1)}" height="${(H - padT - padB).toFixed(1)}" />
                     <rect class="dash-hit"
                         x="${hx.toFixed(1)}" y="${padT}"
                         width="${hitW.toFixed(1)}" height="${(H - padT - padB).toFixed(1)}"
@@ -1965,28 +2133,61 @@ const DashboardView = (() => {
                         data-pedidos="${b.pedidos || 0}">
                         <title>${esc(b.tip)}</title>
                     </rect>
-                    <circle class="dash-dot-cash" cx="${gx}" cy="${cy}" r="3"></circle>
-                    <circle class="dash-dot-gain" cx="${gx}" cy="${gy}" r="3.5"></circle>
                 </g>`;
         }).join('');
+
+        const markers = buckets.map((b, i) => {
+            const left = (xAt(i) / W) * 100;
+            const topCash = (yAt(cashVals[i]) / H) * 100;
+            const topGain = (yAt(gainVals[i]) / H) * 100;
+            const focus = i === focusIndex ? ' is-focus' : '';
+            return `
+                <span class="dash-dot-html is-cash${focus}" data-dash-dot="${i}" style="left:${left.toFixed(2)}%;top:${topCash.toFixed(2)}%"></span>
+                <span class="dash-dot-html is-gain${focus}" data-dash-dot="${i}" style="left:${left.toFixed(2)}%;top:${topGain.toFixed(2)}%"></span>`;
+        }).join('');
+
+        const midLabel = yMin < 0 ? shortMoney((yMax + yMin) / 2) : shortMoney(yMax / 2);
+        const bottomLabel = yMin < 0 ? shortMoney(yMin) : '$0';
 
         return `
             <div class="dash-progress-chart dash-progress-line" role="img" aria-label="Tendencia de ganancia y cobrado/vendido">
                 <div class="dash-progress-y">
-                    <span>${shortMoney(maxV)}</span>
-                    <span>${shortMoney(maxV / 2)}</span>
-                    <span>$0</span>
+                    <span>${shortMoney(yMax)}</span>
+                    <span>${midLabel}</span>
+                    <span>${bottomLabel}</span>
                 </div>
                 <div class="dash-progress-plot">
                     <div class="dash-progress-grid" aria-hidden="true"></div>
-                    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="dash-line-svg">
-                        ${areas}
-                        <path class="dash-line-gain" d="${gainPath}" fill="none" />
-                        <path class="dash-line-cash" d="${cashPath}" fill="none" />
-                        ${marks}
-                    </svg>
+                    <div class="dash-spark-stage">
+                        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="dash-line-svg">
+                            <defs>
+                                <linearGradient id="${uid}-gain" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stop-color="#30D158" stop-opacity="0.38"/>
+                                    <stop offset="55%" stop-color="#30D158" stop-opacity="0.12"/>
+                                    <stop offset="100%" stop-color="#30D158" stop-opacity="0"/>
+                                </linearGradient>
+                                <linearGradient id="${uid}-cash" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stop-color="#0071e3" stop-opacity="0.22"/>
+                                    <stop offset="60%" stop-color="#0071e3" stop-opacity="0.07"/>
+                                    <stop offset="100%" stop-color="#0071e3" stop-opacity="0"/>
+                                </linearGradient>
+                                <filter id="${uid}-glow" x="-20%" y="-20%" width="140%" height="140%">
+                                    <feGaussianBlur stdDeviation="1.6" result="b"/>
+                                    <feMerge>
+                                        <feMergeNode in="b"/>
+                                        <feMergeNode in="SourceGraphic"/>
+                                    </feMerge>
+                                </filter>
+                            </defs>
+                            ${areas}
+                            <path class="dash-line-cash" d="${cashPath}" fill="none" vector-effect="non-scaling-stroke" />
+                            <path class="dash-line-gain" d="${gainPath}" fill="none" vector-effect="non-scaling-stroke" filter="url(#${uid}-glow)" />
+                            ${marks}
+                        </svg>
+                        <div class="dash-spark-markers" aria-hidden="true">${markers}</div>
+                    </div>
                     <div class="dash-progress-xlabels">
-                        ${buckets.map(b => `<span title="${esc(b.tip)}">${esc(b.label)}</span>`).join('')}
+                        ${buckets.map((b, i) => `<span class="${i === focusIndex ? 'is-focus' : ''}" data-dash-xlabel="${i}" title="${esc(b.tip)}">${esc(b.label)}</span>`).join('')}
                     </div>
                 </div>
             </div>`;
@@ -2048,22 +2249,213 @@ const DashboardView = (() => {
         return { agg, rows, fees, costoVendido, gastoAds, isAmazon, isGeneral };
     }
 
-    function layPyG({ agg, fees, costoVendido, gastoAds, isAmazon, isGeneral }) {
+    /** Preferencia de corte del P&G: month (default) | prev | all */
+    function readPyGPeriodMode() {
+        const m = window.State.ui?.dashPyGPeriod;
+        return (m === 'prev' || m === 'all') ? m : 'month';
+    }
+
+    /**
+     * Rango calendario del P&G.
+     * month = mes actual hasta hoy; prev = mes anterior completo; all = sin filtro.
+     */
+    function resolvePyGPeriod(now = new Date()) {
+        const mode = readPyGPeriodMode();
+        if (mode === 'all') {
+            return { mode, start: null, end: null, label: 'Todo el historial' };
+        }
+        const y = now.getFullYear();
+        const m = now.getMonth();
+        if (mode === 'prev') {
+            const start = new Date(y, m - 1, 1);
+            const end = Calc.startOfLocalDay(new Date(y, m, 0));
+            const label = start.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+            return { mode, start, end, label: label.charAt(0).toUpperCase() + label.slice(1) };
+        }
+        const start = new Date(y, m, 1);
+        const end = Calc.startOfLocalDay(now);
+        const label = start.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+        return { mode, start, end, label: label.charAt(0).toUpperCase() + label.slice(1) };
+    }
+
+    function saleInPyGRange(fecha, range) {
+        if (!range || !range.start) return true;
+        const d = Calc.effectiveSaleDay(fecha);
+        if (!d) return false;
+        if (d < range.start) return false;
+        if (range.end && d > range.end) return false;
+        return true;
+    }
+
+    /**
+     * Recorta ctx del P&G / detalle a las ventas del rango.
+     * Ads de lote son lifetime → solo se muestran en modo «Todo».
+     */
+    function sliceCtxForPyG(ctx, range) {
+        const resolved = range || resolvePyGPeriod();
+        const markets = ctx.isGeneral
+            ? ['meli', 'amazon']
+            : [window.State.marketplace === 'amazon' ? 'amazon' : 'meli'];
+        const bonif = sumBonificacionesInRange(markets, resolved.start ? resolved : null);
+
+        if (!resolved.start) {
+            return { ...ctx, pygPeriod: resolved, bonificaciones: bonif.total, bonificacionesN: bonif.n };
+        }
+        const slicedRows = [];
+        let cashIn = 0;
+        let ganancia = 0;
+        let fees = 0;
+        let costoVendido = 0;
+        let totalVendidas = 0;
+
+        (ctx.rows || []).forEach(({ lote, calc }) => {
+            if (!lote) return;
+            const settings = settingsForTaggedLote(lote);
+            const ventasAll = Array.isArray(lote.ventas) ? lote.ventas : [];
+
+            if (ventasAll.length) {
+                const ventas = ventasAll.filter(v => saleInPyGRange(v.fecha, resolved));
+                if (!ventas.length) return;
+                const loteSlice = { ...lote, ventas };
+                const sum = sumFeesAndCogs(loteSlice, settings);
+                let cash = 0;
+                let util = 0;
+                let uds = 0;
+                ventas.forEach(v => {
+                    const u = Math.max(0, Number(v.unidades) || 0);
+                    const p = Number(v.precio) || 0;
+                    cash += p * u;
+                    uds += u;
+                    util += Calc.utilidadAtPrice(loteAtSaleCost(loteSlice, v), p, settings).utilidad * u;
+                });
+                fees += sum.fees;
+                costoVendido += sum.costoVendido;
+                cashIn += cash;
+                ganancia += util;
+                totalVendidas += uds;
+                slicedRows.push({
+                    lote: loteSlice,
+                    calc: {
+                        ...calc,
+                        cashIn: cash,
+                        gananciaRealizada: util,
+                        vendidas: uds,
+                        gastoAds: 0,
+                    },
+                });
+                return;
+            }
+
+            const vendidas = Math.max(0, Number(lote.vendidas) || 0);
+            if (!vendidas) return;
+            if (!saleInPyGRange(lote.fecha, resolved)) return;
+            const c = Calc.computeLote(lote, settings);
+            const sum = sumFeesAndCogs(lote, settings);
+            fees += sum.fees;
+            costoVendido += sum.costoVendido;
+            cashIn += c.cashIn;
+            ganancia += c.gananciaRealizada;
+            totalVendidas += vendidas;
+            slicedRows.push({
+                lote,
+                calc: { ...c, gastoAds: 0 },
+            });
+        });
+
+        return {
+            ...ctx,
+            rows: slicedRows,
+            fees,
+            costoVendido,
+            gastoAds: 0,
+            bonificaciones: bonif.total,
+            bonificacionesN: bonif.n,
+            agg: {
+                ...(ctx.agg || {}),
+                cashIn,
+                gananciaRealizada: ganancia,
+                totalVendidas,
+                margenPonderado: cashIn > 0 ? ganancia / cashIn : 0,
+            },
+            pygPeriod: resolved,
+        };
+    }
+
+    function layPyGPeriodChips(period) {
+        const mode = period?.mode || readPyGPeriodMode();
+        const items = [
+            { id: 'month', label: 'Mes actual' },
+            { id: 'prev', label: 'Mes anterior' },
+            { id: 'all', label: 'Todo' },
+        ];
+        return `
+            <div class="dash-seg dash-pyg-period" role="group" aria-label="Corte del P&G">
+                ${items.map(it => `
+                    <button type="button"
+                        class="dash-seg-btn${mode === it.id ? ' active' : ''}"
+                        data-dash-pyg-period="${it.id}">${esc(it.label)}</button>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    function layPyG({ agg, fees, costoVendido, gastoAds, isAmazon, isGeneral, rows, pygPeriod, bonificaciones = 0, bonificacionesN = 0 }) {
         const bruto = agg.cashIn - costoVendido;
         const neto = agg.gananciaRealizada;
+        const bonif = Number(bonificaciones) || 0;
+        const resultado = neto + bonif;
         const feeLabel = isGeneral
             ? '− Fees Meli + Amazon (est.)'
             : (isAmazon
                 ? '− Fees Amazon (est.)'
                 : '− Fees ML + retenciones (est.)');
+
+        // Separar utilidad positiva vs pérdidas (mismo motor que Detalle por venta)
+        let ganancias = 0;
+        let perdidas = 0;
+        let nGain = 0;
+        let nLoss = 0;
+        collectVentaPnLRows(rows).forEach(r => {
+            if (r.util >= -0.005) {
+                if (r.util > 0.005) { ganancias += r.util; nGain += 1; }
+            } else {
+                perdidas += Math.abs(r.util);
+                nLoss += 1;
+            }
+        });
+
         const lines = [
             { label: 'Ingresos (cash in)', value: agg.cashIn },
             { label: '− Costo de lo vendido', value: -costoVendido },
             { label: '= Utilidad bruta est.', value: bruto, bold: true },
             { label: feeLabel, value: -fees },
             { label: '= Ganancia realizada', value: neto, bold: true },
-            { label: 'Gasto Ads (referencia, no restado arriba)', value: -gastoAds },
         ];
+        if (ganancias > 0.009 || perdidas > 0.009) {
+            lines.push({
+                label: `···· Ganancias${nGain ? ` (${nGain})` : ''}`,
+                value: ganancias,
+                sub: true,
+            });
+            lines.push({
+                label: `···· Pérdidas${nLoss ? ` (${nLoss})` : ''}`,
+                value: -perdidas,
+                sub: true,
+            });
+        }
+        lines.push({
+            label: `+ Bonificaciones${bonificacionesN ? ` (${bonificacionesN})` : ''}`,
+            value: bonif,
+        });
+        lines.push({
+            label: '= Resultado neto',
+            value: resultado,
+            bold: true,
+        });
+        if ((gastoAds || 0) > 0.009) {
+            lines.push({ label: 'Gasto Ads (referencia, no restado arriba)', value: -gastoAds });
+        }
+
         return `
             <div class="dash-split-2">
                 <div class="dash-panel">
@@ -2071,7 +2463,7 @@ const DashboardView = (() => {
                     <table class="dash-table">
                         <tbody>
                             ${lines.map(l => `
-                                <tr class="${l.bold ? 'is-bold' : ''} ${tone(l.value)}">
+                                <tr class="${l.bold ? 'is-bold' : ''} ${l.sub ? 'is-sub' : ''} ${tone(l.value)}">
                                     <td>${esc(l.label)}</td>
                                     <td class="num">${Calc.fmtMXN(l.value)}</td>
                                 </tr>
@@ -2079,7 +2471,12 @@ const DashboardView = (() => {
                         </tbody>
                     </table>
                     <p class="muted small" style="margin-top:12px">
-                        Fees y costo al precio real de cada venta. Ganancia realizada = utilidad por venta. Ads del lote aparte.
+                        Corte: <strong>${esc(pygPeriod?.label || resolvePyGPeriod().label)}</strong>.
+                        Fees y costo al precio real de cada venta. Ganancia realizada = ganancias − pérdidas.
+                        ${perdidas > 0.009
+                            ? `Hay <span class="neg">${Calc.fmtMXN(perdidas)}</span> en ventas a pérdida.`
+                            : ''}
+                        ${(gastoAds || 0) > 0 ? 'Ads del lote aparte.' : ''}
                     </p>
                 </div>
                 <div class="dash-panel">
@@ -2101,14 +2498,18 @@ const DashboardView = (() => {
                             : Math.max(costoVendido + feePart, 1);
                         return stackBars(parts, total);
                     })()}
-                    ${neto < -0.009
-                        ? `<p class="muted small" style="margin-top:8px">Pérdida <span class="neg">${Calc.fmtMXN(neto)}</span> (fees + costo &gt; ingresos).</p>`
+                    ${perdidas > 0.009
+                        ? `<p class="muted small" style="margin-top:8px">Pérdidas en ventas: <span class="neg">${Calc.fmtMXN(perdidas)}</span>${nLoss ? ` · ${nLoss} pedido${nLoss === 1 ? '' : 's'}` : ''} (ya restadas en la ganancia realizada).</p>`
                         : ''}
+                    ${neto < -0.009
+                        ? `<p class="muted small" style="margin-top:8px">Resultado neto <span class="neg">${Calc.fmtMXN(neto)}</span> (fees + costo &gt; ingresos).</p>`
+                        : ''}
+                    ${(gastoAds || 0) > 0 ? `
                     <p class="muted small" style="margin-top:10px">
                         Ads del lote (referencia, fuera del cash in): ${Calc.fmtMXN(gastoAds)}
-                    </p>
+                    </p>` : ''}
                     <div class="dash-mini-kpis">
-                        ${mini('Margen lista', Calc.fmtPct(agg.margenPonderado))}
+                        ${mini(pygPeriod?.mode === 'all' ? 'Margen lista' : 'Margen periodo', Calc.fmtPct(agg.margenPonderado))}
                         ${mini('Uds vendidas', String(agg.totalVendidas))}
                         ${mini('Fees / cash', agg.cashIn ? Calc.fmtPct(fees / agg.cashIn) : '—')}
                     </div>
@@ -2123,24 +2524,58 @@ const DashboardView = (() => {
      * expande a la vista original.
      */
     function layPyGCompact(ctx) {
-        const { agg, fees, costoVendido, gastoAds } = ctx;
+        const { agg, fees, costoVendido, gastoAds, pygPeriod, bonificaciones = 0 } = ctx;
         const cashIn = agg.cashIn || 0;
         const neto = agg.gananciaRealizada || 0;
+        const bonif = Number(bonificaciones) || 0;
+        const resultado = neto + bonif;
         const bruto = cashIn - costoVendido;
         const marginPct = cashIn > 0 ? (neto / cashIn) : 0;
+        const periodLabel = pygPeriod?.label || resolvePyGPeriod().label;
+
+        let ganancias = 0;
+        let perdidas = 0;
+        collectVentaPnLRows(ctx.rows).forEach(r => {
+            if (r.util > 0.005) ganancias += r.util;
+            else if (r.util < -0.005) perdidas += Math.abs(r.util);
+        });
+
+        const showResult = Math.abs(bonif) > 0.009;
         return `
             <div class="dash-panel dash-pyg-compact">
-                <div class="dash-pyg-flow">
+                <p class="dash-pyg-period-label">${esc(periodLabel)} · ${agg.totalVendidas || 0} uds</p>
+                <div class="dash-pyg-strip" aria-label="Resumen del periodo">
+                    <div class="dash-pyg-chip is-gain">
+                        <span class="dash-pyg-chip-k">Ganancias</span>
+                        <span class="dash-pyg-chip-v pos">${Calc.fmtMXN(ganancias)}</span>
+                    </div>
+                    <div class="dash-pyg-chip is-loss">
+                        <span class="dash-pyg-chip-k">Pérdidas</span>
+                        <span class="dash-pyg-chip-v neg">${Calc.fmtMXN(perdidas ? -perdidas : 0)}</span>
+                    </div>
+                    <button type="button" class="dash-pyg-chip is-bonif" data-dash-open-bonif title="Registrar o editar bonificaciones">
+                        <span class="dash-pyg-chip-k">Bonificaciones</span>
+                        <span class="dash-pyg-chip-v ${bonif > 0.009 ? 'pos' : ''}">${Calc.fmtMXN(bonif)}</span>
+                    </button>
+                </div>
+                <div class="dash-pyg-flow${showResult ? ' is-3' : ''}">
                     <div class="dash-pyg-node">
                         <div class="dash-pyg-node-label">Ingresos</div>
-                        <div class="dash-pyg-node-value mono">${Calc.fmtMXN(cashIn)}</div>
+                        <div class="dash-pyg-node-value">${Calc.fmtMXN(cashIn)}</div>
                     </div>
-                    <div class="dash-pyg-arrow" aria-hidden="true">→</div>
-                    <div class="dash-pyg-node">
+                    <div class="dash-pyg-arrow" aria-hidden="true"></div>
+                    <div class="dash-pyg-node is-util">
                         <div class="dash-pyg-node-label">Utilidad</div>
-                        <div class="dash-pyg-node-value mono ${tone(neto)}">${Calc.fmtMXN(neto)}</div>
-                        <div class="dash-pyg-node-sub muted small">${Calc.fmtPct(marginPct)} margen · ${agg.totalVendidas || 0} uds</div>
+                        <div class="dash-pyg-node-value ${tone(neto)}">${Calc.fmtMXN(neto)}</div>
+                        <div class="dash-pyg-node-sub">${Calc.fmtPct(marginPct)} margen · ${agg.totalVendidas || 0} uds</div>
                     </div>
+                    ${showResult ? `
+                    <div class="dash-pyg-arrow" aria-hidden="true"></div>
+                    <div class="dash-pyg-node is-result">
+                        <div class="dash-pyg-node-label">Resultado</div>
+                        <div class="dash-pyg-node-value ${tone(resultado)}">${Calc.fmtMXN(resultado)}</div>
+                        <div class="dash-pyg-node-sub">utilidad + bonificaciones</div>
+                    </div>` : ''}
                 </div>
                 <details class="dash-pyg-details">
                     <summary>Ver desglose</summary>
@@ -2148,8 +2583,232 @@ const DashboardView = (() => {
                         ${layPyG(ctx)}
                         ${(gastoAds || 0) > 0 ? `<p class="muted small" style="margin-top:8px">Ads (referencia, no restado arriba): ${Calc.fmtMXN(gastoAds)}</p>` : ''}
                         <p class="muted small" style="margin:6px 0 0">Utilidad bruta est.: ${Calc.fmtMXN(bruto)} · Fees: ${Calc.fmtMXN(fees)}.</p>
+                        <div class="dash-venta-detalle-embed">
+                            <h3 class="dash-venta-detalle-h">Detalle por venta</h3>
+                            ${layVentaDetalle(ctx, { variant: 'compact' })}
+                            <p class="muted small dash-venta-detalle-jump">
+                                Completo en
+                                <button type="button" class="dash-link-inline" data-gx-jump="gx-finanzas">Finanzas (General)</button>.
+                            </p>
+                        </div>
                     </div>
                 </details>
+            </div>
+        `;
+    }
+
+    /**
+     * Filas P&L por evento de venta (mismo motor que P&G).
+     * Orden: utilidad asc (pérdidas primero).
+     */
+    function collectVentaPnLRows(aggRows) {
+        const out = [];
+        (aggRows || []).forEach(({ lote }) => {
+            if (!lote) return;
+            const settings = settingsForTaggedLote(lote);
+            const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
+            const mp = lote._mp || '';
+            const producto = lote.producto || lote.nombre || '';
+            const asin = lote.asin || lote.sku || '';
+
+            if (ventas.length) {
+                ventas.forEach((v, idx) => {
+                    const uds = Math.max(0, Number(v.unidades) || 0);
+                    if (!uds) return;
+                    const precio = Number(v.precio) || 0;
+                    const loteAt = loteAtSaleCost(lote, v);
+                    const u = Calc.utilidadAtPrice(loteAt, precio, settings);
+                    const ref = (Number(u.comisionVariable) || 0) * uds;
+                    const fba = (Number(u.envio) || 0) * uds;
+                    const alm = (Number(u.almacenamiento) || 0) * uds;
+                    const varios = (Number(u.varios) || 0) * uds;
+                    const cargo = (Number(u.cargoFijo) || 0) * uds;
+                    const ret = ((Number(u.retIVA) || 0) + (Number(u.retISR) || 0)) * uds;
+                    const fees = ref + fba + alm + varios + cargo + ret;
+                    const cost = (Number(loteAt.costo) || 0) * uds;
+                    const cash = precio * uds;
+                    const util = (Number(u.utilidad) || 0) * uds;
+                    out.push({
+                        loteId: lote.id,
+                        mp,
+                        asin,
+                        producto,
+                        fecha: v.fecha || '',
+                        uds,
+                        cash,
+                        cost,
+                        fees,
+                        ref,
+                        fba,
+                        alm,
+                        util,
+                        margen: cash > 0 ? util / cash : 0,
+                        legacy: false,
+                        ventaIdx: idx,
+                    });
+                });
+                return;
+            }
+
+            const vendidas = Math.max(0, Number(lote.vendidas) || 0);
+            if (!vendidas) return;
+            const calc = Calc.computeLote(lote, settings);
+            const cash = Number(calc.cashIn) || 0;
+            const util = Number(calc.gananciaRealizada) || 0;
+            const cost = (Number(lote.costo) || 0) * vendidas;
+            const fees = Math.max(0, cash - cost - util);
+            out.push({
+                loteId: lote.id,
+                mp,
+                asin,
+                producto,
+                fecha: lote.fecha || '',
+                uds: vendidas,
+                cash,
+                cost,
+                fees,
+                ref: Number(calc.comisionVariable) || 0,
+                fba: Number(calc.envio) || 0,
+                alm: Number(calc.almacenamiento) || 0,
+                util,
+                margen: cash > 0 ? util / cash : 0,
+                legacy: true,
+                ventaIdx: -1,
+            });
+        });
+
+        out.sort((a, b) => {
+            if (a.util !== b.util) return a.util - b.util;
+            return String(a.fecha || '').localeCompare(String(b.fecha || ''));
+        });
+        return out;
+    }
+
+    function fmtVentaFecha(raw) {
+        if (!raw) return '—';
+        const d = parseSaleDate(raw);
+        if (!d) return esc(String(raw).slice(0, 10));
+        return esc(fmtDMY(d));
+    }
+
+    function feesTitle(row) {
+        const parts = [];
+        if (row.ref) parts.push(`Ref ${Calc.fmtMXN(row.ref)}`);
+        if (row.fba) parts.push(`FBA/envío ${Calc.fmtMXN(row.fba)}`);
+        if (row.alm) parts.push(`Alm ${Calc.fmtMXN(row.alm)}`);
+        return parts.join(' · ') || 'Fees';
+    }
+
+    /**
+     * Detalle por venta — mayor del P&G.
+     * variant: 'full' (Finanzas) | 'compact' (desglose Inicio).
+     */
+    function layVentaDetalle(ctx, opts = {}) {
+        const variant = opts.variant === 'compact' ? 'compact' : 'full';
+        const periodLabel = ctx?.pygPeriod?.label || '';
+        const rows = collectVentaPnLRows(ctx?.rows);
+        if (!rows.length) {
+            return `
+                <div class="dash-panel dash-venta-detalle dash-venta-detalle--${variant}">
+                    <p class="muted small" style="margin:0">${periodLabel
+                        ? `Sin ventas en <strong>${esc(periodLabel)}</strong>.`
+                        : 'Sin ventas registradas todavía. Registra una venta en un lote para ver el desglose.'}</p>
+                </div>`;
+        }
+
+        const tot = rows.reduce((a, r) => {
+            a.uds += r.uds;
+            a.cash += r.cash;
+            a.cost += r.cost;
+            a.fees += r.fees;
+            a.util += r.util;
+            return a;
+        }, { uds: 0, cash: 0, cost: 0, fees: 0, util: 0 });
+        const totMargen = tot.cash > 0 ? tot.util / tot.cash : 0;
+        const nPedidos = rows.length;
+
+        const tableRows = rows.map(r => `
+            <tr class="is-click" data-dash-lote="${esc(r.loteId)}" data-dash-mp="${esc(r.mp)}" title="Abrir producto">
+                <td class="dash-venta-fecha">${fmtVentaFecha(r.fecha)}${r.legacy ? ' <span class="muted" title="Sin eventos de venta">·</span>' : ''}</td>
+                <td class="dash-venta-prod">
+                    <span class="dash-venta-name">${esc(short(r.producto, variant === 'compact' ? 36 : 48))}</span>
+                    ${r.asin ? `<span class="dash-venta-asin muted mono">${esc(r.asin)}</span>` : ''}
+                </td>
+                <td class="num">${r.uds}</td>
+                <td class="num">${Calc.fmtMXN(r.cash)}</td>
+                <td class="num">${Calc.fmtMXN(r.cost)}</td>
+                <td class="num" title="${esc(feesTitle(r))}">${Calc.fmtMXN(r.fees)}</td>
+                <td class="num ${tone(r.util)}">${Calc.fmtMXN(r.util)}</td>
+                <td class="num ${tone(r.util)}">${Calc.fmtPct(r.margen)}</td>
+            </tr>
+        `).join('');
+
+        const cards = rows.map(r => `
+            <button type="button" class="dash-venta-card" data-dash-lote="${esc(r.loteId)}" data-dash-mp="${esc(r.mp)}">
+                <div class="dash-venta-card-top">
+                    <span class="dash-venta-card-name">${esc(short(r.producto, 40))}</span>
+                    <span class="dash-venta-card-util mono ${tone(r.util)}">${Calc.fmtMXN(r.util)}</span>
+                </div>
+                <div class="dash-venta-card-meta muted small">
+                    ${fmtVentaFecha(r.fecha)} · ${r.uds} ud · ${Calc.fmtMXN(r.cash)}
+                    ${r.asin ? ` · <span class="mono">${esc(r.asin)}</span>` : ''}
+                </div>
+                <div class="dash-venta-card-grid muted small">
+                    <span>Costo ${Calc.fmtMXN(r.cost)}</span>
+                    <span title="${esc(feesTitle(r))}">Fees ${Calc.fmtMXN(r.fees)}</span>
+                    <span class="${tone(r.util)}">${Calc.fmtPct(r.margen)}</span>
+                </div>
+            </button>
+        `).join('');
+
+        return `
+            <div class="dash-panel dash-venta-detalle dash-venta-detalle--${variant}">
+                ${variant === 'full'
+                    ? `<p class="muted small dash-venta-detalle-lead">${periodLabel ? `<strong>${esc(periodLabel)}</strong> · ` : ''}Misma lógica que el P&amp;G: precio − costo − fees por cada venta. Ordenado por utilidad (pérdidas primero). Ads no restados.</p>`
+                    : ''}
+                <div class="dash-venta-table-wrap">
+                    <table class="dash-table dash-venta-table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Producto</th>
+                                <th class="num">Uds</th>
+                                <th class="num">Venta</th>
+                                <th class="num">Costo</th>
+                                <th class="num">Fees</th>
+                                <th class="num">Util</th>
+                                <th class="num">Margen</th>
+                            </tr>
+                        </thead>
+                        <tbody>${tableRows}</tbody>
+                        <tfoot>
+                            <tr class="is-bold">
+                                <td colspan="2">Total · ${nPedidos} pedido${nPedidos === 1 ? '' : 's'} · ${tot.uds} uds</td>
+                                <td class="num">${tot.uds}</td>
+                                <td class="num">${Calc.fmtMXN(tot.cash)}</td>
+                                <td class="num">${Calc.fmtMXN(tot.cost)}</td>
+                                <td class="num">${Calc.fmtMXN(tot.fees)}</td>
+                                <td class="num ${tone(tot.util)}">${Calc.fmtMXN(tot.util)}</td>
+                                <td class="num ${tone(tot.util)}">${Calc.fmtPct(totMargen)}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                <div class="dash-venta-cards" aria-label="Detalle por venta">
+                    ${cards}
+                    <div class="dash-venta-card dash-venta-card-total">
+                        <div class="dash-venta-card-top">
+                            <span class="dash-venta-card-name">Total · ${nPedidos} pedido${nPedidos === 1 ? '' : 's'}</span>
+                            <span class="dash-venta-card-util mono ${tone(tot.util)}">${Calc.fmtMXN(tot.util)}</span>
+                        </div>
+                        <div class="dash-venta-card-meta muted small">${tot.uds} uds · Venta ${Calc.fmtMXN(tot.cash)}</div>
+                        <div class="dash-venta-card-grid muted small">
+                            <span>Costo ${Calc.fmtMXN(tot.cost)}</span>
+                            <span>Fees ${Calc.fmtMXN(tot.fees)}</span>
+                            <span class="${tone(tot.util)}">${Calc.fmtPct(totMargen)}</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         `;
     }
@@ -2164,21 +2823,26 @@ const DashboardView = (() => {
         const byProduct = groupBestByProduct(active);
         const top = [...byProduct].sort((a, b) => b.calc.utilidad - a.calc.utilidad).slice(0, 3);
         return `
-            <div class="dash-panel">
+            <div class="dash-rank-board">
                 ${top.length
-                    ? `<ol class="dash-rank-ol dash-rank-top3">
+                    ? `<ol class="dash-rank-cards">
                         ${top.map((r, i) => `
-                            <li data-dash-lote="${esc(r.lote.id)}" data-dash-mp="${esc(r.lote._mp || '')}">
-                                <span class="n">${i + 1}</span>
-                                <span class="name" title="${esc(r.lote.producto)}${r.lote.variante ? ' · ' + esc(r.lote.variante) : ''}">
-                                    ${esc(short(r.lote.producto, 42))}${r.lote.variante ? ` <small class="muted">${esc(short(r.lote.variante, 12))}</small>` : ''}
-                                </span>
-                                <span class="num ${tone(r.calc.utilidad)}">${Calc.fmtMXN(r.calc.utilidad)}</span>
+                            <li class="dash-rank-card is-${i + 1}" style="--rank-i:${i}"
+                                data-dash-lote="${esc(r.lote.id)}" data-dash-mp="${esc(r.lote._mp || '')}"
+                                role="button" tabindex="0">
+                                <span class="dash-rank-badge">${i + 1}</span>
+                                <div class="dash-rank-body">
+                                    <span class="dash-rank-name" title="${esc(r.lote.producto)}${r.lote.variante ? ' · ' + esc(r.lote.variante) : ''}">
+                                        ${esc(short(r.lote.producto, 48))}
+                                    </span>
+                                    ${r.lote.variante ? `<span class="dash-rank-var">${esc(short(r.lote.variante, 28))}</span>` : ''}
+                                    <span class="dash-rank-util ${tone(r.calc.utilidad)}">${Calc.fmtMXN(r.calc.utilidad)}</span>
+                                </div>
                             </li>
                         `).join('')}
                     </ol>
-                    <p class="muted small dash-rank-hint">Ver ranking completo (margen y ROI) en <button type="button" class="dash-link-inline" data-dash-goto-mp="general">General</button>.</p>`
-                    : '<p class="muted small">Sin lotes rankeables todavía.</p>'}
+                    <p class="dash-rank-hint">Ranking completo (margen y ROI) en <button type="button" class="dash-link-inline" data-dash-goto-mp="general">General</button>.</p>`
+                    : '<div class="dash-panel dash-panel-quiet"><p class="muted small" style="margin:0">Sin lotes rankeables todavía.</p></div>'}
             </div>
         `;
     }
@@ -2263,6 +2927,193 @@ const DashboardView = (() => {
     const reverseSpend = Alloc.reverseSpend;
     const listUnassignedVentas = Alloc.listUnassignedVentas;
     const readRawAlloc = Alloc.readRawAlloc;
+
+    function newBonifId() {
+        return `bf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    }
+
+    function normalizeBonifEntry(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        const monto = Number(raw.monto);
+        if (!Number.isFinite(monto) || Math.abs(monto) < 0.005) return null;
+        const fecha = String(raw.fecha || '').slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return null;
+        return {
+            id: String(raw.id || newBonifId()),
+            fecha,
+            monto: round2(monto),
+            notas: String(raw.notas || '').slice(0, 160),
+        };
+    }
+
+    function readBonifStore() {
+        const raw = window.State.ui?.bonificaciones;
+        const clean = (list) => (Array.isArray(list) ? list : [])
+            .map(normalizeBonifEntry)
+            .filter(Boolean)
+            .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+        if (!raw || typeof raw !== 'object') return { amazon: [], meli: [] };
+        return { amazon: clean(raw.amazon), meli: clean(raw.meli) };
+    }
+
+    function writeBonifStore(store) {
+        window.State.ui = {
+            ...window.State.ui,
+            bonificaciones: {
+                amazon: Array.isArray(store?.amazon) ? store.amazon : [],
+                meli: Array.isArray(store?.meli) ? store.meli : [],
+            },
+        };
+        window.State.saveUI();
+    }
+
+    function bonifMarketsForView() {
+        if (window.State.ui?.mpView === 'general') return ['meli', 'amazon'];
+        return [window.State.marketplace === 'amazon' ? 'amazon' : 'meli'];
+    }
+
+    function listBonificaciones(markets = bonifMarketsForView()) {
+        const store = readBonifStore();
+        const out = [];
+        (markets || []).forEach(mp => {
+            (store[mp] || []).forEach(b => out.push({ ...b, _mp: mp }));
+        });
+        out.sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+        return out;
+    }
+
+    function sumBonificacionesInRange(markets, range) {
+        let total = 0;
+        let n = 0;
+        listBonificaciones(markets).forEach(b => {
+            if (range?.start) {
+                const d = Calc.effectiveSaleDay(b.fecha);
+                if (!d) return;
+                if (d < range.start) return;
+                if (range.end && d > range.end) return;
+            }
+            total += Number(b.monto) || 0;
+            n += 1;
+        });
+        return { total: round2(total), n };
+    }
+
+    function bonifHeroStats(days = 30) {
+        const now = new Date();
+        const today = Calc.startOfLocalDay(now);
+        const curStart = Calc.startOfLocalDay(new Date(now.getTime() - days * 86400000));
+        const prevStart = Calc.startOfLocalDay(new Date(now.getTime() - 2 * days * 86400000));
+        let cur = 0;
+        let prev = 0;
+        let nCur = 0;
+        listBonificaciones(bonifMarketsForView()).forEach(b => {
+            const d = Calc.effectiveSaleDay(b.fecha, now);
+            if (!d) return;
+            const m = Number(b.monto) || 0;
+            if (today && curStart && d >= curStart && d <= today) {
+                cur += m;
+                nCur += 1;
+            } else if (prevStart && curStart && d >= prevStart && d < curStart) {
+                prev += m;
+            }
+        });
+        return { cur: round2(cur), prev: round2(prev), nCur };
+    }
+
+    async function openBonificacionesDialog() {
+        if (!UI?.dialog) return;
+        const mp = window.State.marketplace === 'amazon' ? 'amazon' : 'meli';
+        const mpLabel = mp === 'amazon' ? 'Amazon' : 'Mercado Libre';
+        const todayIso = toISODate(new Date());
+
+        const paintList = (wrap) => {
+            const list = listBonificaciones([mp]);
+            const host = wrap.querySelector('[data-bonif-list]');
+            if (!host) return;
+            if (!list.length) {
+                host.innerHTML = '<p class="muted small" style="margin:0">Sin bonificaciones. Ej.: créditos Amazon, reembolsos de fees, cupones.</p>';
+                return;
+            }
+            host.innerHTML = `
+                <ul class="dash-bonif-list">
+                    ${list.map(b => `
+                        <li>
+                            <div class="dash-bonif-meta">
+                                <strong class="mono ${tone(b.monto)}">${Calc.fmtMXN(b.monto)}</strong>
+                                <span class="muted small">${esc(fmtDMY(Calc.parseSaleDate(b.fecha) || new Date()))}</span>
+                                ${b.notas ? `<span class="muted small">${esc(b.notas)}</span>` : ''}
+                            </div>
+                            <button type="button" class="btn btn-sm" data-bonif-del="${esc(b.id)}">Quitar</button>
+                        </li>
+                    `).join('')}
+                </ul>`;
+            host.querySelectorAll('[data-bonif-del]').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const id = btn.dataset.bonifDel;
+                    const ok = await UI.confirm?.({
+                        title: 'Quitar bonificación',
+                        message: '¿Eliminar este monto del historial?',
+                        primaryLabel: 'Quitar',
+                        danger: true,
+                    });
+                    if (!ok) return;
+                    const store = readBonifStore();
+                    store[mp] = (store[mp] || []).filter(x => x.id !== id);
+                    writeBonifStore(store);
+                    paintList(wrap);
+                    render();
+                });
+            });
+        };
+
+        const body = document.createElement('div');
+        body.className = 'dash-bonif-dlg';
+        body.innerHTML = `
+            <p class="muted small" style="margin:0 0 12px">Bonificaciones de <strong>${esc(mpLabel)}</strong>: créditos o ajustes a favor. Entran al P&amp;G del periodo (no son ventas).</p>
+            <div class="dash-bonif-form">
+                <label><span>Fecha</span><input type="date" data-bonif-fecha value="${esc(todayIso)}" max="${esc(todayIso)}"></label>
+                <label><span>Monto (MXN)</span><input type="number" data-bonif-monto min="0.01" step="0.01" placeholder="0.00"></label>
+                <label class="wide"><span>Nota (opcional)</span><input type="text" data-bonif-notas maxlength="160" placeholder="Ej. crédito FBA, reembolso ads"></label>
+            </div>
+            <div data-bonif-list style="margin-top:14px"></div>
+        `;
+
+        await UI.dialog({
+            title: 'Bonificaciones',
+            size: 'md',
+            body,
+            actions: [
+                { label: 'Cerrar', value: null },
+                {
+                    label: 'Agregar',
+                    variant: 'primary',
+                    value: 'add',
+                    onClick: (wrap) => {
+                        const fecha = wrap.querySelector('[data-bonif-fecha]')?.value;
+                        const monto = Number(wrap.querySelector('[data-bonif-monto]')?.value);
+                        const notas = wrap.querySelector('[data-bonif-notas]')?.value || '';
+                        const entry = normalizeBonifEntry({ id: newBonifId(), fecha, monto, notas });
+                        if (!entry) {
+                            UI.toast?.('Fecha y monto válidos requeridos', 'warn');
+                            return false;
+                        }
+                        const store = readBonifStore();
+                        store[mp] = [entry, ...(store[mp] || [])];
+                        writeBonifStore(store);
+                        const montoEl = wrap.querySelector('[data-bonif-monto]');
+                        const notasEl = wrap.querySelector('[data-bonif-notas]');
+                        if (montoEl) montoEl.value = '';
+                        if (notasEl) notasEl.value = '';
+                        paintList(wrap);
+                        render();
+                        UI.toast?.(`Bonificación ${Calc.fmtMXN(entry.monto)} agregada`, 'success');
+                        return false;
+                    },
+                },
+            ],
+            onMount: (wrap) => paintList(wrap),
+        });
+    }
     const writeRawAlloc = Alloc.writeRawAlloc;
 
     function getDashScrollEl() {
@@ -2276,11 +3127,18 @@ const DashboardView = (() => {
         render();
         const restore = () => {
             const next = getDashScrollEl();
-            if (next) next.scrollTop = y;
-            else window.scrollTo(0, y);
+            if (next) {
+                // Evita que scroll-behavior:smooth anime desde 0 al restaurar
+                const prev = next.style.scrollBehavior;
+                next.style.scrollBehavior = 'auto';
+                next.scrollTop = y;
+                next.style.scrollBehavior = prev;
+            } else {
+                window.scrollTo({ top: y, left: 0, behavior: 'auto' });
+            }
             if (anchorSel) {
-                const el = document.querySelector(anchorSel);
-                el?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                document.querySelector(anchorSel)
+                    ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
             }
         };
         requestAnimationFrame(() => {
@@ -2300,24 +3158,24 @@ const DashboardView = (() => {
         const pendingSales = listUnassignedVentas();
         const shareOf = (val) => totalBuckets > 0 ? Math.round((val / totalBuckets) * 1000) / 10 : 0;
 
-        const bolsitasCards = ALLOC_BUCKETS.map(b => {
+        const bolsitasCards = ALLOC_BUCKETS.map((b, i) => {
             const val = buckets[b.key] || 0;
             const share = shareOf(val);
             const extra = b.key === 'reinversion' && unitCost > 0 && val > 0
                 ? `≈ ${reinvestUds.toFixed(1)} uds al costo avg`
                 : esc(b.hint);
             return `
-                <div class="dash-bolsa alloc-${b.key}" data-bolsa="${b.key}">
+                <div class="dash-bolsa alloc-${b.key}" data-bolsa="${b.key}" style="--bolsa-i:${i}">
                     <div class="dash-bolsa-top">
                         <div class="dash-bolsa-name">${esc(b.label)}</div>
                         <button type="button" class="dash-bolsa-use-btn" data-bolsa-use="${b.key}"
-                            title="Registrar uso" aria-label="Usar dinero de ${esc(b.label)}">usar</button>
+                            title="Registrar uso" aria-label="Usar dinero de ${esc(b.label)}">Usar</button>
                     </div>
                     <div class="dash-bolsa-amt" data-bolsa-amt>${Calc.fmtMXN(val)}</div>
                     <button type="button" class="dash-bolsa-share" data-bolsa-edit="${b.key}"
                         title="Ajustar %" aria-label="Ajustar porcentaje de ${esc(b.label)}">
-                        <span data-bolsa-share>${percents[b.key]}% de cada venta · ${share}% actual</span>
-                        <span class="dash-bolsa-adjust">ajustar</span>
+                        <span data-bolsa-share>${percents[b.key]}% de cada venta · ${share}% del total</span>
+                        <span class="dash-bolsa-adjust">Ajustar</span>
                     </button>
                     <div class="dash-bolsa-meta" data-bolsa-meta>${extra}</div>
                     <div class="dash-bolsa-edit-panel" hidden>
@@ -2360,27 +3218,23 @@ const DashboardView = (() => {
         return `
             <div class="dash-panel dash-alloc-panel">
                 <div class="dash-alloc-head">
-                    <div>
-                        <h3>Mis bolsitas</h3>
-                        <p class="muted small">
-                            El cobro se reparte en Caja. Si eliminas una venta, se resta de aquí.
-                            Toca el % para ajustarlo · <em>usar</em> para restar lo que ya gastaste.
-                        </p>
-                    </div>
+                    <p class="dash-alloc-lead">
+                        El cobro se reparte en Caja. Toca el % para ajustar · <em>Usar</em> para restar lo gastado.
+                    </p>
                     <div class="dash-alloc-actions">
                         <button type="button" class="dash-chip-btn" data-alloc-equal-pct>% iguales</button>
-                        <button type="button" class="dash-chip-btn" data-alloc-reset-buckets>Vaciar sobres</button>
+                        <button type="button" class="dash-chip-btn" data-alloc-reset-buckets>Vaciar</button>
                     </div>
                 </div>
 
                 <div class="dash-bolsa-hero">
                     <div class="dash-bolsa-hero-main">
-                        <div class="dash-bolsa-hero-label">Total distribuido en bolsitas</div>
+                        <div class="dash-bolsa-hero-label">Total en bolsitas</div>
                         <div class="dash-bolsa-hero-value">${Calc.fmtMXN(totalBuckets)}</div>
-                        <div class="dash-bolsa-hero-sub muted">
-                            Liberado por ventas ${Calc.fmtMXN(liberated)}
-                            ${injected > 0 ? ` · inyectado (histórico) ${Calc.fmtMXN(injected)}` : ''}
-                            · reglas ${pctSum}%
+                        <div class="dash-bolsa-hero-sub">
+                            <span>Liberado ${Calc.fmtMXN(liberated)}</span>
+                            ${injected > 0 ? `<span>Inyectado ${Calc.fmtMXN(injected)}</span>` : ''}
+                            <span>Reglas ${pctSum}%</span>
                         </div>
                     </div>
                     <div class="dash-bolsa-stack" data-bolsa-stack role="img" aria-label="Composición de bolsitas">${stackSegments}</div>
@@ -2399,8 +3253,8 @@ const DashboardView = (() => {
                     <div class="dash-alloc-pending">
                         <div>
                             <strong>${pendingSales.length} cobro${pendingSales.length === 1 ? '' : 's'} sin bolsitas</strong>
-                            <p class="muted small">
-                                Marcados cobrado sin repartir a bolsitas.
+                            <p>
+                                Marcados cobrado sin repartir.
                                 Total ≈ ${Calc.fmtMXN(pendingSales.reduce((s, p) => s + p.amount, 0))}.
                             </p>
                         </div>
@@ -2697,13 +3551,24 @@ const DashboardView = (() => {
                 window.App?.switchTab?.('envios');
             });
         });
+        root.querySelectorAll('[data-dash-open-bonif]').forEach(btn => {
+            btn.addEventListener('click', () => { openBonificacionesDialog(); });
+        });
         root.querySelectorAll('[data-dash-lote]').forEach(el => {
-            el.addEventListener('click', () => openDashLote(el.dataset.dashLote, el.dataset.dashMp));
+            const open = () => openDashLote(el.dataset.dashLote, el.dataset.dashMp);
+            el.addEventListener('click', open);
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    open();
+                }
+            });
         });
         const setChartUI = (patch) => {
             window.State.ui = { ...window.State.ui, ...patch };
             window.State.saveUI();
-            render();
+            // Re-render del canvas entero; conservar scroll (Cobrado/Vendido, rango, etc.)
+            renderPreservingScroll();
         };
         root.querySelectorAll('[data-dash-period]').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -2782,6 +3647,14 @@ const DashboardView = (() => {
         root.querySelectorAll('[data-dash-from-clear]').forEach(btn => {
             btn.addEventListener('click', () => setChartUI({ dashChartFrom: '', dashChartFromPreset: '' }));
         });
+        root.querySelectorAll('[data-dash-pyg-period]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const next = btn.dataset.dashPygPeriod;
+                if (next !== 'month' && next !== 'prev' && next !== 'all') return;
+                if (readPyGPeriodMode() === next) return;
+                setChartUI({ dashPyGPeriod: next });
+            });
+        });
 
         const allocPanel = root.querySelector('.dash-alloc-panel');
         if (allocPanel) {
@@ -2820,7 +3693,7 @@ const DashboardView = (() => {
                     const metaEl = card.querySelector('[data-bolsa-meta]');
                     const liveEl = card.querySelector('[data-bolsa-pct-live]');
                     if (amtEl) amtEl.textContent = Calc.fmtMXN(val);
-                    if (shareEl) shareEl.textContent = `${percents[b.key]}% de cada venta · ${share}% actual`;
+                    if (shareEl) shareEl.textContent = `${percents[b.key]}% de cada venta · ${share}% del total`;
                     if (liveEl) liveEl.textContent = `${percents[b.key]}%`;
                     if (metaEl && b.key === 'reinversion') {
                         const uc = allocSnap.unitCost;
@@ -3039,12 +3912,20 @@ const DashboardView = (() => {
             if (!detail || !el) return;
             detail.innerHTML = formatSparkDetail(el);
             const idx = Number(el.dataset.dashPoint);
-            hits.forEach(h => h.classList.toggle('is-active', h === el));
+            hits.forEach(h => h.classList.toggle('is-active', Number(h.dataset.dashPoint) === idx));
             root.querySelectorAll('.dash-pt').forEach(g => {
                 g.classList.toggle('is-focus', Number(g.dataset.dashPoint) === idx);
             });
             root.querySelectorAll('.dash-progress-col[data-dash-point]').forEach(col => {
-                col.classList.toggle('is-active', col === el);
+                const on = Number(col.dataset.dashPoint) === idx;
+                col.classList.toggle('is-active', on);
+                col.classList.toggle('is-focus', on);
+            });
+            root.querySelectorAll('.dash-progress-xlabels [data-dash-xlabel]').forEach(span => {
+                span.classList.toggle('is-focus', Number(span.dataset.dashXlabel) === idx);
+            });
+            root.querySelectorAll('.dash-spark-markers [data-dash-dot]').forEach(dot => {
+                dot.classList.toggle('is-focus', Number(dot.dataset.dashDot) === idx);
             });
         };
         hits.forEach(hit => {
@@ -3062,7 +3943,12 @@ const DashboardView = (() => {
 
     function init() {
         window.State.subscribe(() => {
-            if (window.State.view === 'dashboard') render();
+            if (window.State.view !== 'dashboard') return;
+            // No tumbar paneles abiertos de bolsitas / diálogo bonif mid-edit
+            if (document.querySelector('#dashboard-canvas .dash-bolsa.is-editing, #dashboard-canvas .dash-bolsa.is-using, .dash-bonif-dlg, .dash-bonif-form')) {
+                return;
+            }
+            renderPreservingScroll();
         });
     }
 

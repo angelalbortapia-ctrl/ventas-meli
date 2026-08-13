@@ -307,6 +307,35 @@ const Keepa = (() => {
         }
     }
 
+    /**
+     * Lote ligero (history=0): título, BB, BSR, imagen.
+     * Ideal para fichas de Finder. ~1 token por ASIN devuelto.
+     */
+    async function fetchProductsLight(asins, { statsDays = 90 } = {}) {
+        const codes = [...new Set((asins || [])
+            .map(a => String(a || '').trim().toUpperCase())
+            .filter(a => /^[A-Z0-9]{10}$/.test(a)))].slice(0, 100);
+        if (!codes.length) return [];
+
+        const cached = [];
+        const missing = [];
+        codes.forEach(code => {
+            const hit = readCache(code);
+            if (hit?.title || hit?.currentPrice != null || hit?.bsr != null) cached.push(hit);
+            else missing.push(code);
+        });
+        if (!missing.length) return codes.map(c => cached.find(x => x.asin === c) || readCache(c)).filter(Boolean);
+
+        const raw = await proxyFetch(
+            `product?domain=${DOMAIN_MX}&asin=${encodeURIComponent(missing.join(','))}&stats=${statsDays}&history=0&rating=1`
+        );
+        const products = Array.isArray(raw.products) ? raw.products : [];
+        const fresh = products.map(summarizeProduct).filter(Boolean);
+        fresh.forEach(s => writeCache(s.asin, s));
+        const byAsin = new Map([...cached, ...fresh].map(s => [s.asin, s]));
+        return codes.map(c => byAsin.get(c)).filter(Boolean);
+    }
+
     /** Extrae ASIN de link Amazon o texto suelto. */
     function extractAsin(text) {
         const s = String(text || '').trim();
@@ -494,6 +523,19 @@ const Keepa = (() => {
         return out;
     }
 
+    function catalogImageForAsin(asin) {
+        const code = String(asin || '').trim().toUpperCase();
+        if (!code) return '';
+        const lotes = window.State?.lotes || [];
+        const hit = lotes.find(l => String(l.asin || '').trim().toUpperCase() === code);
+        if (!hit) return '';
+        const fam = window.Data?.familyImage?.(lotes, hit.productId) || '';
+        const s = String(hit.imagen || fam || '').trim();
+        if (/^data:image\/(jpeg|jpg|png|webp);base64,/i.test(s)) return s;
+        if (/^https?:\/\//i.test(s)) return s;
+        return '';
+    }
+
     /** Persiste investigación local (no Sync): reabrir sin tokens + actualizar on-demand. */
     function saveToLibrary(data) {
         if (!data?.asin) return;
@@ -502,7 +544,7 @@ const Keepa = (() => {
             at: Date.now(),
             asin: code,
             title: data.title || code,
-            image: data.image || '',
+            image: data.image || catalogImageForAsin(code) || '',
             brand: data.brand || '',
             signal: data.signal || '',
             signalLabel: data.signalLabel || '',
@@ -776,7 +818,28 @@ const Keepa = (() => {
             data,
             graph,
             compact: true,
+            mode: 'mia',
             overlays: KeepaChart.overlaysFromLote(lote),
+            onGraphChange: (g) => {
+                if (!window.State?.ui) return;
+                const prev = window.State.ui.keepaGraph || {};
+                window.State.ui = {
+                    ...window.State.ui,
+                    keepaGraph: { ...prev, range: g.range, yzoom: g.yzoom },
+                };
+                const skip = window.__skipSync;
+                window.__skipSync = true;
+                try { window.State.saveUI?.(); }
+                finally { window.__skipSync = skip; }
+            },
+            onApplyBuyBox: (price, linked) => {
+                const id = linked?.id || productId;
+                if (!id) {
+                    UI.toast?.(`Buy Box sugerido: ${Calc?.fmtMXN?.(price) || price}`);
+                    return;
+                }
+                applyCompetitionPrice(id, price, { source: 'chart' });
+            },
         });
     }
 
@@ -1078,6 +1141,7 @@ const Keepa = (() => {
         keyLooksValid,
         extractAsin,
         fetchProduct,
+        fetchProductsLight,
         fetchResearch,
         parseHistory,
         saveToLibrary,
