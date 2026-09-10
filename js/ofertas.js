@@ -2087,7 +2087,9 @@ const OfertasView = (() => {
 
     function pendingCount() {
         if (!isAmazonView()) return 0;
-        return loadItems().filter(i => i.status === 'vigilando' || i.status === 'viable').length;
+        const radar = loadItems().filter(i => i.status === 'vigilando' || i.status === 'viable').length;
+        const guardados = window.WishlistView?.pendingCount?.() || 0;
+        return radar + guardados;
     }
 
     function b64urlDecode(s) {
@@ -2246,6 +2248,7 @@ const OfertasView = (() => {
                     item.nota || null,
                     'Desde Ofertas',
                 ].filter(Boolean).join(' · '),
+                silent: true,
             });
             if (created) {
                 const wl = Array.isArray(window.State.ui?.wishlistAmazon)
@@ -2262,6 +2265,7 @@ const OfertasView = (() => {
                         precioMercado: m.precio || item.precioAmazon || wl[idx].precioMercado,
                         tienda: item.tienda || wl[idx].tienda,
                         titulo: item.titulo || wl[idx].titulo,
+                        tipo: item.tipo === 'FBM' ? 'FBM' : 'FBA',
                         updatedAt: new Date().toISOString(),
                     };
                     window.State.ui = { ...window.State.ui, wishlistAmazon: wl };
@@ -2274,11 +2278,50 @@ const OfertasView = (() => {
                 ));
                 saveItems(offers);
                 window.App?.refreshNavCounts?.();
-                WishlistView.render?.();
+                UI.toast('Guardado en Ofertas → Guardados');
+                local.filter = 'guardados';
+                render();
             }
             return;
         }
         UI.toast('Wishlist no disponible', 'error');
+    }
+
+    function convertToProduct(id) {
+        const item = loadItems().find(i => i.id === id);
+        if (!item) return;
+        const asin = item.asin || extractAsin(item.linkAmazon);
+        if (!asin) {
+            UI.toast('Necesitas ASIN Amazon', 'error');
+            return;
+        }
+        if (!(item.costo > 0)) {
+            UI.toast('Completa el costo en tienda', 'error');
+            return;
+        }
+        const m = metricsFor(item);
+        const prospect = {
+            asin,
+            titulo: item.titulo || '',
+            costo: item.costo,
+            precioMercado: m.precio || item.precioAmazon || 0,
+            linkCompra: item.linkTienda || '',
+            linkAmazon: item.linkAmazon || (asin ? `https://www.amazon.com.mx/dp/${asin}` : ''),
+            tienda: item.tienda || '',
+            tipo: item.tipo === 'FBM' ? 'FBM' : 'FBA',
+            categoriaAmazon: item.categoriaAmazon || '',
+            nota: item.nota || 'Desde Ofertas',
+        };
+        const lote = window.LotesView?.createFromWishlist?.(prospect);
+        if (lote) {
+            setStatus(id, 'viable');
+            UI.toast('Producto creado — ajusta unidades si hace falta');
+        }
+    }
+
+    function showGuardados() {
+        local.filter = 'guardados';
+        render();
     }
 
     function readForm(root) {
@@ -2375,8 +2418,11 @@ const OfertasView = (() => {
                 <div class="of-card-actions">
                     ${hrefTienda ? `<a class="btn ghost btn-sm" href="${esc(hrefTienda)}" target="_blank" rel="noopener">Tienda</a>` : ''}
                     ${hrefAmz ? `<a class="btn ghost btn-sm" href="${esc(hrefAmz)}" target="_blank" rel="noopener">Amazon</a>` : ''}
-                    ${item.asin ? `<button type="button" class="btn ghost btn-sm" data-of-keepa="${esc(item.asin)}">Keepa Lab</button>` : ''}
-                    <button type="button" class="btn ghost btn-sm" data-of-wishlist="${esc(item.id)}">A Wishlist</button>
+                    ${item.asin ? `<button type="button" class="btn ghost btn-sm" data-of-keepa="${esc(item.asin)}">Keepa</button>` : ''}
+                    <button type="button" class="btn ghost btn-sm" data-of-wishlist="${esc(item.id)}">Guardar</button>
+                    ${(item.asin || extractAsin(item.linkAmazon)) && item.costo > 0
+                        ? `<button type="button" class="btn primary btn-sm" data-of-convert="${esc(item.id)}">→ Producto</button>`
+                        : ''}
                     <button type="button" class="btn ghost btn-sm" data-of-edit="${esc(item.id)}">Editar</button>
                     ${item.status !== 'viable' ? `<button type="button" class="btn primary btn-sm" data-of-status="viable" data-id="${esc(item.id)}">Viable</button>` : ''}
                     ${item.status !== 'vigilando' ? `<button type="button" class="btn ghost btn-sm" data-of-status="vigilando" data-id="${esc(item.id)}">Vigilar</button>` : ''}
@@ -2402,14 +2448,19 @@ const OfertasView = (() => {
         }
 
         const items = loadItems();
+        const guardadosN = window.WishlistView?.pendingCount?.() || 0;
         const counts = {
             vigilando: items.filter(i => i.status === 'vigilando').length,
             viable: items.filter(i => i.status === 'viable').length,
+            guardados: guardadosN,
             descartada: items.filter(i => i.status === 'descartada').length,
         };
-        const shown = items
-            .filter(i => i.status === local.filter)
-            .sort((a, b) => metricsFor(b).roi - metricsFor(a).roi);
+        const isGuardados = local.filter === 'guardados';
+        const shown = isGuardados
+            ? []
+            : items
+                .filter(i => i.status === local.filter)
+                .sort((a, b) => metricsFor(b).roi - metricsFor(a).roi);
 
         const editing = local.editingId
             ? items.find(i => i.id === local.editingId)
@@ -2445,6 +2496,7 @@ const OfertasView = (() => {
                         ${[
                             ['vigilando', 'Vigilando', counts.vigilando],
                             ['viable', 'Viables', counts.viable],
+                            ['guardados', 'Guardados', counts.guardados],
                             ['descartada', 'Descartadas', counts.descartada],
                         ].map(([k, label, n]) => `
                             <button type="button" class="dash-seg-btn${local.filter === k ? ' active' : ''}"
@@ -2452,11 +2504,13 @@ const OfertasView = (() => {
                         `).join('')}
                     </div>
                 </div>
-                ${shown.length
-                    ? `<div class="of-list">${shown.map(card).join('')}</div>`
-                    : `<p class="muted small of-empty">${local.filter === 'vigilando'
-                        ? 'Nada en el radar todavía.'
-                        : 'Nada aquí todavía.'}</p>`
+                ${isGuardados
+                    ? `<div id="of-guardados-host" class="of-guardados-host"></div>`
+                    : (shown.length
+                        ? `<div class="of-list">${shown.map(card).join('')}</div>`
+                        : `<p class="muted small of-empty">${local.filter === 'vigilando'
+                            ? 'Nada en el radar todavía.'
+                            : 'Nada aquí todavía.'}</p>`)
                 }
             </section>
 
@@ -2511,6 +2565,10 @@ const OfertasView = (() => {
         refreshPreview(root);
         if (window.Keepa?.hydrate) Keepa.hydrate(root);
         window.Icons?.hydrate?.(root);
+        if (local.filter === 'guardados') {
+            const host = root.querySelector('#of-guardados-host');
+            if (host) window.WishlistView?.renderEmbedded?.(host);
+        }
     }
 
     function refreshPreview(root) {
@@ -2709,6 +2767,9 @@ const OfertasView = (() => {
         root.querySelectorAll('[data-of-wishlist]').forEach(btn => {
             btn.addEventListener('click', () => sendToWishlist(btn.getAttribute('data-of-wishlist')));
         });
+        root.querySelectorAll('[data-of-convert]').forEach(btn => {
+            btn.addEventListener('click', () => convertToProduct(btn.getAttribute('data-of-convert')));
+        });
 
         root.querySelectorAll('[data-of-del]').forEach(btn => {
             btn.addEventListener('click', async () => {
@@ -2752,6 +2813,7 @@ const OfertasView = (() => {
         openDraftFromUrl,
         acceptDraft,
         hasDraft,
+        showGuardados,
     };
 })();
 window.OfertasView = OfertasView;

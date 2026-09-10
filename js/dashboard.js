@@ -256,86 +256,16 @@ const DashboardView = (() => {
                 <div class="dash-body dash-body-combined dash-home gx-body">
                     <header class="dash-masthead">
                         ${gxAmbience}
-                        <p class="dash-masthead-kicker">General</p>
-                        <h1 class="dash-masthead-title">Ambos canales,<br>un solo pulso.</h1>
+                        <p class="dash-masthead-kicker">Hoy</p>
+                        <h1 class="dash-masthead-title">Qué hacer<br>ahora.</h1>
                     </header>
                     ${layHeroKPIs(lotesAll)}
                     ${layGeneralExecutive(exec)}
-                    <section class="dash-section dash-section-rise" id="gx-progreso">
-                        <div class="dash-section-head">
-                            <div class="dash-section-copy">
-                                <h2 class="dash-section-title">Progreso</h2>
-                                <p class="dash-section-lead">Tendencia consolidada Meli + Amazon</p>
-                            </div>
-                            <div class="dash-chart-toggles">
-                                <div class="dash-seg" role="group" aria-label="Granularidad">
-                                    <button type="button" class="dash-seg-btn${chartPeriod === 'weeks' ? ' active' : ''}" data-dash-period="weeks">Semanas</button>
-                                    <button type="button" class="dash-seg-btn${chartPeriod === 'months' ? ' active' : ''}" data-dash-period="months">Meses</button>
-                                    <button type="button" class="dash-seg-btn${chartPeriod === 'years' ? ' active' : ''}" data-dash-period="years">Años</button>
-                                </div>
-                                <details class="dash-chart-type-more">
-                                    <summary class="dash-chart-type-btn" aria-label="Tipo de gráfica">⋯</summary>
-                                    <div class="dash-chart-type-list" role="group" aria-label="Tipo de gráfica">
-                                        <button type="button" class="dash-type-opt${chartType === 'hero' ? ' active' : ''}" data-dash-type="hero">Hero</button>
-                                        <button type="button" class="dash-type-opt${chartType === 'bars' ? ' active' : ''}" data-dash-type="bars">Barras</button>
-                                        <button type="button" class="dash-type-opt${chartType === 'lines' ? ' active' : ''}" data-dash-type="lines">Líneas</button>
-                                        <button type="button" class="dash-type-opt${chartType === 'area' ? ' active' : ''}" data-dash-type="area">Área</button>
-                                    </div>
-                                </details>
-                            </div>
-                        </div>
-                        ${layProgreso(lotesAll, {
-                            period: chartPeriod,
-                            range: chartRange,
-                            showEmpty: chartShowEmpty,
-                            chartType,
-                            fromDate: fromResolved.iso,
-                            fromPreset: fromResolved.preset,
-                            cashMode: window.State.ui?.dashCashMode === 'vendido' ? 'vendido' : 'cobrado',
-                        })}
-                    </section>
-                    <section class="dash-section dash-section-rise" id="gx-finanzas">
-                        <div class="dash-section-head">
-                            <div class="dash-section-copy">
-                                <h2 class="dash-section-title">P&amp;G estimado</h2>
-                                <p class="dash-section-lead">${esc(pygPeriod?.label || 'Periodo')} · ${pygCtx.agg?.totalVendidas || 0} uds · por fecha de venta</p>
-                            </div>
-                            ${layPyGPeriodChips(pygPeriod)}
-                        </div>
-                        ${layPyGCompact(pygCtx)}
-                    </section>
-                    <details class="gx-more dash-section-rise" id="gx-finanzas-more" data-gx-more-persist="finanzas"${moreFlags.finanzas ? ' open' : ''}>
-                        <summary class="gx-more-summary">Más finanzas · detalle, caja y portafolio</summary>
-                        <div class="gx-more-body">
-                            <div class="gx-fin-stack">
-                                <div>
-                                    <h3 class="gx-fin-h">Estado de resultados</h3>
-                                    ${layPyG(pygCtx)}
-                                </div>
-                                <div>
-                                    <h3 class="gx-fin-h">Detalle por venta</h3>
-                                    ${layVentaDetalle(pygCtx, { variant: 'full' })}
-                                </div>
-                                <div>
-                                    <h3 class="gx-fin-h">Caja</h3>
-                                    ${layCaja(ctx)}
-                                </div>
-                                <div>
-                                    <h3 class="gx-fin-h">Portafolio</h3>
-                                    ${layPortafolio(ctx)}
-                                </div>
-                                <div>
-                                    <h3 class="gx-fin-h">Bolsitas consolidadas</h3>
-                                    <p class="dash-section-lead" style="margin:0 0 12px">Suma de Meli + Amazon. Para usar o ajustar %, abre cada marketplace.</p>
-                                    ${layAsignacionDualReadonly()}
-                                </div>
-                            </div>
-                        </div>
-                    </details>
                 </div>
             </div>`;
         bind(root);
         bindGeneralExecutive(root, exec);
+        bindHoyOps(root);
     }
 
     function mergeStrategyCounts(a = {}, b = {}) {
@@ -828,65 +758,85 @@ const DashboardView = (() => {
                 </div>
             </section>
 
-            <section class="dash-section dash-section-rise" id="gx-invmap">
-                <div class="dash-section-copy">
-                    <h2 class="dash-section-title">Sano vs flojo</h2>
-                    <p class="dash-section-lead">Capital en margen sano (≥20%) vs flojo</p>
-                </div>
-                <div class="dash-panel dash-panel-quiet gx-invmap-panel">
-                    ${layInvMarginMap(aggCombined.rows || [])}
-                </div>
-            </section>
+            ${layHoyOpsQueue()}
+        `;
+    }
 
-            <section class="dash-section dash-section-rise" id="gx-metas">
+    function layHoyOpsQueue() {
+        const keepaAlerts = (window.Keepa?.readOpsAlerts?.() || []).slice(0, 5);
+        const ofertas = (Array.isArray(window.State.ui?.ofertasRetail) ? window.State.ui.ofertasRetail : [])
+            .filter(i => i && i.status === 'viable')
+            .slice(0, 5);
+        const guardados = (Array.isArray(window.State.ui?.wishlistAmazon) ? window.State.ui.wishlistAmazon : [])
+            .filter(i => i && i.status === 'listo')
+            .slice(0, 5);
+        let envios = [];
+        try {
+            if (window.EnviosView?.listHoy) envios = EnviosView.listHoy().slice(0, 5);
+            else if (window.EnviosView?.pendingCount) {
+                const n = EnviosView.pendingCount() || 0;
+                if (n > 0) envios = [{ id: 'env-summary', title: `${n} envío${n === 1 ? '' : 's'} pendiente${n === 1 ? '' : 's'}`, sub: 'Abrir Envíos' }];
+            }
+        } catch (_) { /* ignore */ }
+
+        const empty = !keepaAlerts.length && !ofertas.length && !guardados.length && !envios.length;
+        return `
+            <section class="dash-section dash-section-rise" id="gx-hoy-ops">
                 <div class="dash-section-copy">
-                    <h2 class="dash-section-title">Metas del mes</h2>
-                    <p class="dash-section-lead">Objetivo simple. El pulso sigue el ritmo.</p>
+                    <h2 class="dash-section-title">Cola de hoy</h2>
+                    <p class="dash-section-lead">Recompras · ofertas · guardados · envíos · alertas Keepa</p>
                 </div>
-                <div class="dash-panel dash-panel-quiet gx-goals-panel">
-                    <div class="gx-goals">
-                        <div class="gx-goals-main">
-                            <div class="gx-goals-fields">
-                                <label class="gx-field">
-                                    <span>Meta utilidad (MXN)</span>
-                                    <input type="number" min="0" step="100" data-goal-utilidad value="${goalUtil || ''}" placeholder="0">
-                                </label>
-                                <label class="gx-field">
-                                    <span>Meta cash in (MXN)</span>
-                                    <input type="number" min="0" step="100" data-goal-cash value="${goalCash || ''}" placeholder="0">
-                                </label>
-                                <button type="button" class="btn primary gx-btn-solid" data-goal-save>Guardar metas</button>
-                            </div>
+                <div class="gx-hoy-grid">
+                    <div class="dash-panel gx-panel dash-panel-quiet">
+                        <div class="gx-panel-head">
+                            <h3>Alertas Keepa</h3>
+                            <button type="button" class="btn ghost btn-sm" data-hoy-goto="keepa">Keepa</button>
                         </div>
-                        <div class="gx-goals-pace">
-                            ${layGoalBar('Utilidad', monthStats.ganancia, goalUtil, monthStats.projGain)}
-                            ${layGoalBar('Cash in', monthStats.cashIn, goalCash, monthStats.projCash)}
+                        ${keepaAlerts.length ? `<ul class="gx-hoy-list">${keepaAlerts.map(a => `
+                            <li>
+                                <button type="button" class="gx-hoy-row" data-hoy-asin="${esc(a.asin || '')}">
+                                    <strong>${esc(a.title || a.asin || 'Alerta')}</strong>
+                                    <span class="muted">${esc(a.text || '')}</span>
+                                </button>
+                            </li>`).join('')}</ul>` : '<p class="muted small">Sin alertas. Escanea en Keepa → Alertas.</p>'}
+                    </div>
+                    <div class="dash-panel gx-panel dash-panel-quiet">
+                        <div class="gx-panel-head">
+                            <h3>Ofertas / Guardados</h3>
+                            <button type="button" class="btn ghost btn-sm" data-hoy-goto="ofertas">Ofertas</button>
                         </div>
+                        ${ofertas.length || guardados.length ? `<ul class="gx-hoy-list">
+                            ${ofertas.map(o => `
+                                <li><button type="button" class="gx-hoy-row" data-hoy-goto="ofertas">
+                                    <strong>${esc(o.titulo || o.asin || 'Oferta viable')}</strong>
+                                    <span class="muted">Viable · ${esc(o.tienda || 'retail')}</span>
+                                </button></li>`).join('')}
+                            ${guardados.map(g => `
+                                <li><button type="button" class="gx-hoy-row" data-hoy-goto="guardados">
+                                    <strong>${esc(g.titulo || g.asin || 'Guardado')}</strong>
+                                    <span class="muted">Listo · ${Calc.fmtMXN(g.costo || 0)}</span>
+                                </button></li>`).join('')}
+                        </ul>` : '<p class="muted small">Nada viable ni guardado.</p>'}
+                    </div>
+                    <div class="dash-panel gx-panel dash-panel-quiet">
+                        <div class="gx-panel-head">
+                            <h3>Envíos</h3>
+                            <button type="button" class="btn ghost btn-sm" data-hoy-goto="envios">Envíos</button>
+                        </div>
+                        ${envios.length ? `<ul class="gx-hoy-list">${envios.map(e => `
+                            <li><button type="button" class="gx-hoy-row" data-hoy-goto="envios">
+                                <strong>${esc(e.title || e.label || 'Pendiente')}</strong>
+                                <span class="muted">${esc(e.sub || e.detail || '')}</span>
+                            </button></li>`).join('')}</ul>` : '<p class="muted small">Sin envíos pendientes.</p>'}
                     </div>
                 </div>
-            </section>
-
-            <details class="gx-more dash-section-rise" id="gx-canales" data-gx-more-persist="canales" ${moreOpen ? 'open' : ''}>
-                <summary class="gx-more-summary">Más detalle · canales y capital</summary>
-                <div class="gx-more-body">
-                    <div class="gx-alloc-suggest" aria-label="Asignación sugerida de capital">
-                        <div class="gx-alloc-copy">
-                            <span class="gx-alloc-title">Peso sugerido</span>
-                            <span class="muted small">${esc(split.line)}</span>
-                        </div>
-                        <div class="gx-alloc-track">
-                            <span class="gx-alloc-meli" style="width:${split.pctMeli}%"></span>
-                            <span class="gx-alloc-amz" style="width:${split.pctAmz}%"></span>
-                        </div>
-                        <div class="gx-alloc-meta">
-                            <span><i class="gx-dot meli"></i> Meli ${split.pctMeli}%</span>
-                            <span><i class="gx-dot amz"></i> Amazon ${split.pctAmz}%</span>
-                        </div>
-                    </div>
-                    ${layChannelMatrix(exec.aggMeli, exec.aggAmz, nMeli, nAmz, hardMeli, hardAmz)}
-                    <div class="gx-canales-capital">${layCapitalUnificado(allocUnified)}</div>
+                ${empty ? '' : ''}
+                <div class="gx-hoy-links">
+                    <button type="button" class="btn ghost btn-sm" data-hoy-goto="insights">Insights</button>
+                    <button type="button" class="btn ghost btn-sm" data-hoy-goto="caja">Caja</button>
+                    <button type="button" class="btn ghost btn-sm" data-hoy-goto="lotes">Productos</button>
                 </div>
-            </details>
+            </section>
         `;
     }
 
@@ -1029,6 +979,33 @@ const DashboardView = (() => {
             </div>
             ${layAsignacionDualReadonly()}
         `;
+    }
+
+    function bindHoyOps(root) {
+        root.querySelectorAll('[data-hoy-goto]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const go = btn.getAttribute('data-hoy-goto');
+                if (go === 'guardados') {
+                    window.App?.switchTab?.('ofertas');
+                    window.OfertasView?.showGuardados?.();
+                    return;
+                }
+                if (go === 'ofertas' || go === 'keepa' || go === 'envios' || go === 'insights' || go === 'caja' || go === 'lotes') {
+                    window.App?.switchTab?.(go);
+                }
+            });
+        });
+        root.querySelectorAll('[data-hoy-asin]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const asin = btn.getAttribute('data-hoy-asin');
+                if (!asin) {
+                    window.App?.switchTab?.('keepa');
+                    return;
+                }
+                window.App?.switchTab?.('keepa');
+                window.KeepaView?.openAsin?.(asin);
+            });
+        });
     }
 
     function bindGeneralExecutive(root, exec) {

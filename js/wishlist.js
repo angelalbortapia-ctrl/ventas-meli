@@ -283,8 +283,8 @@ const WishlistView = (() => {
         await seedInboundPipeline(lote);
     }
 
-    /** Alta rápida desde Keepa Lab (Deal / Finder / Research). */
-    function addFromKeepa({ asin, title = '', precio = 0, note = '' } = {}) {
+    /** Alta rápida desde Keepa / Ofertas. */
+    function addFromKeepa({ asin, title = '', precio = 0, note = '', silent = false } = {}) {
         const code = String(asin || '').trim().toUpperCase();
         if (!/^[A-Z0-9]{10}$/.test(code)) {
             UI.toast('ASIN inválido', 'error');
@@ -298,9 +298,11 @@ const WishlistView = (() => {
         if (existing) {
             local.filter = existing.status === 'comprado' ? 'comprado' : 'listo';
             local.editingId = existing.id;
-            window.App?.switchTab?.('wishlist');
-            render();
-            UI.toast('Ya estaba en Wishlist');
+            if (!silent) {
+                window.App?.switchTab?.('ofertas');
+                window.OfertasView?.showGuardados?.();
+                UI.toast('Ya estaba en Guardados');
+            }
             return existing;
         }
         const next = normalizeItem({
@@ -310,7 +312,7 @@ const WishlistView = (() => {
             precioMercado: Number(precio) || 0,
             costo: 0,
             linkAmazon: `https://www.amazon.com.mx/dp/${code}`,
-            nota: note || 'Desde Keepa Lab',
+            nota: note || 'Desde Keepa',
             status: 'listo',
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -322,9 +324,11 @@ const WishlistView = (() => {
         saveItems([next, ...items]);
         local.filter = 'listo';
         local.editingId = next.id;
-        window.App?.switchTab?.('wishlist');
-        render();
-        UI.toast('Agregado a Wishlist · completa costo');
+        if (!silent) {
+            window.App?.switchTab?.('ofertas');
+            window.OfertasView?.showGuardados?.();
+            UI.toast('Guardado · completa el costo');
+        }
         return next;
     }
 
@@ -338,7 +342,8 @@ const WishlistView = (() => {
         if (idx < 0) return;
         items[idx] = { ...items[idx], status, updatedAt: new Date().toISOString() };
         saveItems(items);
-        render();
+        if (window.State.view === 'ofertas') window.OfertasView?.render?.();
+        else render();
     }
 
     function removeItem(id) {
@@ -347,15 +352,17 @@ const WishlistView = (() => {
         if (!target) return;
         saveItems(before.filter(i => i.id !== id));
         if (local.editingId === id) local.editingId = null;
-        render();
+        if (window.State.view === 'ofertas') window.OfertasView?.render?.();
+        else render();
         const label = target.titulo || target.asin || 'ítem';
         UI.toast(`Eliminado · ${label}`, 'success', {
             action: {
                 label: 'Deshacer',
                 handler: () => {
                     saveItems(before);
-                    render();
-                    UI.toast('Wishlist restaurada');
+                    if (window.State.view === 'ofertas') window.OfertasView?.render?.();
+                    else render();
+                    UI.toast('Guardados restaurados');
                 },
             },
         });
@@ -370,9 +377,9 @@ const WishlistView = (() => {
         const primary = item.status === 'comprado' && item.loteId
             ? `<button type="button" class="btn primary btn-sm" data-wl-open-lote="${esc(item.loteId)}">Ver producto</button>`
             : item.status === 'comprado' && !item.loteId
-                ? `<button type="button" class="btn primary btn-sm" data-wl-status="comprado" data-id="${esc(item.id)}">Crear producto</button>`
+                ? `<button type="button" class="btn primary btn-sm" data-wl-status="comprado" data-id="${esc(item.id)}">→ Producto</button>`
                 : item.status === 'listo'
-                    ? `<button type="button" class="btn primary btn-sm" data-wl-status="comprado" data-id="${esc(item.id)}">Ya lo compré</button>`
+                    ? `<button type="button" class="btn primary btn-sm" data-wl-status="comprado" data-id="${esc(item.id)}">→ Producto</button>`
                     : `<button type="button" class="btn ghost btn-sm" data-wl-status="listo" data-id="${esc(item.id)}">Volver a listo</button>`;
 
         return `
@@ -431,106 +438,83 @@ const WishlistView = (() => {
     }
 
     function render() {
-        const root = document.getElementById('view-wishlist');
-        if (!root) return;
-        if (!isAmazonView()) {
-            root.innerHTML = `
-                <div class="view-head"><div><h2>Wishlist</h2>
-                <p class="muted">Cambia a Amazon para usarla.</p></div></div>`;
+        // Wishlist vive dentro de Ofertas → Guardados
+        if (window.State.view === 'wishlist') {
+            window.App?.switchTab?.('ofertas');
+            window.OfertasView?.showGuardados?.();
             return;
         }
+        const host = document.getElementById('of-guardados-host');
+        if (host) {
+            renderEmbedded(host);
+            return;
+        }
+        const root = document.getElementById('view-wishlist');
+        if (root) {
+            root.innerHTML = `
+                <div class="view-head">
+                    <div>
+                        <h2>Guardados</h2>
+                        <p class="muted">Se movió a <strong>Ofertas → Guardados</strong>.</p>
+                    </div>
+                    <button type="button" class="btn primary" data-wl-goto-ofertas>Abrir Guardados</button>
+                </div>`;
+            root.querySelector('[data-wl-goto-ofertas]')?.addEventListener('click', () => {
+                window.App?.switchTab?.('ofertas');
+                window.OfertasView?.showGuardados?.();
+            });
+        }
+    }
 
-        const items = loadItems();
-        const shown = sortedFiltered(items);
-        const counts = {
-            listo: items.filter(i => i.status === 'listo').length,
-            comprado: items.filter(i => i.status === 'comprado').length,
-            no_procede: items.filter(i => i.status === 'no_procede').length,
-        };
-        const rein = reinversionDisponible();
-        const d = formDefaults();
-        const previewItem = {
-            costo: Number(d.costo) || 0,
-            precioMercado: Number(d.precioMercado) || 0,
-            tipo: d.tipo || 'FBA',
-            categoriaAmazon: d.categoriaAmazon || window.State.settings?.categoriaDefault || '',
-        };
-        const storeHint = d.tienda
-            || detectStore(d.linkCompra || '').label
-            || '';
+    function renderEmbedded(host) {
+        if (!host) return;
+        const items = loadItems().filter(i => i.status === 'listo' || i.status === 'comprado');
+        const listo = items.filter(i => i.status === 'listo');
+        const comprado = items.filter(i => i.status === 'comprado');
+        const shown = [...listo, ...comprado];
+        host.innerHTML = `
+            <div class="of-guardados-panel">
+                <p class="muted small of-guardados-lead">Prospectos listos para comprar o convertir a producto (ASIN + costo + FBA/FBM).</p>
+                ${shown.length
+                    ? `<div class="of-list wl-embedded-list">${shown.map(card).join('')}</div>`
+                    : `<p class="muted small of-empty">Nada guardado. Desde el radar usa <strong>Guardar</strong>.</p>`}
+            </div>`;
+        bindEmbedded(host);
+        if (window.Keepa?.hydrate) Keepa.hydrate(host);
+    }
 
-        root.innerHTML = `
-            <div class="view-head wl-head">
-                <div>
-                    <h2>Wishlist</h2>
-                    <p class="muted">Links + números. Al comprar, se crea el producto.</p>
-                </div>
-                <div class="wl-capital-inline" title="Reinversión Amazon">
-                    <span class="muted small">Para comprar</span>
-                    <strong class="mono">${Calc.fmtMXN(rein)}</strong>
-                </div>
-            </div>
-
-            <div class="card wl-form-card">
-                ${local.editingId ? `<p class="wl-editing muted small">Editando prospecto</p>` : ''}
-                <div class="form-grid wl-form">
-                    <label class="wide">
-                        <span>Link compra</span>
-                        <input type="text" id="wl-link-compra" inputmode="url" autocomplete="off"
-                            placeholder="Pega link de Costco, Sam's, Walmart…" value="${esc(d.linkCompra || '')}">
-                        <span class="wl-detect" id="wl-detect-tienda">${storeHint
-                            ? `<span class="wl-store">${esc(storeHint)}</span>`
-                            : `<span class="muted small">La tienda aparece al pegar el link</span>`}</span>
-                    </label>
-                    <label class="wide">
-                        <span>Link Amazon</span>
-                        <input type="text" id="wl-link-amazon" inputmode="url" autocomplete="off"
-                            placeholder="Pega link amazon.com.mx/dp/…" value="${esc(d.linkAmazon || '')}">
-                        <span class="wl-detect" id="wl-detect-asin">${d.asin
-                            ? `<code>${esc(d.asin)}</code>`
-                            : `<span class="muted small">El ASIN aparece al pegar el link</span>`}</span>
-                    </label>
-                    <label class="wide">
-                        <span>Nombre <small>opcional</small></span>
-                        <input type="text" id="wl-titulo" placeholder="Cómo lo reconoces" value="${esc(d.titulo || '')}">
-                    </label>
-                    <label>
-                        <span>Costo compra (MXN)</span>
-                        <input type="number" id="wl-costo" min="0" step="0.01" inputmode="decimal" placeholder="Ej. 180" value="${d.costo !== '' && d.costo != null ? esc(d.costo) : ''}">
-                    </label>
-                    <label>
-                        <span>Precio Amazon (MXN)</span>
-                        <input type="number" id="wl-precio" min="0" step="0.01" inputmode="decimal" placeholder="Ej. 449" value="${d.precioMercado !== '' && d.precioMercado != null ? esc(d.precioMercado) : ''}">
-                    </label>
-                </div>
-                <div id="wl-live-preview">${previewHtml(previewItem)}</div>
-                <div class="wl-form-actions">
-                    <button type="button" class="btn primary" id="wl-save-listo">${local.editingId ? 'Guardar' : 'Agregar'}</button>
-                    ${local.editingId ? `<button type="button" class="btn ghost" id="wl-cancel-edit">Cancelar</button>` : ''}
-                </div>
-            </div>
-
-            <div class="wl-toolbar">
-                <div class="dash-seg" role="tablist" aria-label="Filtro">
-                    ${[
-                        ['listo', 'Listos', counts.listo],
-                        ['comprado', 'Comprados', counts.comprado],
-                        ['no_procede', 'No', counts.no_procede],
-                    ].map(([k, label, n]) => `
-                        <button type="button" class="dash-seg-btn${local.filter === k ? ' active' : ''}"
-                            data-wl-filter="${k}" role="tab">${label} ${n}</button>
-                    `).join('')}
-                </div>
-            </div>
-
-            ${shown.length
-                ? `<div class="wl-list">${shown.map(card).join('')}</div>`
-                : `<p class="muted small wl-empty">Nada aquí todavía.</p>`
-            }
-        `;
-
-        bind(root);
-        if (window.Keepa?.hydrate) Keepa.hydrate(root);
+    function bindEmbedded(root) {
+        root.querySelectorAll('[data-wl-status]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                setStatus(btn.getAttribute('data-id'), btn.getAttribute('data-wl-status'));
+            });
+        });
+        root.querySelectorAll('[data-wl-open-lote]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.getAttribute('data-wl-open-lote');
+                if (!id) return;
+                window.App?.switchTab?.('lotes');
+                window.LotesView?.openModal?.(id);
+            });
+        });
+        root.querySelectorAll('[data-wl-del]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const ok = await UI.confirm({
+                    title: 'Eliminar guardado',
+                    message: 'Se quitará de Guardados. ¿Continuar?',
+                    primaryLabel: 'Eliminar',
+                    danger: true,
+                });
+                if (ok) removeItem(btn.getAttribute('data-wl-del'));
+            });
+        });
+        root.querySelectorAll('[data-wl-edit]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                local.editingId = btn.getAttribute('data-wl-edit');
+                // Abrir Ofertas form no aplica; toast to edit via full modal later
+                UI.toast('Edita costo/ASIN al convertir, o desde Keepa');
+            });
+        });
     }
 
     function refreshPreview(root) {
@@ -643,17 +627,17 @@ const WishlistView = (() => {
 
     function init() {
         window.State.subscribe(() => {
-            if (window.State.view !== 'wishlist') return;
-            const root = document.getElementById('view-wishlist');
-            // No pisar el form si el usuario está escribiendo / ya llenó campos
-            if (root && (root.contains(document.activeElement) || formIsDirty(root))) return;
-            render();
+            if (window.State.view !== 'ofertas') return;
+            const host = document.getElementById('of-guardados-host');
+            if (!host) return;
+            renderEmbedded(host);
         });
     }
 
     return {
         init,
         render,
+        renderEmbedded,
         pendingCount,
         isEnabled: isAmazonView,
         addFromKeepa,

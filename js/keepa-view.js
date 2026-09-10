@@ -409,8 +409,8 @@ const KeepaView = (() => {
         root.innerHTML = `
             <div class="view-head keepa-view-head">
                 <div>
-                    <h2>Keepa Lab</h2>
-                    <p class="muted">Precio histórico, demanda, Buy Box, ofertas, Finder y vendedores · Amazon MX.</p>
+                    <h2>Keepa</h2>
+                    <p class="muted">Checa un ASIN y alertas de precio/BSR/restock sobre tu catálogo Amazon MX.</p>
                 </div>
                 <div class="keepa-head-actions">
                     ${configured ? `
@@ -436,11 +436,9 @@ const KeepaView = (() => {
 
             <nav class="keepa-view-tabs" role="tablist">
                 ${[
-                    ['research', 'Investigador'],
+                    ['research', 'Checar ASIN'],
                     ['library', 'Biblioteca'],
-                    ['finder', 'Product Finder'],
-                    ['seller', 'Vendedor'],
-                    ['deals', 'Deals'],
+                    ['alerts', 'Alertas catálogo'],
                 ].map(([key, label]) => `
                     <button type="button" class="detail-tab ${local.section === key ? 'active' : ''}"
                         data-kv-section="${key}" role="tab">${label}</button>
@@ -456,11 +454,46 @@ const KeepaView = (() => {
     }
 
     function renderSection(configured) {
+        // Lab reducido: ASIN + biblioteca + alertas (finder/seller/deals quedan fuera del nav)
+        if (['finder', 'seller', 'deals'].includes(local.section)) local.section = 'research';
         if (local.section === 'library') return renderLibrary(configured);
-        if (local.section === 'finder') return renderFinder(configured);
-        if (local.section === 'seller') return renderSeller(configured);
-        if (local.section === 'deals') return renderDeals(configured);
+        if (local.section === 'alerts') return renderCatalogAlerts(configured);
         return renderResearch(configured);
+    }
+
+    function renderCatalogAlerts(configured) {
+        const alerts = window.Keepa?.readOpsAlerts?.() || [];
+        const list = Array.isArray(alerts) ? alerts : (alerts.items || []);
+        return `
+            <section class="keepa-workspace">
+                <div class="keepa-workspace-head">
+                    <div>
+                        <h3>Alertas del catálogo</h3>
+                        <p class="muted small">Precio, BSR y restock sobre tus lotes Amazon con stock. Sin entrar a Finder/Deals.</p>
+                    </div>
+                    <button type="button" class="btn primary sm" data-kv-action="scan-catalog" ${configured ? '' : 'disabled'}>
+                        Escanear ahora
+                    </button>
+                </div>
+                ${list.length ? `
+                    <ul class="keepa-alert-list">
+                        ${list.slice(0, 24).map(a => `
+                            <li class="keepa-alert-item tone-${esc(a.severity || 'medium')}">
+                                <div>
+                                    <strong>${esc(a.title || a.asin || 'Alerta')}</strong>
+                                    <p class="muted small">${esc(a.text || '')}</p>
+                                </div>
+                                ${a.asin ? `<button type="button" class="btn ghost sm" data-kv-open-asin="${esc(a.asin)}">Ver ASIN</button>` : ''}
+                            </li>
+                        `).join('')}
+                    </ul>
+                    <p class="muted small" style="margin-top:12px">También aparecen en Insights. <button type="button" class="btn ghost sm" data-kv-action="goto-insights">Abrir Insights</button></p>
+                ` : `
+                    <div class="card keepa-empty">
+                        <p>Sin alertas guardadas. Escanea el catálogo para detectar caídas de precio, BSR flojo o restocks.</p>
+                    </div>
+                `}
+            </section>`;
     }
 
     function vitrineTone(i) {
@@ -1455,18 +1488,29 @@ const KeepaView = (() => {
                 });
             });
         });
-        root.querySelector('[data-kv-action="scan-catalog"]')?.addEventListener('click', async () => {
-            const btn = root.querySelector('[data-kv-action="scan-catalog"]');
-            if (btn) btn.disabled = true;
-            try {
-                const res = await Keepa.scanCatalogAlerts({ limit: 12 });
-                UI.toast(`Keepa · ${res.scanned} ASINs · ${res.alerts.length} alerta${res.alerts.length === 1 ? '' : 's'}`);
-                window.App?.switchTab?.('insights');
-            } catch (err) {
-                UI.toast(err.message || 'No se pudo escanear', 'error');
-            } finally {
-                if (btn) btn.disabled = false;
-            }
+        root.querySelectorAll('[data-kv-action="scan-catalog"]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                try {
+                    const res = await Keepa.scanCatalogAlerts({ limit: 12 });
+                    UI.toast(`Keepa · ${res.scanned} ASINs · ${res.alerts.length} alerta${res.alerts.length === 1 ? '' : 's'}`);
+                    local.section = 'alerts';
+                    render();
+                } catch (err) {
+                    UI.toast(err.message || 'No se pudo escanear', 'error');
+                } finally {
+                    btn.disabled = false;
+                }
+            });
+        });
+        root.querySelectorAll('[data-kv-action="goto-insights"]').forEach(btn => {
+            btn.addEventListener('click', () => window.App?.switchTab?.('insights'));
+        });
+        root.querySelectorAll('[data-kv-open-asin]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const asin = btn.getAttribute('data-kv-open-asin');
+                if (asin) window.KeepaView?.openAsin?.(asin);
+            });
         });
         root.querySelectorAll('[data-kv-seller]').forEach(button => {
             button.addEventListener('click', () => {

@@ -15,9 +15,9 @@ const App = (() => {
         dashboard: 'Inicio',
         lotes: 'Productos',
         envios: 'Envíos',
-        wishlist: 'Wishlist',
+        wishlist: 'Ofertas',
         ofertas: 'Ofertas',
-        keepa: 'Keepa Lab',
+        keepa: 'Keepa',
         caja: 'Caja',
         insights: 'Insights',
         settings: 'Ajustes',
@@ -79,6 +79,11 @@ const App = (() => {
         if (!TAB_LABELS[tab]) return;
 
         const apply = () => {
+            // Wishlist unificada dentro de Ofertas → Guardados
+            if (tab === 'wishlist') {
+                tab = 'ofertas';
+                window.__ofertasOpenGuardados = true;
+            }
             // Envíos (deuda FBA + colas) solo en Amazon
             if (tab === 'envios' && (!window.EnviosView || !window.EnviosView.canOpen?.())) {
                 if (window.State.marketplace !== 'amazon') {
@@ -99,7 +104,7 @@ const App = (() => {
                 window.State.saveUI();
                 refreshMarketplaceChrome();
                 const label = real === 'amazon' ? 'Amazon' : 'Mercado Libre';
-                UI.toast(`Catálogo ${label} (General es solo resumen)`);
+                UI.toast(`Catálogo ${label} (Hoy es el resumen)`);
             }
             const view = document.getElementById('view-' + tab);
             if (!view) return;
@@ -125,8 +130,17 @@ const App = (() => {
             else if (tab === 'insights') InsightsView.render();
             else if (tab === 'lotes') LotesView.render();
             else if (tab === 'envios') EnviosView.render();
-            else if (tab === 'wishlist') WishlistView.render();
-            else if (tab === 'ofertas') OfertasView.render();
+            else if (tab === 'wishlist') {
+                OfertasView.render();
+                OfertasView.showGuardados?.();
+            }
+            else if (tab === 'ofertas') {
+                OfertasView.render();
+                if (window.__ofertasOpenGuardados) {
+                    window.__ofertasOpenGuardados = false;
+                    OfertasView.showGuardados?.();
+                }
+            }
             else if (tab === 'keepa') KeepaView.render();
             else if (tab === 'caja') CajaView.render();
             else if (tab === 'settings') SettingsView.loadIntoForm();
@@ -297,7 +311,6 @@ const App = (() => {
         const isAmazon = window.State.marketplace === 'amazon';
         const prepOn = isAmazon && window.State.settings?.prepEnvioActivo !== false;
         const pendingShip = window.EnviosView?.pendingCount?.() || 0;
-        const pendingWish = window.WishlistView?.pendingCount?.() || 0;
         const alerts = window.InsightsView?.alertCount?.() || 0;
 
         const items = [];
@@ -308,10 +321,10 @@ const App = (() => {
         }
         if (isAmazon) {
             items.push({ id: 'ofertas', icon: 'ofertas', label: 'Ofertas',
-                hint: 'Retail → Amazon · arbitraje',
+                hint: 'Radar + Guardados · → Producto',
                 badge: window.OfertasView?.pendingCount?.() || null });
-            items.push({ id: 'keepa', icon: 'keepa', label: 'Keepa Lab',
-                hint: 'Investigación de ASINs' });
+            items.push({ id: 'keepa', icon: 'keepa', label: 'Keepa',
+                hint: 'Checar ASIN + alertas catálogo' });
         }
         // Slot Insights: en Amazon está fuera del tabbar → aparece en el sheet.
         if (isAmazon) {
@@ -329,11 +342,6 @@ const App = (() => {
         items.push({ id: 'backup', icon: 'backup', label: 'Respaldo JSON',
             hint: 'Exportar / importar copia' });
 
-        // Wishlist va en el tabbar cuando estás en Amazon; en Meli lo mostramos aquí también
-        if (!isAmazon) {
-            items.unshift({ id: 'wishlist', icon: 'wishlist', label: 'Wishlist Amazon',
-                hint: 'Cambia a Amazon para verlo', badge: pendingWish || null, tone: 'mute' });
-        }
 
         UI.bottomSheet({
             title: 'Más opciones',
@@ -389,23 +397,23 @@ const App = (() => {
             sbEnv.classList.toggle('badge-alert', pendingShip > 0);
         }
 
-        const pendingWish = window.WishlistView?.pendingCount?.() || 0;
-        const sbWish = document.getElementById('sb-count-wishlist');
-        if (sbWish) {
-            sbWish.textContent = pendingWish;
-            sbWish.hidden = pendingWish === 0;
-        }
-        const mWish = document.getElementById('m-tab-wishlist');
-        if (mWish) {
-            mWish.textContent = pendingWish;
-            mWish.hidden = pendingWish === 0;
-        }
-
         const pendingOfertas = window.OfertasView?.pendingCount?.() || 0;
         const sbOfertas = document.getElementById('sb-count-ofertas');
         if (sbOfertas) {
             sbOfertas.textContent = pendingOfertas;
             sbOfertas.hidden = pendingOfertas === 0;
+        }
+        const mOfertas = document.getElementById('m-tab-ofertas');
+        if (mOfertas) {
+            mOfertas.textContent = pendingOfertas;
+            mOfertas.hidden = pendingOfertas === 0;
+        }
+
+        const pendingWish = window.WishlistView?.pendingCount?.() || 0;
+        const sbWish = document.getElementById('sb-count-wishlist');
+        if (sbWish) {
+            sbWish.textContent = pendingWish;
+            sbWish.hidden = true; // tab legacy oculto
         }
 
         const pendingCaja = window.CajaView?.pendingCount?.() || 0;
@@ -932,16 +940,6 @@ const App = (() => {
     // Ninguna acción es destructiva; todas abren editores/formularios.
     // Productos usa el CTA del header (#lotes-new); no FAB ahí.
     const FAB_CONFIG = {
-        wishlist: {
-            label: 'Añadir',
-            title: 'Añadir a Wishlist',
-            aria: 'Añadir a Wishlist',
-            action: () => {
-                const view = document.getElementById('view-wishlist');
-                view?.scrollTo?.({ top: 0, behavior: 'smooth' });
-                document.getElementById('wl-link-compra')?.focus();
-            },
-        },
         ofertas: {
             label: 'Añadir',
             title: 'Añadir oferta',
@@ -1243,7 +1241,7 @@ const App = (() => {
                 DashboardView.render();
                 refreshNavCounts();
                 refreshFAB();
-                if (toast) UI.toast('General · agenda y metas');
+                if (toast) UI.toast('Hoy · cola y prioridades');
                 return;
             }
 
