@@ -19,7 +19,10 @@ const LotesView = (() => {
         mobileDetail: false,     // iPhone: lista ↔ detalle a pantalla completa
         fxEntered: false,        // entrada FX solo una vez por montaje
         fxLastFamily: null,
-        listSettleTimer: null,
+        salesChart: {
+            range: '12w',       // 4w | 12w | 6m | ytd
+            metric: 'unidades', // unidades | cash | ganancia
+        },
     };
 
     const ENVIO_LABELS = {
@@ -284,6 +287,8 @@ const LotesView = (() => {
                     <div class="lotes-detail" id="lotes-detail"></div>
                 </div>
             </div>
+
+            <div id="lotes-sales-chart" class="prod-sales-host" aria-label="Ventas en el tiempo"></div>
         `;
         bindShellEvents();
         initResizer();
@@ -493,6 +498,8 @@ const LotesView = (() => {
             const nVar = window.State.lotes.length;
             const statsEl = document.getElementById('lotes-stats');
             if (statsEl) statsEl.innerHTML = renderStats({ nProd, nTotal, nVar });
+            const salesChartEl = document.getElementById('lotes-sales-chart');
+            if (salesChartEl) salesChartEl.innerHTML = renderCatalogSalesChart();
             let catalogHost = document.getElementById('lotes-catalog-shelf');
             if (!catalogHost) {
                 const mailTop = document.querySelector('#view-lotes .lotes-mail-top');
@@ -1309,7 +1316,16 @@ const LotesView = (() => {
         const visibleVariants = listableVariants(family);
         const multi = visibleVariants.length > 1;
         const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
-        const sparkHTML = ventasSparkline(ventas, calc);
+        // Ventas: si hay varias variantes, listar las del producto con columna color
+        const allVentas = multi
+            ? visibleVariants.flatMap(v => (v.lote.ventas || []).map(venta => ({
+                ...venta,
+                variante: v.lote.variante || '—',
+                loteId: v.lote.id,
+                colorCls: cls(v.calc.estrategia),
+            }))).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
+            : ventas.map(v => ({ ...v, variante: null, loteId: lote.id }));
+        const sparkHTML = ventasSparkline(allVentas, calc);
 
         // Stock solo de colores activos (ocultos los dados de baja a 0)
         const stockBlock = multi ? `
@@ -1350,16 +1366,6 @@ const LotesView = (() => {
             </div>
         `;
 
-        // Ventas: si hay varias variantes, listar las del producto con columna color
-        const allVentas = multi
-            ? visibleVariants.flatMap(v => (v.lote.ventas || []).map(venta => ({
-                ...venta,
-                variante: v.lote.variante || '—',
-                loteId: v.lote.id,
-                colorCls: cls(v.calc.estrategia),
-            }))).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
-            : ventas.map(v => ({ ...v, variante: null, loteId: lote.id }));
-
         return `
             ${stockBlock}
 
@@ -1390,7 +1396,7 @@ const LotesView = (() => {
                     FBM: en cada venta elige el <strong>estatus de envío al cliente</strong>.
                 </p>
             ` : ''}
-            ${!multi ? sparkHTML : ''}
+            ${sparkHTML}
             ${allVentas.length ? `
                 <table class="mini-table" style="margin-top:8px">
                     <thead>
@@ -1755,26 +1761,447 @@ const LotesView = (() => {
     }
 
     // Sparkline SVG simple de ventas por semana (últimas 8 semanas).
+    // ---- Ventas en el tiempo (catálogo) --------------------------------
+    const SALES_RANGES = [
+        { id: '4w', label: '4 sem', period: 'weeks', range: 4 },
+        { id: '12w', label: '12 sem', period: 'weeks', range: 12 },
+        { id: '6m', label: '6 meses', period: 'months', range: 6 },
+        { id: 'ytd', label: 'YTD', period: 'months', range: 'ytd' },
+    ];
+
+    function salesRangeConfig(id = local.salesChart.range) {
+        return SALES_RANGES.find(r => r.id === id) || SALES_RANGES[1];
+    }
+
+    function salesPeriodKeys(period, range, now = new Date()) {
+        const keys = [];
+        if (period === 'months') {
+            if (range === 'ytd') {
+                for (let m = 0; m <= now.getMonth(); m++) {
+                    const x = new Date(now.getFullYear(), m, 1);
+                    keys.push({
+                        key: `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`,
+                        label: x.toLocaleDateString('es-MX', { month: 'short' }).replace(/\.$/, ''),
+                        tip: x.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }),
+                    });
+                }
+                return keys;
+            }
+            const count = Math.max(1, Number(range) || 6);
+            const d = new Date(now.getFullYear(), now.getMonth(), 1);
+            for (let i = count - 1; i >= 0; i--) {
+                const x = new Date(d.getFullYear(), d.getMonth() - i, 1);
+                keys.push({
+                    key: `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`,
+                    label: x.toLocaleDateString('es-MX', { month: 'short' }).replace(/\.$/, ''),
+                    tip: x.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }),
+                });
+            }
+            return keys;
+        }
+        const count = Math.max(1, Number(range) || 12);
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const day = (today.getDay() + 6) % 7;
+        const thisMon = new Date(today);
+        thisMon.setDate(today.getDate() - day);
+        for (let i = count - 1; i >= 0; i--) {
+            const mon = new Date(thisMon);
+            mon.setDate(thisMon.getDate() - i * 7);
+            const key = `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`;
+            const sun = new Date(mon);
+            sun.setDate(mon.getDate() + 6);
+            keys.push({
+                key,
+                label: mon.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }).replace(/\.$/, ''),
+                tip: `${mon.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} – ${sun.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`,
+            });
+        }
+        return keys;
+    }
+
+    function saleBucketKey(day, period) {
+        if (!day) return '';
+        if (period === 'months') {
+            return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}`;
+        }
+        const mon = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+        const wd = (mon.getDay() + 6) % 7;
+        mon.setDate(mon.getDate() - wd);
+        return `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`;
+    }
+
+    function buildCatalogSalesData() {
+        const cfg = salesRangeConfig();
+        const period = cfg.period;
+        const range = cfg.range;
+        const now = new Date();
+        const slots = salesPeriodKeys(period, range, now);
+        const slotMap = new Map(slots.map(s => [s.key, {
+            ...s,
+            unidades: 0,
+            cash: 0,
+            ganancia: 0,
+            pedidos: 0,
+            products: new Map(),
+        }]));
+        const byProduct = new Map();
+        const settings = window.State.settings;
+
+        (window.State.lotes || []).forEach(lote => {
+            const name = String(lote.producto || 'Sin nombre').trim() || 'Sin nombre';
+            const pid = familyKey(lote);
+            const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
+            ventas.forEach(v => {
+                const day = Calc.effectiveSaleDay(v.fecha, now);
+                if (!day) return;
+                const key = saleBucketKey(day, period);
+                const bucket = slotMap.get(key);
+                if (!bucket) return;
+                const uds = Math.max(0, Number(v.unidades) || 0);
+                const precio = Number(v.precio) || 0;
+                const cash = precio * uds;
+                let gain = 0;
+                try {
+                    const u = Calc.utilidadAtPrice(lote, precio, settings);
+                    gain = (Number(u?.utilidad) || 0) * uds;
+                } catch (_) {
+                    gain = 0;
+                }
+                bucket.unidades += uds;
+                bucket.cash += cash;
+                bucket.ganancia += gain;
+                bucket.pedidos += 1;
+
+                if (!bucket.products.has(pid)) {
+                    bucket.products.set(pid, { id: pid, name, unidades: 0, cash: 0, ganancia: 0 });
+                }
+                const bp = bucket.products.get(pid);
+                bp.unidades += uds;
+                bp.cash += cash;
+                bp.ganancia += gain;
+                if (name.length > bp.name.length) bp.name = name;
+
+                if (!byProduct.has(pid)) {
+                    byProduct.set(pid, {
+                        id: pid,
+                        name,
+                        unidades: 0,
+                        cash: 0,
+                        ganancia: 0,
+                        pedidos: 0,
+                    });
+                }
+                const p = byProduct.get(pid);
+                p.unidades += uds;
+                p.cash += cash;
+                p.ganancia += gain;
+                p.pedidos += 1;
+                if (name.length > p.name.length) p.name = name;
+            });
+        });
+
+        const metric = local.salesChart.metric || 'unidades';
+        const buckets = slots.map(s => {
+            const b = slotMap.get(s.key);
+            const top = [...b.products.values()]
+                .sort((a, c) => (c[metric] || 0) - (a[metric] || 0) || c.unidades - a.unidades)
+                .slice(0, 2)
+                .map(p => ({
+                    id: p.id,
+                    name: p.name,
+                    unidades: p.unidades,
+                    cash: p.cash,
+                    ganancia: p.ganancia,
+                }));
+            return {
+                key: b.key,
+                label: b.label,
+                tip: b.tip,
+                unidades: b.unidades,
+                cash: b.cash,
+                ganancia: b.ganancia,
+                pedidos: b.pedidos,
+                top,
+            };
+        });
+        const products = [...byProduct.values()]
+            .sort((a, b) => (b[metric] || 0) - (a[metric] || 0) || b.unidades - a.unidades)
+            .slice(0, 6);
+        const totals = buckets.reduce((acc, b) => {
+            acc.unidades += b.unidades;
+            acc.cash += b.cash;
+            acc.ganancia += b.ganancia;
+            acc.pedidos += b.pedidos;
+            return acc;
+        }, { unidades: 0, cash: 0, ganancia: 0, pedidos: 0 });
+
+        // Delta: último bucket con data vs el anterior con data (fallback: penúltimo)
+        const withData = buckets
+            .map((b, i) => ({ b, i }))
+            .filter(x => x.b.unidades > 0 || x.b.cash > 0 || Math.abs(x.b.ganancia) > 0.009);
+        const cur = withData.length ? withData[withData.length - 1] : null;
+        const prev = withData.length >= 2 ? withData[withData.length - 2] : null;
+        let delta = null;
+        if (cur && prev) {
+            const curV = Number(cur.b[metric]) || 0;
+            const prevV = Number(prev.b[metric]) || 0;
+            const diff = curV - prevV;
+            const pct = Math.abs(prevV) > 0.009
+                ? (diff / Math.abs(prevV)) * 100
+                : (Math.abs(diff) > 0.009 ? (diff > 0 ? 100 : -100) : 0);
+            delta = {
+                diff,
+                pct,
+                curLabel: cur.b.tip || cur.b.label,
+                prevLabel: prev.b.tip || prev.b.label,
+                periodWord: period === 'months' ? 'mes' : 'semana',
+            };
+        }
+
+        return { period, range, rangeId: cfg.id, buckets, products, totals, metric, delta };
+    }
+
+    function fmtSalesMetric(metric, n) {
+        if (metric === 'unidades') return `${Math.round(n)} uds`;
+        return Calc.fmtMXN(n);
+    }
+
+    function salesSmoothPath(vals, xAt, yAt) {
+        const n = vals.length;
+        if (!n) return '';
+        const pts = vals.map((v, i) => ({ x: xAt(i), y: yAt(v) }));
+        if (n === 1) return `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+        if (n === 2) {
+            return `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)} L${pts[1].x.toFixed(1)},${pts[1].y.toFixed(1)}`;
+        }
+        let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+        for (let i = 0; i < n - 1; i++) {
+            const p0 = pts[i - 1] || pts[i];
+            const p1 = pts[i];
+            const p2 = pts[i + 1];
+            const p3 = pts[i + 2] || p2;
+            const cp1x = p1.x + (p2.x - p0.x) / 6;
+            const cp1y = p1.y + (p2.y - p0.y) / 6;
+            const cp2x = p2.x - (p3.x - p1.x) / 6;
+            const cp2y = p2.y - (p3.y - p1.y) / 6;
+            d += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+        }
+        return d;
+    }
+
+    function renderSalesAreaSvg(buckets, metric) {
+        const n = buckets.length;
+        const vals = buckets.map(b => Number(b[metric]) || 0);
+        const maxV = Math.max(1, ...vals.map(v => Math.abs(v)));
+        const W = 720, H = 220, padL = 8, padR = 8, padT = 18, padB = 36;
+        const xAt = i => padL + (n <= 1 ? (W - padL - padR) / 2 : (i / (n - 1)) * (W - padL - padR));
+        const yAt = v => padT + (1 - Math.abs(v) / maxV) * (H - padT - padB);
+        const baseY = H - padB;
+        const line = salesSmoothPath(vals, xAt, yAt);
+        const area = n
+            ? `${line} L${xAt(n - 1).toFixed(1)},${baseY} L${xAt(0).toFixed(1)},${baseY} Z`
+            : '';
+        const uid = `ps${Math.random().toString(36).slice(2, 8)}`;
+        const focus = n - 1;
+        const labels = buckets.map((b, i) => {
+            const show = n <= 8 || i === 0 || i === focus || i % Math.ceil(n / 6) === 0;
+            if (!show) return '';
+            return `<text class="prod-sales-svg-x" x="${xAt(i).toFixed(1)}" y="${H - 10}" text-anchor="middle">${esc(b.label)}</text>`;
+        }).join('');
+        const dots = vals.map((v, i) => {
+            const active = i === focus || v > 0;
+            if (!active && n > 10) return '';
+            return `<circle class="prod-sales-dot${i === focus ? ' is-focus' : ''}" data-sales-dot="${i}" cx="${xAt(i).toFixed(1)}" cy="${yAt(v).toFixed(1)}" r="${i === focus ? 5 : 3.2}" />`;
+        }).join('');
+        // Column hit areas for easier hover
+        const colW = n <= 1 ? (W - padL - padR) : (W - padL - padR) / Math.max(1, n - 1);
+        const hits = buckets.map((b, i) => {
+            const cx = xAt(i);
+            const x = Math.max(padL, cx - colW / 2);
+            const w = Math.min(W - padR - x, colW);
+            return `<rect class="prod-sales-hit" data-sales-point="${i}" x="${x.toFixed(1)}" y="${padT}" width="${Math.max(8, w).toFixed(1)}" height="${(baseY - padT).toFixed(1)}" />`;
+        }).join('');
+
+        return `
+            <svg class="prod-sales-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-hidden="true">
+                <defs>
+                    <linearGradient id="${uid}-fill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="var(--prod-sales-accent)" stop-opacity="0.38"/>
+                        <stop offset="55%" stop-color="var(--prod-sales-accent)" stop-opacity="0.12"/>
+                        <stop offset="100%" stop-color="var(--prod-sales-accent)" stop-opacity="0"/>
+                    </linearGradient>
+                    <linearGradient id="${uid}-stroke" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stop-color="var(--prod-sales-accent-2)"/>
+                        <stop offset="100%" stop-color="var(--prod-sales-accent)"/>
+                    </linearGradient>
+                </defs>
+                <line class="prod-sales-guide" x1="${padL}" y1="${padT}" x2="${W - padR}" y2="${padT}"/>
+                <line class="prod-sales-guide" x1="${padL}" y1="${(padT + baseY) / 2}" x2="${W - padR}" y2="${(padT + baseY) / 2}"/>
+                <line class="prod-sales-guide is-base" x1="${padL}" y1="${baseY}" x2="${W - padR}" y2="${baseY}"/>
+                ${area ? `<path class="prod-sales-area" d="${area}" fill="url(#${uid}-fill)"/>` : ''}
+                ${line ? `<path class="prod-sales-line" d="${line}" fill="none" stroke="url(#${uid}-stroke)"/>` : ''}
+                ${dots}
+                ${labels}
+                ${hits}
+            </svg>
+            <div class="prod-sales-scale" aria-hidden="true">
+                <span>${esc(fmtSalesMetric(metric, maxV))}</span>
+                <span>${esc(fmtSalesMetric(metric, maxV / 2))}</span>
+                <span>${metric === 'unidades' ? '0' : '$0'}</span>
+            </div>
+            <div class="prod-sales-tip" data-sales-tip hidden></div>
+        `;
+    }
+
+    function renderSalesDelta(delta, metric) {
+        if (!delta) {
+            return `<span class="prod-sales-delta is-na">Sin periodo previo para comparar</span>`;
+        }
+        const up = delta.diff >= 0;
+        const tone = Math.abs(delta.diff) < 0.009 ? 'is-flat' : (up ? 'is-up' : 'is-down');
+        const arrow = Math.abs(delta.diff) < 0.009 ? '●' : (up ? '▲' : '▼');
+        return `
+            <span class="prod-sales-delta ${tone}">
+                ${arrow} ${Math.abs(delta.pct).toFixed(0)}% vs ${esc(delta.periodWord)} anterior
+                <span class="prod-sales-delta-abs">${up && delta.diff > 0 ? '+' : ''}${esc(fmtSalesMetric(metric, delta.diff))}</span>
+            </span>`;
+    }
+
+    function catalogHasAnySales() {
+        return (window.State.lotes || []).some(lote =>
+            Array.isArray(lote.ventas) && lote.ventas.some(v => (Number(v.unidades) || 0) > 0)
+        );
+    }
+
+    function renderCatalogSalesChart() {
+        const data = buildCatalogSalesData();
+        const { buckets, products, totals, metric, rangeId, delta } = data;
+        const metricLabel = metric === 'unidades' ? 'Unidades' : (metric === 'ganancia' ? 'Ganancia' : 'Vendido');
+        const rangeLabel = salesRangeConfig(rangeId).label;
+
+        if (!catalogHasAnySales()) {
+            return `
+                <section class="prod-sales-panel is-empty">
+                    <div class="prod-sales-head">
+                        <div>
+                            <p class="prod-sales-kicker">Cierre del catálogo</p>
+                            <h2 class="prod-sales-title">Ventas en el tiempo</h2>
+                        </div>
+                    </div>
+                    <p class="prod-sales-empty">Todavía no hay ventas registradas. Cuando registres movimientos en Inventario, aquí aparece la curva y qué productos están jalando.</p>
+                </section>`;
+        }
+
+        const topMax = Math.max(1, ...products.map(p => Math.abs(Number(p[metric]) || 0)));
+        const last = buckets[buckets.length - 1] || { unidades: 0, cash: 0, ganancia: 0 };
+        const lastVal = Number(last[metric]) || 0;
+        // Serialize bucket tip payloads for hover
+        const tipPayload = buckets.map(b => ({
+            tip: b.tip,
+            label: b.label,
+            unidades: b.unidades,
+            cash: b.cash,
+            ganancia: b.ganancia,
+            pedidos: b.pedidos,
+            top: (b.top || []).map(p => ({
+                name: displayName(p.name),
+                unidades: p.unidades,
+                cash: p.cash,
+                ganancia: p.ganancia,
+            })),
+        }));
+
+        return `
+            <section class="prod-sales-panel" data-sales-chart>
+                <div class="prod-sales-head">
+                    <div class="prod-sales-copy">
+                        <p class="prod-sales-kicker">Cierre del catálogo</p>
+                        <h2 class="prod-sales-title">Ventas en el tiempo</h2>
+                        <div class="prod-sales-subrow">
+                            <p class="prod-sales-sub">
+                                <strong>${esc(fmtSalesMetric(metric, lastVal))}</strong>
+                                <span>periodo actual · ${esc(rangeLabel)}</span>
+                            </p>
+                            ${renderSalesDelta(delta, metric)}
+                        </div>
+                        <p class="prod-sales-foot muted small">${totals.unidades} uds · ${Calc.fmtMXN(totals.cash)} · ${Calc.fmtMXN(totals.ganancia)} gan. en el rango</p>
+                    </div>
+                    <div class="prod-sales-toggles" role="group" aria-label="Vista del gráfico">
+                        <div class="prod-sales-seg" data-seg="range">
+                            ${SALES_RANGES.map(r => `
+                                <button type="button" class="prod-sales-tog${rangeId === r.id ? ' is-on' : ''}" data-sales-range="${r.id}">${esc(r.label)}</button>
+                            `).join('')}
+                        </div>
+                        <div class="prod-sales-seg" data-seg="metric">
+                            <button type="button" class="prod-sales-tog${metric === 'unidades' ? ' is-on' : ''}" data-sales-metric="unidades">Uds</button>
+                            <button type="button" class="prod-sales-tog${metric === 'cash' ? ' is-on' : ''}" data-sales-metric="cash">$</button>
+                            <button type="button" class="prod-sales-tog${metric === 'ganancia' ? ' is-on' : ''}" data-sales-metric="ganancia">Gan.</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="prod-sales-body">
+                    <div class="prod-sales-chart" aria-label="${esc(metricLabel)} · ${esc(rangeLabel)}" data-sales-buckets="${esc(JSON.stringify(tipPayload))}" data-sales-metric-active="${esc(metric)}">
+                        ${renderSalesAreaSvg(buckets, metric)}
+                    </div>
+                    <aside class="prod-sales-top">
+                        <div class="prod-sales-top-head">
+                            <h3>Qué está vendiendo</h3>
+                            <span class="muted small">${esc(metricLabel)}</span>
+                        </div>
+                        <ol class="prod-sales-rank">
+                            ${products.length ? products.map((p, i) => {
+                                const v = Number(p[metric]) || 0;
+                                const pct = Math.round((Math.abs(v) / topMax) * 100);
+                                return `
+                                    <li class="prod-sales-rank-item" style="--i:${i}; --pct:${pct}">
+                                        <button type="button" class="prod-sales-rank-btn" data-sales-select="${esc(p.id)}" title="Abrir ${esc(p.name)}">
+                                            <span class="prod-sales-rank-idx">${i + 1}</span>
+                                            <span class="prod-sales-rank-main">
+                                                <span class="prod-sales-rank-name">${esc(displayName(p.name))}</span>
+                                                <span class="prod-sales-rank-meta">${p.unidades} uds · ${p.pedidos} venta${p.pedidos === 1 ? '' : 's'}</span>
+                                                <span class="prod-sales-rank-bar" aria-hidden="true"><i></i></span>
+                                            </span>
+                                            <span class="prod-sales-rank-val">${esc(fmtSalesMetric(metric, v))}</span>
+                                        </button>
+                                    </li>`;
+                            }).join('') : `<li class="prod-sales-rank-empty muted small">Sin ventas en este rango</li>`}
+                        </ol>
+                    </aside>
+                </div>
+            </section>
+        `;
+    }
+
     function ventasSparkline(ventas, calc) {
         if (!ventas.length) return '';
         const now = Date.now();
         const WEEKS = 8;
         const buckets = new Array(WEEKS).fill(0);
+        let cash = 0;
         ventas.forEach(v => {
             const day = Calc.effectiveSaleDay(v.fecha, new Date(now));
             if (!day) return;
             const wIdx = Math.floor((now - day.getTime()) / (7 * 86400000));
             if (wIdx >= 0 && wIdx < WEEKS) buckets[WEEKS - 1 - wIdx] += Number(v.unidades) || 0;
+            cash += (Number(v.precio) || 0) * (Number(v.unidades) || 0);
         });
+        const totalUds = buckets.reduce((s, x) => s + x, 0);
+        if (!totalUds) return '';
         const max = Math.max(1, ...buckets);
-        const W = 300, H = 40, step = W / (WEEKS - 1);
-        const pts = buckets.map((v, i) => `${i * step},${H - (v / max) * H}`).join(' ');
-        const dots = buckets.map((v, i) => `<circle cx="${i * step}" cy="${H - (v / max) * H}" r="2.5" fill="var(--primary)"/>`).join('');
+        const W = 300, H = 48, pad = 2;
+        const step = (W - pad * 2) / Math.max(1, WEEKS - 1);
+        const yAt = v => H - pad - (v / max) * (H - pad * 2);
+        const pts = buckets.map((v, i) => `${(pad + i * step).toFixed(1)},${yAt(v).toFixed(1)}`).join(' ');
+        const area = `${pad},${H - pad} ${pts} ${pad + (WEEKS - 1) * step},${H - pad}`;
+        const dots = buckets.map((v, i) => (
+            `<circle cx="${(pad + i * step).toFixed(1)}" cy="${yAt(v).toFixed(1)}" r="${v > 0 ? 2.4 : 1.4}" fill="var(--primary)" opacity="${v > 0 ? 1 : 0.35}"/>`
+        )).join('');
         return `
-            <div class="sparkline-wrap">
-                <div class="sparkline-title">Ventas últimas 8 semanas · Total ${buckets.reduce((s, x) => s + x, 0)} uds</div>
-                <svg class="sparkline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-                    <polyline fill="none" stroke="var(--primary)" stroke-width="1.5" points="${pts}"/>
+            <div class="sparkline-wrap prod-spark">
+                <div class="sparkline-title">Últimas 8 semanas · ${totalUds} uds · ${Calc.fmtMXN(cash)}</div>
+                <svg class="sparkline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+                    <polygon fill="color-mix(in srgb, var(--primary) 14%, transparent)" points="${area}"/>
+                    <polyline fill="none" stroke="var(--primary)" stroke-width="1.8" stroke-linejoin="round" points="${pts}"/>
                     ${dots}
                 </svg>
             </div>
@@ -1878,6 +2305,131 @@ const LotesView = (() => {
         });
     }
 
+    function refreshSalesChart() {
+        const host = document.getElementById('lotes-sales-chart');
+        if (host) host.innerHTML = renderCatalogSalesChart();
+        bindSalesChartEvents();
+    }
+
+    function bindSalesChartEvents() {
+        document.querySelectorAll('[data-sales-select]').forEach(btn => {
+            if (btn.dataset.boundSales === '1') return;
+            btn.dataset.boundSales = '1';
+            btn.addEventListener('click', () => {
+                const key = btn.dataset.salesSelect;
+                const fam = families().find(f => f.key === key);
+                if (!fam) return;
+                local.selected = fam.key;
+                local.selectedVariant = pickVisible(fam)?.lote?.id || null;
+                local.detailTab = 'inv';
+                if (isMobile()) local.mobileDetail = true;
+                renderContent({ soft: true });
+                document.getElementById('lotes-detail')?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+            });
+        });
+
+        document.querySelectorAll('[data-sales-range]').forEach(btn => {
+            if (btn.dataset.boundSales === '1') return;
+            btn.dataset.boundSales = '1';
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.salesRange;
+                if (!SALES_RANGES.some(r => r.id === id)) return;
+                if (local.salesChart.range === id) return;
+                local.salesChart.range = id;
+                refreshSalesChart();
+            });
+        });
+
+        document.querySelectorAll('[data-sales-metric]').forEach(btn => {
+            if (btn.dataset.boundSales === '1') return;
+            btn.dataset.boundSales = '1';
+            btn.addEventListener('click', () => {
+                const m = btn.dataset.salesMetric;
+                if (!['unidades', 'cash', 'ganancia'].includes(m)) return;
+                if (local.salesChart.metric === m) return;
+                local.salesChart.metric = m;
+                refreshSalesChart();
+            });
+        });
+
+        // Hover tooltip
+        document.querySelectorAll('.prod-sales-chart').forEach(chart => {
+            if (chart.dataset.boundSalesHover === '1') return;
+            chart.dataset.boundSalesHover = '1';
+            let buckets = [];
+            try {
+                buckets = JSON.parse(chart.dataset.salesBuckets || '[]');
+            } catch (_) {
+                buckets = [];
+            }
+            const metric = chart.dataset.salesMetricActive || 'unidades';
+            const tip = chart.querySelector('[data-sales-tip]');
+            const svg = chart.querySelector('.prod-sales-svg');
+
+            const hide = () => {
+                if (tip) tip.hidden = true;
+                chart.querySelectorAll('.prod-sales-dot').forEach(d => {
+                    const last = Number(d.dataset.salesDot) === buckets.length - 1;
+                    d.classList.remove('is-hover');
+                    d.classList.toggle('is-focus', last);
+                    d.setAttribute('r', last ? '5' : '3.2');
+                });
+            };
+
+            const showAt = (idx, clientX, clientY) => {
+                const b = buckets[idx];
+                if (!b || !tip) return;
+                const topHtml = (b.top || []).length
+                    ? `<div class="prod-sales-tip-top">${(b.top || []).map(p => `
+                        <div><strong>${esc(p.name)}</strong> · ${esc(fmtSalesMetric(metric, Number(p[metric]) || 0))}</div>
+                      `).join('')}</div>`
+                    : '<div class="prod-sales-tip-top muted">Sin ventas en este periodo</div>';
+                tip.innerHTML = `
+                    <div class="prod-sales-tip-date">${esc(b.tip || b.label)}</div>
+                    <div class="prod-sales-tip-grid">
+                        <span>Uds</span><strong>${b.unidades}</strong>
+                        <span>Vendido</span><strong>${esc(Calc.fmtMXN(b.cash))}</strong>
+                        <span>Ganancia</span><strong class="${b.ganancia >= 0 ? 'pos' : 'neg'}">${esc(Calc.fmtMXN(b.ganancia))}</strong>
+                    </div>
+                    ${topHtml}
+                `;
+                tip.hidden = false;
+                const rect = chart.getBoundingClientRect();
+                let left = clientX - rect.left + 14;
+                let top = clientY - rect.top - 12;
+                tip.style.left = '0px';
+                tip.style.top = '0px';
+                const tw = tip.offsetWidth || 200;
+                const th = tip.offsetHeight || 100;
+                if (left + tw > rect.width - 8) left = clientX - rect.left - tw - 14;
+                if (top + th > rect.height - 8) top = Math.max(8, rect.height - th - 8);
+                if (top < 8) top = 8;
+                if (left < 8) left = 8;
+                tip.style.left = `${left}px`;
+                tip.style.top = `${top}px`;
+
+                chart.querySelectorAll('.prod-sales-dot').forEach(d => {
+                    const on = Number(d.dataset.salesDot) === idx;
+                    d.classList.toggle('is-hover', on);
+                    d.classList.toggle('is-focus', on);
+                    d.setAttribute('r', on ? '5.5' : (Number(d.dataset.salesDot) === buckets.length - 1 ? '5' : '3.2'));
+                });
+            };
+
+            chart.addEventListener('pointerleave', hide);
+            chart.querySelectorAll('[data-sales-point]').forEach(hit => {
+                hit.addEventListener('pointerenter', e => {
+                    showAt(Number(hit.dataset.salesPoint), e.clientX, e.clientY);
+                });
+                hit.addEventListener('pointermove', e => {
+                    showAt(Number(hit.dataset.salesPoint), e.clientX, e.clientY);
+                });
+            });
+            // Keep svg from eating events oddly on mobile
+            if (svg) svg.style.touchAction = 'manipulation';
+        });
+    }
+
     function bindDynamicEvents() {
         // Chip filters
         document.querySelectorAll('.chip[data-chip]').forEach(el => {
@@ -1901,6 +2453,8 @@ const LotesView = (() => {
                 renderContent();
             });
         });
+
+        bindSalesChartEvents();
 
         // Row select (familia) — misma variante visible que la vitrina
         document.querySelectorAll('#lotes-list [data-select]').forEach(row => {
