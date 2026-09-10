@@ -201,7 +201,7 @@ const EnviosView = (() => {
                     </div>
                     <div class="envios-freight-kpi${totals.balanceDisplay > 0 ? ' is-owe' : ''}">
                         <div class="envios-freight-kpi-label">Le debes a Amazon</div>
-                        <div class="envios-freight-kpi-value">${Calc.fmtMXN(totals.balanceDisplay)}</div>
+                        <div class="envios-freight-kpi-value"${UI.fxAttrs?.(totals.balanceDisplay, 'mxn') || ''}>${Calc.fmtMXN(totals.balanceDisplay)}</div>
                         <div class="envios-freight-kpi-sub muted small">
                             Cargos ${Calc.fmtMXN(totals.charges)} · Pagos ${Calc.fmtMXN(totals.payments)}
                         </div>
@@ -428,11 +428,11 @@ const EnviosView = (() => {
         const prepQueuesHtml = prepOn ? `
             <div class="envios-stats">
                 <div class="envios-stat">
-                    <div class="envios-stat-n">${fbaPending.length}</div>
+                    <div class="envios-stat-n"${UI.fxAttrs?.(fbaPending.length, 'int') || ''}>${fbaPending.length}</div>
                     <div class="envios-stat-l">A FBA (pendientes)</div>
                 </div>
                 <div class="envios-stat">
-                    <div class="envios-stat-n">${fbmPending.length}</div>
+                    <div class="envios-stat-n"${UI.fxAttrs?.(fbmPending.length, 'int') || ''}>${fbmPending.length}</div>
                     <div class="envios-stat-l">Al cliente FBM</div>
                 </div>
             </div>
@@ -515,6 +515,7 @@ const EnviosView = (() => {
         `;
 
         bind(root);
+        UI.countUp?.(root);
         bindFreight(root);
         document.getElementById('envios-goto-settings')?.addEventListener('click', () => {
             window.App?.switchTab?.('settings');

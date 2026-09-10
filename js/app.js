@@ -16,67 +16,131 @@ const App = (() => {
         lotes: 'Productos',
         envios: 'Envíos',
         wishlist: 'Wishlist',
+        ofertas: 'Ofertas',
         keepa: 'Keepa Lab',
         caja: 'Caja',
         insights: 'Insights',
         settings: 'Ajustes',
     };
 
+    let pageTxBusy = false;
+
+    function prefersReducedMotion() {
+        return !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    }
+
+    /** Transición preciosa entre canal o vista (View Transitions API + fallback). */
+    function runPageTransition(kind, mutate) {
+        const body = document.body;
+        const root = document.documentElement;
+        if (prefersReducedMotion() || pageTxBusy) {
+            mutate();
+            return Promise.resolve();
+        }
+
+        pageTxBusy = true;
+        body.dataset.pageTransition = kind;
+        root.dataset.pageTransition = kind;
+
+        const finish = () => {
+            pageTxBusy = false;
+            delete body.dataset.pageTransition;
+            delete root.dataset.pageTransition;
+            body.classList.remove('is-page-exit', 'is-page-enter', 'is-mp-sky-shift');
+        };
+
+        if (typeof document.startViewTransition === 'function') {
+            try {
+                const tx = document.startViewTransition(() => { mutate(); });
+                return tx.finished.then(finish, finish);
+            } catch (_) {
+                mutate();
+                finish();
+                return Promise.resolve();
+            }
+        }
+
+        body.classList.add('is-page-exit');
+        if (kind === 'channel') body.classList.add('is-mp-sky-shift');
+        return new Promise((resolve) => {
+            window.setTimeout(() => {
+                mutate();
+                body.classList.remove('is-page-exit');
+                body.classList.add('is-page-enter');
+                window.setTimeout(() => {
+                    finish();
+                    resolve();
+                }, 560);
+            }, 210);
+        });
+    }
+
     function switchTab(tab) {
         if (!TAB_LABELS[tab]) return;
-        // Envíos (deuda FBA + colas) solo en Amazon
-        if (tab === 'envios' && (!window.EnviosView || !window.EnviosView.canOpen?.())) {
-            if (window.State.marketplace !== 'amazon') {
-                applyMarketplaceView('amazon', { toast: false });
-            }
-            if (!window.EnviosView?.canOpen?.()) tab = 'settings';
-        }
-        if (['wishlist', 'keepa'].includes(tab) && window.State.marketplace !== 'amazon') {
-            // Desde Meli/General: cambia a Amazon en vez de caer a Productos.
-            applyMarketplaceView('amazon', { toast: false });
-            if (window.State.marketplace !== 'amazon') {
-                tab = 'lotes';
-            }
-        }
-        // General es solo resumen: al ir a catálogo, vuelve al último MP real.
-        // Ajustes (Sync) sí. Caja está oculta en el menú General; si se abre, su vista pide catálogo.
-        if (['lotes', 'envios', 'wishlist', 'keepa', 'insights'].includes(tab)
-            && window.State.ui?.mpView === 'general') {
-            const real = Data.normalizeMarketplace(window.State.marketplace);
-            window.State.ui = { ...window.State.ui, mpView: real };
-            window.State.saveUI();
-            refreshMarketplaceChrome();
-            const label = real === 'amazon' ? 'Amazon' : 'Mercado Libre';
-            UI.toast(`Catálogo ${label} (General es solo resumen)`);
-        }
-        const view = document.getElementById('view-' + tab);
-        if (!view) return;
-        window.State.view = tab;
-        document.body.dataset.appView = tab;
-        document.querySelectorAll('.sb-item[data-tab]').forEach(el => {
-            const active = el.dataset.tab === tab;
-            el.classList.toggle('active', active);
-            el.setAttribute('aria-selected', active ? 'true' : 'false');
-        });
-        document.querySelectorAll('.mobile-tab[data-tab]').forEach(el => {
-            el.classList.toggle('active', el.dataset.tab === tab);
-        });
-        document.querySelectorAll('.view').forEach(v => { v.hidden = true; });
-        view.hidden = false;
 
-        const crumb = document.getElementById('tb-current');
-        if (crumb) crumb.textContent = TAB_LABELS[tab];
+        const apply = () => {
+            // Envíos (deuda FBA + colas) solo en Amazon
+            if (tab === 'envios' && (!window.EnviosView || !window.EnviosView.canOpen?.())) {
+                if (window.State.marketplace !== 'amazon') {
+                    applyMarketplaceView('amazon', { toast: false, animate: false });
+                }
+                if (!window.EnviosView?.canOpen?.()) tab = 'settings';
+            }
+            if (['wishlist', 'ofertas', 'keepa'].includes(tab) && window.State.marketplace !== 'amazon') {
+                applyMarketplaceView('amazon', { toast: false, animate: false });
+                if (window.State.marketplace !== 'amazon') {
+                    tab = 'lotes';
+                }
+            }
+            if (['lotes', 'envios', 'wishlist', 'ofertas', 'keepa', 'insights'].includes(tab)
+                && window.State.ui?.mpView === 'general') {
+                const real = Data.normalizeMarketplace(window.State.marketplace);
+                window.State.ui = { ...window.State.ui, mpView: real };
+                window.State.saveUI();
+                refreshMarketplaceChrome();
+                const label = real === 'amazon' ? 'Amazon' : 'Mercado Libre';
+                UI.toast(`Catálogo ${label} (General es solo resumen)`);
+            }
+            const view = document.getElementById('view-' + tab);
+            if (!view) return;
+            window.State.view = tab;
+            document.body.dataset.appView = tab;
+            document.querySelectorAll('.sb-item[data-tab]').forEach(el => {
+                const active = el.dataset.tab === tab;
+                el.classList.toggle('active', active);
+                el.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
+            document.querySelectorAll('.mobile-tab[data-tab]').forEach(el => {
+                el.classList.toggle('active', el.dataset.tab === tab);
+            });
+            document.querySelectorAll('.view').forEach(v => { v.hidden = true; });
+            view.hidden = false;
 
-        if (tab === 'dashboard') DashboardView.render();
-        else if (tab === 'insights') InsightsView.render();
-        else if (tab === 'lotes') LotesView.render();
-        else if (tab === 'envios') EnviosView.render();
-        else if (tab === 'wishlist') WishlistView.render();
-        else if (tab === 'keepa') KeepaView.render();
-        else if (tab === 'caja') CajaView.render();
-        else if (tab === 'settings') SettingsView.loadIntoForm();
-        refreshNavCounts();
-        refreshFAB();
+            const crumb = document.getElementById('tb-current');
+            if (crumb) crumb.textContent = TAB_LABELS[tab];
+
+            UI.clearCountFx?.(view);
+
+            if (tab === 'dashboard') DashboardView.render();
+            else if (tab === 'insights') InsightsView.render();
+            else if (tab === 'lotes') LotesView.render();
+            else if (tab === 'envios') EnviosView.render();
+            else if (tab === 'wishlist') WishlistView.render();
+            else if (tab === 'ofertas') OfertasView.render();
+            else if (tab === 'keepa') KeepaView.render();
+            else if (tab === 'caja') CajaView.render();
+            else if (tab === 'settings') SettingsView.loadIntoForm();
+            refreshNavCounts();
+            refreshFAB();
+        };
+
+        const same = window.State.view === tab
+            && !document.getElementById('view-' + tab)?.hidden;
+        if (same) {
+            apply();
+            return;
+        }
+        runPageTransition('tab', apply);
     }
 
     function closeMobileNav() {
@@ -243,6 +307,9 @@ const App = (() => {
                 badge: pendingShip || null });
         }
         if (isAmazon) {
+            items.push({ id: 'ofertas', icon: 'ofertas', label: 'Ofertas',
+                hint: 'Retail → Amazon · arbitraje',
+                badge: window.OfertasView?.pendingCount?.() || null });
             items.push({ id: 'keepa', icon: 'keepa', label: 'Keepa Lab',
                 hint: 'Investigación de ASINs' });
         }
@@ -272,7 +339,7 @@ const App = (() => {
             title: 'Más opciones',
             items,
             onPick: id => {
-                if (['dashboard', 'lotes', 'envios', 'wishlist', 'keepa', 'caja', 'insights', 'settings'].includes(id)) {
+                if (['dashboard', 'lotes', 'envios', 'wishlist', 'ofertas', 'keepa', 'caja', 'insights', 'settings'].includes(id)) {
                     switchTab(id);
                     return;
                 }
@@ -332,6 +399,13 @@ const App = (() => {
         if (mWish) {
             mWish.textContent = pendingWish;
             mWish.hidden = pendingWish === 0;
+        }
+
+        const pendingOfertas = window.OfertasView?.pendingCount?.() || 0;
+        const sbOfertas = document.getElementById('sb-count-ofertas');
+        if (sbOfertas) {
+            sbOfertas.textContent = pendingOfertas;
+            sbOfertas.hidden = pendingOfertas === 0;
         }
 
         const pendingCaja = window.CajaView?.pendingCount?.() || 0;
@@ -596,8 +670,9 @@ const App = (() => {
                 markBackupDone();
                 UI.toast('Respaldo restaurado');
                 window.State.notify();
-                // Refresca la vista abierta (wishlist/caja incluidos)
+                // Refresca la vista abierta (wishlist/ofertas/caja incluidos)
                 if (window.State.view === 'wishlist') WishlistView?.render?.();
+                else if (window.State.view === 'ofertas') OfertasView?.render?.();
                 else if (window.State.view === 'keepa') KeepaView?.render?.();
                 else if (window.State.view === 'caja') CajaView?.render?.();
                 else if (window.State.view === 'dashboard') DashboardView?.render?.();
@@ -630,6 +705,7 @@ const App = (() => {
         delete backupUI.keepaApiKey;
         delete backupUI.keepaCache;
         delete backupUI.keepaLibrary;
+        delete backupUI.serpApiKey;
         return {
             version: 5,
             exportedAt: new Date().toISOString(),
@@ -638,8 +714,10 @@ const App = (() => {
             settings: window.State.settings,
             ui: {
                 ...backupUI,
-                // Asegura wishlist + bolsitas en el JSON
+                // Asegura wishlist + ofertas + bolsitas en el JSON
                 wishlistAmazon: window.State.ui?.wishlistAmazon || [],
+                ofertasRetail: window.State.ui?.ofertasRetail || [],
+                ofertasSerpWatches: window.State.ui?.ofertasSerpWatches || [],
                 capitalAlloc: window.State.ui?.capitalAlloc || {},
             },
             stores: {
@@ -852,13 +930,8 @@ const App = (() => {
     // ---- FAB contextual -----------------------------------------------
     // Cada vista define su acción primaria; el resto oculta el botón.
     // Ninguna acción es destructiva; todas abren editores/formularios.
+    // Productos usa el CTA del header (#lotes-new); no FAB ahí.
     const FAB_CONFIG = {
-        lotes: {
-            label: 'Nuevo producto',
-            title: 'Nuevo producto (N)',
-            aria: 'Nuevo producto',
-            action: () => LotesView.openModal(null),
-        },
         wishlist: {
             label: 'Añadir',
             title: 'Añadir a Wishlist',
@@ -867,6 +940,16 @@ const App = (() => {
                 const view = document.getElementById('view-wishlist');
                 view?.scrollTo?.({ top: 0, behavior: 'smooth' });
                 document.getElementById('wl-link-compra')?.focus();
+            },
+        },
+        ofertas: {
+            label: 'Añadir',
+            title: 'Añadir oferta',
+            aria: 'Añadir oferta retail',
+            action: () => {
+                const view = document.getElementById('view-ofertas');
+                view?.scrollTo?.({ top: 0, behavior: 'smooth' });
+                document.getElementById('of-link-tienda')?.focus();
             },
         },
     };
@@ -979,6 +1062,7 @@ const App = (() => {
         else if (window.State.view === 'lotes') LotesView.render();
         else if (window.State.view === 'envios') EnviosView.render();
         else if (window.State.view === 'wishlist') WishlistView.render();
+        else if (window.State.view === 'ofertas') OfertasView.render();
         else if (window.State.view === 'keepa') KeepaView.render();
         else if (window.State.view === 'caja') CajaView.render();
         refreshNavCounts();
@@ -1023,21 +1107,32 @@ const App = (() => {
         if (brand) {
             brand.textContent = mpView === 'general'
                 ? 'Ventas'
-                : (mp === 'amazon' ? 'Ventas Amazon' : 'Ventas Meli');
+                : Data.mpBrand(mp);
         }
         const sub = document.querySelector('.sb-brand-text .sub');
         if (sub) {
-            // Misma longitud visual en Meli / Amazon / General (evita tope amontonado)
+            // Canal bajo la marca (Meli / Amazon / consolidado)
             sub.textContent = mpView === 'general'
                 ? 'Ambos canales'
-                : (mp === 'amazon' ? 'Catálogo MX' : 'Catálogo MX');
+                : (mp === 'amazon' ? 'Amazon MX' : 'Mercado Libre MX');
         }
         const root = document.querySelector('.tb-crumb-root');
         if (root) root.textContent = mpView === 'general' ? 'General' : meta.short;
         const curr = document.getElementById('tb-current');
         if (curr && mpView === 'general') curr.textContent = 'Hoy';
         document.body.dataset.marketplace = mp;
+        const prevMpView = document.body.dataset.mpView;
         document.body.dataset.mpView = mpView;
+        if (prevMpView && prevMpView !== mpView) {
+            document.body.classList.remove('is-mp-sky-shift');
+            void document.body.offsetWidth;
+            document.body.classList.add('is-mp-sky-shift');
+            window.clearTimeout(window.__mpSkyShiftTimer);
+            window.__mpSkyShiftTimer = window.setTimeout(
+                () => document.body.classList.remove('is-mp-sky-shift'),
+                1200
+            );
+        }
 
         const themeMeta = document.querySelector('meta[name="theme-color"]');
         if (themeMeta) {
@@ -1062,13 +1157,6 @@ const App = (() => {
         } else {
             gxItems.forEach(b => b.classList.remove('active'));
         }
-        const mpHint = document.querySelector('.sb-mp-hint');
-        if (mpHint) {
-            mpHint.textContent = isGeneral
-                ? 'Checklist, agenda y metas. Productos en cada catálogo.'
-                : 'Cambia a General para el pulso del día.';
-        }
-
         // Cards/flags por catálogo activo (incluso en General: Ajustes usa el MP subyacente).
         // Envíos y similares se ocultan en General vía data-feature / data-hide-on-general.
         document.querySelectorAll('[data-mp-only]').forEach(el => {
@@ -1085,7 +1173,7 @@ const App = (() => {
         if (!isGeneral && window.State.view === 'envios' && !enviosOn) {
             switchTab('lotes');
         }
-        if (!isGeneral && ['wishlist', 'keepa'].includes(window.State.view) && mp !== 'amazon') {
+        if (!isGeneral && ['wishlist', 'ofertas', 'keepa'].includes(window.State.view) && mp !== 'amazon') {
             switchTab('lotes');
         }
         // Labels del modal
@@ -1122,7 +1210,7 @@ const App = (() => {
         fillAmzCats(document.getElementById('set-amz-cat-default'), window.State.settings?.categoriaDefault);
     }
 
-    function applyMarketplaceView(mp, { toast = true } = {}) {
+    function applyMarketplaceView(mp, { toast = true, animate = true } = {}) {
         if (!mp) return;
         const curView = Data.normalizeMpView(
             window.State.ui?.mpView === 'general'
@@ -1131,44 +1219,66 @@ const App = (() => {
         );
         if (mp === curView) return;
 
-        if (mp === 'general') {
-            window.State.ui = { ...window.State.ui, mpView: 'general' };
-            window.State.saveUI();
-            refreshMarketplaceChrome();
-            switchTab('dashboard');
-            if (toast) UI.toast('General · checklist y agenda');
-            return;
-        }
+        const go = () => {
+            if (mp === 'general') {
+                window.State.ui = { ...window.State.ui, mpView: 'general' };
+                window.State.saveUI();
+                refreshMarketplaceChrome();
+                // Evita transición anidada: el render de dashboard ya va dentro de esta.
+                const dash = document.getElementById('view-dashboard');
+                window.State.view = 'dashboard';
+                document.body.dataset.appView = 'dashboard';
+                document.querySelectorAll('.sb-item[data-tab]').forEach(el => {
+                    const active = el.dataset.tab === 'dashboard';
+                    el.classList.toggle('active', active);
+                    el.setAttribute('aria-selected', active ? 'true' : 'false');
+                });
+                document.querySelectorAll('.mobile-tab[data-tab]').forEach(el => {
+                    el.classList.toggle('active', el.dataset.tab === 'dashboard');
+                });
+                document.querySelectorAll('.view').forEach(v => { v.hidden = true; });
+                if (dash) dash.hidden = false;
+                const crumb = document.getElementById('tb-current');
+                if (crumb) crumb.textContent = TAB_LABELS.dashboard;
+                DashboardView.render();
+                refreshNavCounts();
+                refreshFAB();
+                if (toast) UI.toast('General · agenda y metas');
+                return;
+            }
 
-        window.State.ui = { ...window.State.ui, mpView: mp };
-        window.State.saveUI();
-        if (mp !== window.State.marketplace) {
-            window.State.switchMarketplace(mp);
-        }
-        refreshMarketplaceChrome();
-        SettingsView.loadIntoForm();
-        // Invalida vistas ocultas: vacía el DOM y avisa a LotesView para que
-        // remonte su shell (si no, shellMounted=true escribe en nodos null).
-        ['view-lotes', 'view-envios', 'view-wishlist', 'view-keepa', 'view-insights', 'view-caja']
-            .forEach(id => {
-                const el = document.getElementById(id);
-                if (el && el.hidden) el.innerHTML = '';
-            });
-        window.LotesView?.invalidate?.();
-        if (window.State.view === 'dashboard') DashboardView.render();
-        else if (window.State.view === 'insights') InsightsView.render();
-        else if (window.State.view === 'lotes') LotesView.render();
-        else if (window.State.view === 'envios') EnviosView.render();
-        else if (window.State.view === 'wishlist') WishlistView.render();
-        else if (window.State.view === 'keepa') KeepaView.render();
-        else if (window.State.view === 'caja') CajaView.render();
-        refreshNavCounts();
-        if (document.body.classList.contains('nav-open')) {
-            document.body.classList.remove('nav-open');
-            const overlay = document.getElementById('nav-overlay');
-            if (overlay) overlay.hidden = true;
-        }
-        if (toast) UI.toast(mp === 'amazon' ? 'Amazon' : 'Mercado Libre');
+            window.State.ui = { ...window.State.ui, mpView: mp };
+            window.State.saveUI();
+            if (mp !== window.State.marketplace) {
+                window.State.switchMarketplace(mp);
+            }
+            refreshMarketplaceChrome();
+            SettingsView.loadIntoForm();
+            ['view-lotes', 'view-envios', 'view-wishlist', 'view-ofertas', 'view-keepa', 'view-insights', 'view-caja']
+                .forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el && el.hidden) el.innerHTML = '';
+                });
+            window.LotesView?.invalidate?.();
+            if (window.State.view === 'dashboard') DashboardView.render();
+            else if (window.State.view === 'insights') InsightsView.render();
+            else if (window.State.view === 'lotes') LotesView.render();
+            else if (window.State.view === 'envios') EnviosView.render();
+            else if (window.State.view === 'wishlist') WishlistView.render();
+            else if (window.State.view === 'ofertas') OfertasView.render();
+            else if (window.State.view === 'keepa') KeepaView.render();
+            else if (window.State.view === 'caja') CajaView.render();
+            refreshNavCounts();
+            if (document.body.classList.contains('nav-open')) {
+                document.body.classList.remove('nav-open');
+                const overlay = document.getElementById('nav-overlay');
+                if (overlay) overlay.hidden = true;
+            }
+            if (toast) UI.toast(mp === 'amazon' ? 'Amazon' : 'Mercado Libre');
+        };
+
+        if (animate) runPageTransition('channel', go);
+        else go();
     }
 
     function scrollGeneralSection(id) {
@@ -1219,6 +1329,92 @@ const App = (() => {
         });
     }
 
+    /** Ambiente del canvas según hora de Ciudad de México (no la TZ del dispositivo).
+     *  Seis franjas: con un único bloque de 8 a 17 la app se veía igual toda la jornada. */
+    const CDMX_TZ = 'America/Mexico_City';
+
+    /** Hora decimal CDMX (0–24). Independiente del huso del Mac/iPhone. */
+    function cdmxHourDecimal(d = new Date()) {
+        try {
+            const parts = new Intl.DateTimeFormat('en-US', {
+                timeZone: CDMX_TZ,
+                hour: 'numeric',
+                minute: 'numeric',
+                hourCycle: 'h23',
+            }).formatToParts(d);
+            const hour = Number(parts.find(p => p.type === 'hour')?.value);
+            const minute = Number(parts.find(p => p.type === 'minute')?.value);
+            if (Number.isFinite(hour) && Number.isFinite(minute)) {
+                return hour + minute / 60;
+            }
+        } catch { /* Intl / TZ no disponible */ }
+        return d.getHours() + d.getMinutes() / 60;
+    }
+
+    function resolveDaypart(d = new Date()) {
+        const h = cdmxHourDecimal(d);
+        if (h >= 5 && h < 7.5) return 'dawn';
+        if (h >= 7.5 && h < 11) return 'morning';
+        if (h >= 11 && h < 15) return 'midday';
+        if (h >= 15 && h < 17.5) return 'afternoon';
+        if (h >= 17.5 && h < 20) return 'dusk';
+        return 'night';
+    }
+
+    /** Recorrido del sol 0–1 (este → oeste) entre las 5 y las 20 CDMX. */
+    function resolveSunX(d = new Date()) {
+        const h = cdmxHourDecimal(d);
+        return Math.min(1, Math.max(0, (h - 5) / 15));
+    }
+
+    /** Elevación del sol 0–1 (pico al mediodía CDMX) para matizar el cielo. */
+    function resolveSunElev(d = new Date()) {
+        const h = cdmxHourDecimal(d);
+        // 6 → 0, 12 → 1, 18 → 0; noche suave ~0.12–0.25
+        const elev = Math.sin(((h - 6) / 12) * Math.PI);
+        if (elev > 0) return Math.min(1, elev);
+        // Noche: brillo lunar suave según qué tan lejos del mediodía
+        return 0.14 + Math.min(0.16, Math.abs(elev) * 0.12);
+    }
+
+    function applyDaypart(force = false) {
+        const now = new Date();
+        const part = resolveDaypart(now);
+        const hour = cdmxHourDecimal(now);
+        const elev = resolveSunElev(now);
+        const sunX = resolveSunX(now);
+        const root = document.documentElement;
+        root.style.setProperty('--sun-hour', hour.toFixed(3));
+        root.style.setProperty('--sun-elev', elev.toFixed(3));
+        root.style.setProperty('--sun-x', sunX.toFixed(3));
+        document.body.style.setProperty('--sun-hour', hour.toFixed(3));
+        document.body.style.setProperty('--sun-elev', elev.toFixed(3));
+        document.body.style.setProperty('--sun-x', sunX.toFixed(3));
+        root.dataset.daypart = part;
+        if (!force && document.body.dataset.daypart === part) return part;
+        document.body.dataset.daypart = part;
+        // Micro-kick visual al cruzar franja (sin ser molesto)
+        if (force || document.body.dataset.daypartPrev !== part) {
+            document.body.dataset.daypartPrev = part;
+            document.body.classList.remove('is-daypart-shift');
+            void document.body.offsetWidth;
+            document.body.classList.add('is-daypart-shift');
+            window.setTimeout(() => document.body.classList.remove('is-daypart-shift'), 1200);
+        }
+        return part;
+    }
+
+    function initDaypartAmbient() {
+        applyDaypart(true);
+        const tick = () => applyDaypart(false);
+        // Cada minuto: el sol se mueve; cada 5 min bastaba para franjas, ahora afinamos
+        const id = window.setInterval(tick, 60 * 1000);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') tick();
+        });
+        window.addEventListener('beforeunload', () => clearInterval(id), { once: true });
+    }
+
     // ---- Init ----------------------------------------------------------
     function init() {
         window.State.ui = Data.loadUI();
@@ -1237,6 +1433,7 @@ const App = (() => {
 
         initMarketplaceSwitch();
         refreshMarketplaceChrome();
+        initDaypartAmbient();
         initSidebar();
         initTopbar();
         initExcel();
@@ -1248,6 +1445,7 @@ const App = (() => {
         LotesView.init();
         EnviosView.init();
         WishlistView.init();
+        OfertasView.init();
         CajaView.init();
         DashboardView.init();
         InsightsView.init();
@@ -1308,11 +1506,112 @@ const App = (() => {
         setTimeout(() => maybeNotifyOpsAlerts().catch(() => {}), 2800);
 
         switchTab('dashboard');
+        openOfertasDraft();
 
         // ?clearVentas=1 → limpia después del pull de Sync
         syncReady.finally(() => {
             maybeClearVentasFromUrl().catch(err => console.warn('[clearVentas]', err));
+            maybeDiagSalesDump().catch(err => console.warn('[diagSales]', err));
         });
+    }
+
+    /** Bookmarklet #oferta=… → Amazon + pestaña Ofertas con form prellenado. */
+    function openOfertasDraft() {
+        const hadHash = /^#oferta=/.test(location.hash || '');
+        const ingested = window.OfertasView?.openDraftFromUrl?.();
+        if (!ingested && !window.OfertasView?.hasDraft?.()) return false;
+
+        try {
+            if (window.State.marketplace !== 'amazon') {
+                window.State.switchMarketplace('amazon');
+            }
+            if (window.State.ui?.mpView === 'general') {
+                window.State.ui = { ...window.State.ui, mpView: 'amazon' };
+                window.State.saveUI();
+            }
+        } catch (err) {
+            console.warn('[ofertas draft]', err);
+        }
+        refreshMarketplaceChrome();
+        switchTab('ofertas');
+        if (hadHash || ingested) {
+            UI.toast?.('Oferta capturada — completa ASIN Amazon y guarda');
+        }
+        return true;
+    }
+
+    /** ?diagSales=1 → vuelca ventas Amazon a .diag/amazon-sales.json (solo local). */
+    async function maybeDiagSalesDump() {
+        const params = new URLSearchParams(location.search);
+        if (params.get('diagSales') !== '1') return;
+        try {
+            const mp = 'amazon';
+            const settings = Data.loadSettings(mp);
+            const lotes = Data.loadLotes(mp);
+            const lists = Data.listVentasCobro(lotes, settings);
+            const all = [...lists.porCobrar, ...lists.porAsignar, ...lists.historial];
+            const rows = all.map(r => {
+                const lote = lotes.find(l => l.id === r.loteId);
+                const venta = (lote?.ventas || []).find(v => v.id === r.ventaId);
+                let fees = 0;
+                let util = 0;
+                let costo = 0;
+                let ref = 0;
+                let fba = 0;
+                try {
+                    const loteAt = Data.loteForVentaCalc?.(lote, venta) || lote;
+                    const u = Calc.utilidadAtPrice(loteAt, r.precio, settings);
+                    const uds = r.unidades || 0;
+                    util = (u.utilidad || 0) * uds;
+                    costo = (Number(loteAt?.costo) || 0) * uds;
+                    ref = (u.comisionVariable || 0) * uds;
+                    fba = (u.envio || 0) * uds;
+                    const alm = (u.almacenamiento || 0) * uds;
+                    const varios = (u.varios || 0) * uds;
+                    fees = ref + fba + alm + varios;
+                } catch { /* ignore */ }
+                return {
+                    fecha: r.fecha,
+                    sku: r.sku,
+                    producto: r.producto,
+                    uds: r.unidades,
+                    precio: r.precio,
+                    venta: r.saleTotal,
+                    costo: Math.round(costo * 100) / 100,
+                    ref: Math.round(ref * 100) / 100,
+                    fba: Math.round(fba * 100) / 100,
+                    fees: Math.round(fees * 100) / 100,
+                    util: Math.round(util * 100) / 100,
+                    repartir: r.amount,
+                    cobro: r.cobroEstado,
+                };
+            }).sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
+            const sum = (k) => Math.round(rows.reduce((s, r) => s + (Number(r[k]) || 0), 0) * 100) / 100;
+            const payload = {
+                at: new Date().toISOString(),
+                n: rows.length,
+                totals: {
+                    venta: sum('venta'),
+                    costo: sum('costo'),
+                    fees: sum('fees'),
+                    util: sum('util'),
+                    repartir: sum('repartir'),
+                },
+                rows,
+            };
+            const res = await fetch('/api/diag/dump', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: 'amazon-sales', data: payload }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+            UI.toast?.(`Diag: ${rows.length} ventas Amazon → .diag/amazon-sales.json`, 'success');
+        } finally {
+            params.delete('diagSales');
+            const q = params.toString();
+            history.replaceState({}, '', location.pathname + (q ? `?${q}` : '') + location.hash);
+        }
     }
 
     if (document.readyState === 'loading') {
@@ -1333,6 +1632,9 @@ const App = (() => {
         refreshNavCounts,
         refreshMarketplaceChrome,
         applyMarketplaceView,
+        openOfertasDraft,
+        applyDaypart,
+        resolveDaypart,
         scrollGeneralSection,
         requestOpsNotifyPermission,
         maybeNotifyOpsAlerts,

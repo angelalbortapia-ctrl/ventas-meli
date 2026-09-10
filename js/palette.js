@@ -56,6 +56,13 @@ const Palette = (() => {
             });
             actions.splice(enviosOn ? 3 : 2, 0, {
                 section: 'Navegación',
+                icon: '🏷',
+                title: 'Ir a Ofertas',
+                keys: 'Retail Costco Walmart Sams arbitraje ASIN Keepa',
+                run: () => App.switchTab('ofertas'),
+            });
+            actions.splice(enviosOn ? 4 : 3, 0, {
+                section: 'Navegación',
                 icon: '📈',
                 title: 'Ir a Keepa Lab',
                 keys: 'Amazon ASIN gráfica Buy Box Finder Deals',

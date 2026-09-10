@@ -187,6 +187,7 @@ const InsightsView = (() => {
             </div>
         `;
         bind(root);
+        UI.countUp?.(root);
     }
 
     /**
@@ -242,7 +243,6 @@ const InsightsView = (() => {
             });
         });
         return {
-            monthLabelThis: startThis.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }),
             monthLabelPrev: startPrev.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }),
             dayNow,
             daysPrev,
@@ -299,10 +299,11 @@ const InsightsView = (() => {
         const deltaTxt = prev > 0
             ? `${arrow} ${sign}${pct.toFixed(1)}%`
             : (cur > 0 ? '▲ nuevo' : '· sin dato');
+        const fxFmt = fmt === Calc.fmtMXN ? 'mxn' : 'int';
         return `
             <div class="ins-kpi ins-mom-card">
                 <div class="ins-kpi-label">${esc(label)}</div>
-                <div class="ins-kpi-value">${fmt(cur)}</div>
+                <div class="ins-kpi-value"${UI.fxAttrs?.(cur, fxFmt) || ''}>${fmt(cur)}</div>
                 <div class="ins-kpi-sub ins-mom-delta ${tone}">${deltaTxt}</div>
                 <div class="ins-kpi-sub muted small">${sub}</div>
             </div>`;
@@ -324,10 +325,10 @@ const InsightsView = (() => {
         });
         return `
             <div class="ins-kpis">
-                ${kpi('Estrellas', quad.estrellas.length, 'pos', 'Alto margen + alta rotación')}
-                ${kpi('Vacas', quad.vacas.length, '', 'Margen alto, rota poco')}
-                ${kpi('Interrogantes', quad.interrogantes.length, '', 'Rota, margen flojo')}
-                ${kpi('Perros', quad.perros.length, quad.perros.length ? 'neg' : '', 'Bajo margen + lenta')}
+                ${kpi('Estrellas', quad.estrellas.length, 'pos', 'Alto margen + alta rotación', quad.estrellas.length, 'int')}
+                ${kpi('Vacas', quad.vacas.length, '', 'Margen alto, rota poco', quad.vacas.length, 'int')}
+                ${kpi('Interrogantes', quad.interrogantes.length, '', 'Rota, margen flojo', quad.interrogantes.length, 'int')}
+                ${kpi('Perros', quad.perros.length, quad.perros.length ? 'neg' : '', 'Bajo margen + lenta', quad.perros.length, 'int')}
             </div>
             <div class="ins-quad">
                 ${quadCard('Estrellas — empujar', quad.estrellas, 'good')}
@@ -403,8 +404,8 @@ const InsightsView = (() => {
         const dead = list.filter(r => r.dias >= 30 || r.calc.vendidas === 0);
         return `
             <div class="ins-kpis">
-                ${kpi('$ atrapado', Calc.fmtMXN(trapped), trapped ? 'neg' : '', 'Con stock')}
-                ${kpi('Sin movimiento', dead.length, dead.length ? 'neg' : '', '0 ventas o ≥30 días')}
+                ${kpi('$ atrapado', Calc.fmtMXN(trapped), trapped ? 'neg' : '', 'Con stock', trapped, 'mxn')}
+                ${kpi('Sin movimiento', dead.length, dead.length ? 'neg' : '', '0 ventas o ≥30 días', dead.length, 'int')}
             </div>
             <div class="ins-panel">
                 <h3>Rotación lenta → capital dormido</h3>
@@ -431,9 +432,9 @@ const InsightsView = (() => {
         const barato = withComp.filter(r => r.diff <= -0.05);
         return `
             <div class="ins-kpis">
-                ${kpi('Con competencia', withComp.length, '', 'Tienen precio ref.')}
-                ${kpi('Más caros ≥10%', caro.length, caro.length ? 'neg' : '', 'Riesgo de no convertir')}
-                ${kpi('Más baratos', barato.length, 'pos', 'Posible margen a recuperar')}
+                ${kpi('Con competencia', withComp.length, '', 'Tienen precio ref.', withComp.length, 'int')}
+                ${kpi('Más caros ≥10%', caro.length, caro.length ? 'neg' : '', 'Riesgo de no convertir', caro.length, 'int')}
+                ${kpi('Más baratos', barato.length, 'pos', 'Posible margen a recuperar', barato.length, 'int')}
             </div>
             <div class="ins-panel">
                 <h3>Gap de precio</h3>
@@ -475,11 +476,14 @@ const InsightsView = (() => {
             </table>`;
     }
 
-    function kpi(label, value, t, sub) {
+    function kpi(label, value, t, sub, fxNum = null, fxFmt = 'int') {
+        const fx = fxNum != null && Number.isFinite(Number(fxNum))
+            ? (UI.fxAttrs?.(fxNum, fxFmt) || '')
+            : '';
         return `
             <div class="ins-kpi">
                 <div class="ins-kpi-label">${esc(label)}</div>
-                <div class="ins-kpi-value ${t || ''}">${value}</div>
+                <div class="ins-kpi-value ${t || ''}"${fx}>${value}</div>
                 ${sub ? `<div class="ins-kpi-sub">${esc(sub)}</div>` : ''}
             </div>`;
     }

@@ -62,6 +62,14 @@ const SettingsView = (() => {
         if (keepaPanel) keepaPanel.checked = !window.Keepa?.panelPrefs?.().off;
         paintKeepaStatus();
 
+        const serpKey = document.getElementById('set-serpapi-key');
+        if (serpKey) {
+            const k = window.SerpApi?.getApiKey?.() || window.State.ui?.serpApiKey || '';
+            serpKey.value = k;
+            serpKey.placeholder = k ? '•••••••• (guardada)' : 'Pégala desde serpapi.com/manage-api-key';
+        }
+        paintSerpStatus();
+
         const resico = document.getElementById('set-resico');
         if (resico) resico.checked = !!s.resico;
         const isr = document.getElementById('set-isr');
@@ -260,6 +268,22 @@ const SettingsView = (() => {
             : 'La key guardada no tiene formato de Keepa (40–80 caracteres alfanuméricos). Vuelve a pegarla.';
     }
 
+    function paintSerpStatus(extra = '') {
+        const el = document.getElementById('serpapi-status');
+        if (!el) return;
+        if (extra) {
+            el.textContent = extra;
+            return;
+        }
+        if (!window.SerpApi?.hasKey?.()) {
+            el.textContent = 'Sin configurar.';
+            return;
+        }
+        el.textContent = window.SerpApi?.keyLooksValid?.()
+            ? 'Key guardada. Ofertas: Shopping + Immersive (~2 créditos/investigación).'
+            : 'La key no parece válida. Vuelve a pegarla.';
+    }
+
     function initKeepaUi() {
         document.getElementById('set-keepa-panel')?.addEventListener('change', event => {
             window.Keepa?.setPanelPref?.({ keepaPanelOff: !event.target.checked });
@@ -284,8 +308,6 @@ const SettingsView = (() => {
 
         document.getElementById('btn-keepa-test')?.addEventListener('click', async () => {
             const typed = document.getElementById('set-keepa-key')?.value?.trim() || '';
-            // Solo adoptar lo escrito si tiene forma de key: el autocompletado del
-            // navegador puede haber inyectado una contraseña en este campo.
             const previous = Keepa.getApiKey();
             const adopted = Boolean(typed && typed !== previous && Keepa.keyLooksValid(typed));
             if (adopted) Keepa.setApiKey(typed);
@@ -301,9 +323,52 @@ const SettingsView = (() => {
                 paintKeepaStatus(`Conectado · tokens: ${left}`);
                 UI.toast('Keepa OK');
             } catch (err) {
-                // Si la key nueva no sirve, no dejamos al usuario sin la que ya funcionaba.
                 if (adopted && previous) Keepa.setApiKey(previous);
                 paintKeepaStatus(err.message || 'Error');
+                UI.toast(err.message || 'No se pudo conectar', 'error');
+            }
+        });
+    }
+
+    function initSerpApiUi() {
+        document.getElementById('btn-serpapi-save')?.addEventListener('click', () => {
+            const key = document.getElementById('set-serpapi-key')?.value || '';
+            if (!window.SerpApi) {
+                UI.toast('SerpAPI no cargó — recarga', 'error');
+                return;
+            }
+            if (key.trim() && !SerpApi.keyLooksValid(key)) {
+                UI.toast('Esa key no parece válida', 'error');
+                return;
+            }
+            SerpApi.setApiKey(key.trim());
+            UI.toast(key.trim() ? 'SerpAPI key guardada' : 'SerpAPI key borrada');
+            paintSerpStatus();
+        });
+
+        document.getElementById('btn-serpapi-test')?.addEventListener('click', async () => {
+            const typed = document.getElementById('set-serpapi-key')?.value?.trim() || '';
+            const previous = SerpApi.getApiKey();
+            const adopted = Boolean(typed && typed !== previous && SerpApi.keyLooksValid(typed));
+            if (adopted) SerpApi.setApiKey(typed);
+            if (!SerpApi.hasKey()) {
+                UI.toast('Pega tu API key primero', 'error');
+                return;
+            }
+            const status = document.getElementById('serpapi-status');
+            if (status) status.textContent = 'Probando…';
+            try {
+                const acc = await SerpApi.accountStatus();
+                const left = acc.total_searches_left ?? acc.plan_searches_left ?? '—';
+                const thisMonth = acc.this_month_usage ?? acc.searches_per_month ?? '';
+                paintSerpStatus(
+                    `Conectado · créditos restantes: ${left}`
+                    + (thisMonth !== '' ? ` · uso mes: ${thisMonth}` : '')
+                );
+                UI.toast('SerpAPI OK');
+            } catch (err) {
+                if (adopted && previous) SerpApi.setApiKey(previous);
+                paintSerpStatus(err.message || 'Error');
                 UI.toast(err.message || 'No se pudo conectar', 'error');
             }
         });
@@ -331,6 +396,7 @@ const SettingsView = (() => {
         loadIntoForm();
         initSyncUi();
         initKeepaUi();
+        initSerpApiUi();
     }
 
     return { init, loadIntoForm };

@@ -1,6 +1,6 @@
 /* Service worker: network-first local (evita CSS/JS viejos), fallback a cache offline. */
 
-const VERSION = 'vm-v299';
+const VERSION = 'vm-v439';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -15,6 +15,8 @@ const STATIC_ASSETS = [
     './js/ui.js',
     './js/freight.js',
     './js/alloc.js',
+    './js/stores.js',
+    './js/serpapi.js',
     './js/keepa.js',
     './js/keepa-chart.js',
     './js/keepa-view.js',
@@ -22,6 +24,7 @@ const STATIC_ASSETS = [
     './js/insights.js',
     './js/envios.js',
     './js/wishlist.js',
+    './js/ofertas.js',
     './js/lotes.js',
     './js/dashboard.js',
     './js/caja.js',
@@ -57,9 +60,8 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // Las respuestas Keepa dependen de ASIN, parámetros y una key privada.
-    // Nunca guardarlas bajo una URL sin query ni servir datos de otro producto.
-    if (url.pathname.startsWith('/api/keepa/')) {
+    // Keepa y SerpAPI: datos vivos — nunca cachear
+    if (url.pathname.startsWith('/api/keepa/') || url.pathname.startsWith('/api/serpapi/')) {
         event.respondWith(fetch(req, { cache: 'no-store' }));
         return;
     }

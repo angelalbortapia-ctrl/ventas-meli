@@ -246,9 +246,15 @@ const Keepa = (() => {
 
     async function proxyFetch(pathWithQuery) {
         const key = requireKey();
-        const res = await fetch(`/api/keepa/${pathWithQuery.replace(/^\//, '')}`, {
-            headers: { 'X-Keepa-Key': key },
-        });
+        let res;
+        try {
+            res = await fetch(`/api/keepa/${pathWithQuery.replace(/^\//, '')}`, {
+                headers: { 'X-Keepa-Key': key },
+                cache: 'no-store',
+            });
+        } catch (_) {
+            throw new Error('No se pudo hablar con el proxy local. ¿Corrés python3 serve.py?');
+        }
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(describeError(data, res.status));
         return data;
@@ -256,9 +262,15 @@ const Keepa = (() => {
 
     async function proxyFetchBlob(pathWithQuery) {
         const key = requireKey();
-        const res = await fetch(`/api/keepa/${pathWithQuery.replace(/^\//, '')}`, {
-            headers: { 'X-Keepa-Key': key },
-        });
+        let res;
+        try {
+            res = await fetch(`/api/keepa/${pathWithQuery.replace(/^\//, '')}`, {
+                headers: { 'X-Keepa-Key': key },
+                cache: 'no-store',
+            });
+        } catch (_) {
+            throw new Error('No se pudo hablar con el proxy local. ¿Corrés python3 serve.py?');
+        }
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
             throw new Error(describeError(data, res.status));
@@ -342,8 +354,8 @@ const Keepa = (() => {
         if (!s) return '';
         if (/^[A-Z0-9]{10}$/i.test(s)) return s.toUpperCase();
         const m = s.match(
-            /(?:\/(?:dp|gp\/product|gp\/aw\/d)|[?&]asin=)\/?([A-Z0-9]{10})\b/i
-        ) || s.match(/\b([A-Z0-9]{10})\b/);
+            /(?:\/(?:dp|gp\/product|gp\/aw\/d|product|exec\/obidos\/ASIN)|[?&]asin=)\/?([A-Z0-9]{10})\b/i
+        ) || s.match(/\b([B0-9][A-Z0-9]{9})\b/i);
         return m ? m[1].toUpperCase() : '';
     }
 

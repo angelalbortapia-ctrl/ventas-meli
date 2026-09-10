@@ -17,6 +17,9 @@ const LotesView = (() => {
         detailTab: 'renta',
         margenObjetivoPct: 25,   // % editable en Sugerencias → compra ideal
         mobileDetail: false,     // iPhone: lista ↔ detalle a pantalla completa
+        fxEntered: false,        // entrada FX solo una vez por montaje
+        fxLastFamily: null,
+        listSettleTimer: null,
     };
 
     const ENVIO_LABELS = {
@@ -95,9 +98,29 @@ const LotesView = (() => {
         return true;
     }
 
+    /** Variantes navegables en UI (pills / shelf / teclado), según filtros activos. */
+    function listableVariants(fam) {
+        if (!fam?.variants?.length) return [];
+        const showFinalizadas = local.strategies.has('FINALIZADA');
+        const q = normalize(local.search).trim();
+        let list = (showFinalizadas || q)
+            ? fam.variants.slice()
+            : fam.variants.filter(v => isVariantVisible(v.lote, v.calc));
+        if (local.strategies.size) {
+            const filtered = list.filter(v => local.strategies.has(v.calc.estrategia));
+            if (filtered.length) list = filtered;
+        }
+        if (local.selectedVariant) {
+            const cur = fam.variants.find(v => v.lote.id === local.selectedVariant);
+            if (cur && !list.some(v => v.lote.id === cur.lote.id)) list = [...list, cur];
+        }
+        return list;
+    }
+
     function pickVisible(fam) {
         if (!fam?.variants?.length) return null;
-        return fam.variants.find(v => isVariantVisible(v.lote, v.calc)) || fam.variants[0];
+        const list = listableVariants(fam);
+        return list[0] || fam.variants[0];
     }
 
     function prepEnvioOn() {
@@ -223,27 +246,36 @@ const LotesView = (() => {
             view.innerHTML = '<div id="lotes-canvas"></div>';
             canvas = document.getElementById('lotes-canvas');
         }
+        canvas.classList.add('is-fx', 'is-studio');
         canvas.innerHTML = `
-            <div class="view-head">
-                <div>
-                    <h2>Productos</h2>
-                    <p class="muted" id="lotes-header-sub"></p>
-                </div>
-                <div class="view-actions">
-                    <button class="btn primary" id="lotes-new">+ Agregar producto</button>
-                </div>
+            <div class="prod-fx-stage" aria-hidden="true">
+                <div class="prod-fx-wash"></div>
+                <div class="prod-fx-orb prod-fx-orb-a"></div>
+                <div class="prod-fx-orb prod-fx-orb-b"></div>
             </div>
-
-            <div class="stats-strip" id="lotes-stats"></div>
-
-            <div id="lotes-catalog-shelf"></div>
-
-            <div class="lotes-shell">
-                <div class="lotes-toolbar">
-                    <div class="grow">
-                        <input type="search" id="lotes-search" placeholder="Filtrar por SKU, nombre, variante o categoría…">
+            <header class="lotes-studio-head">
+                <div class="lotes-studio-title-row">
+                    <div class="lotes-studio-copy">
+                        <p class="dash-masthead-kicker">${esc(mpKicker())}</p>
+                        <h1 class="lotes-studio-title">Tu catálogo.</h1>
+                        <p class="lotes-studio-lead">Inventario, rentabilidad y estrategia en un solo lugar.</p>
                     </div>
-                    <div class="chip-row" id="lotes-chips"></div>
+                    <div class="view-actions">
+                        <button class="btn primary lotes-add-btn" id="lotes-new"><span aria-hidden="true">＋</span> Agregar producto</button>
+                    </div>
+                </div>
+                <div id="lotes-stats" class="dash-hero-kpis-band is-flow lotes-hero-kpis" aria-label="Resumen del catálogo"></div>
+            </header>
+
+            <div class="lotes-shell is-mail">
+                <div class="lotes-mail-top">
+                    <div class="lotes-toolbar">
+                        <div class="grow">
+                            <input type="search" id="lotes-search" placeholder="Buscar en productos" aria-label="Buscar productos">
+                        </div>
+                    </div>
+                    <div class="chip-row lotes-mail-chips" id="lotes-chips"></div>
+                    <div id="lotes-catalog-shelf"></div>
                 </div>
 
                 <div class="lotes-split" id="lotes-split">
@@ -259,11 +291,15 @@ const LotesView = (() => {
     }
 
     function bindShellEvents() {
-        document.getElementById('lotes-search').addEventListener('input', e => {
-            local.search = e.target.value;
-            renderContent();
-        });
-        document.getElementById('lotes-new').addEventListener('click', () => openModal(null));
+        const search = document.getElementById('lotes-search');
+        const neu = document.getElementById('lotes-new');
+        if (search) {
+            search.addEventListener('input', e => {
+                local.search = e.target.value;
+                renderContent();
+            });
+        }
+        if (neu) neu.addEventListener('click', () => openModal(null));
     }
 
     function initResizer() {
@@ -275,7 +311,7 @@ const LotesView = (() => {
             document.removeEventListener('mouseup', resizerHandlers.end);
             resizerHandlers = null;
         }
-        const saved = parseInt(localStorage.getItem('vm-list-width') || '400', 10);
+        const saved = parseInt(localStorage.getItem('vm-list-width') || '380', 10);
         if (!isNaN(saved) && saved >= 280 && saved <= 700) {
             split.style.setProperty('--list-w', saved + 'px');
         }
@@ -305,8 +341,8 @@ const LotesView = (() => {
         document.addEventListener('mousemove', move);
         document.addEventListener('mouseup', end);
         resizer.addEventListener('dblclick', () => {
-            split.style.setProperty('--list-w', '400px');
-            localStorage.setItem('vm-list-width', '400');
+            split.style.setProperty('--list-w', '380px');
+            localStorage.setItem('vm-list-width', '380');
         });
         resizerHandlers = { move, end };
     }
@@ -314,6 +350,100 @@ const LotesView = (() => {
     /** Llamar cuando App vacía #view-lotes (cambio de marketplace). */
     function invalidate() {
         shellMounted = false;
+        local.fxEntered = false;
+        local.fxLastFamily = null;
+    }
+
+    function settleListFx() {
+        const listEl = document.getElementById('lotes-list');
+        if (!listEl) return;
+        const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+        if (reduce) return;
+        listEl.classList.remove('is-list-settle');
+        void listEl.offsetWidth;
+        listEl.classList.add('is-list-settle');
+        window.clearTimeout(local.listSettleTimer);
+        local.listSettleTimer = window.setTimeout(() => {
+            listEl.classList.remove('is-list-settle');
+        }, 900);
+    }
+
+    function kickProdFx(familyKey, opts = {}) {
+        const soft = !!opts.soft;
+        const canvas = document.getElementById('lotes-canvas');
+        const detail = document.getElementById('lotes-detail');
+        if (!canvas) return;
+
+        const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+        canvas.classList.add('is-fx');
+
+        if (reduce) {
+            canvas.classList.remove('is-fx-enter');
+            local.fxEntered = true;
+            return;
+        }
+
+        if (!soft && !local.fxEntered) {
+            local.fxEntered = true;
+            canvas.classList.add('is-fx-enter');
+            window.setTimeout(() => canvas.classList.remove('is-fx-enter'), 1100);
+        }
+        if (!soft) UI.countUp?.(document.getElementById('lotes-stats'));
+
+        const familyChanged = !!(familyKey && familyKey !== local.fxLastFamily);
+        if (familyKey) local.fxLastFamily = familyKey;
+
+        if (detail) {
+            detail.classList.remove('is-detail-swap');
+            void detail.offsetWidth;
+            detail.classList.add('is-detail-swap');
+        }
+
+        if (familyChanged) {
+            const active = document.querySelector('#lotes-catalog-track .prod-rail-thumb.is-active');
+            if (active) {
+                active.classList.remove('is-pop');
+                void active.offsetWidth;
+                active.classList.add('is-pop');
+            }
+            const activeRow = document.querySelector('#lotes-list .lotes-row.active');
+            if (activeRow) {
+                activeRow.classList.remove('is-bloom');
+                void activeRow.offsetWidth;
+                activeRow.classList.add('is-bloom');
+            }
+        }
+
+        if (!soft) settleListFx();
+    }
+
+    function syncSelectionClasses() {
+        document.querySelectorAll('#lotes-catalog-track [data-select-family]').forEach(card => {
+            card.classList.toggle('is-active', card.dataset.selectFamily === local.selected);
+        });
+        document.querySelectorAll('#lotes-list [data-select]').forEach(row => {
+            row.classList.toggle('active', row.dataset.select === local.selected);
+        });
+    }
+
+    function ensureActiveShelfVisible() {
+        const track = document.getElementById('lotes-catalog-track');
+        const activeCard = track?.querySelector('.is-active');
+        if (!track || !activeCard) return;
+        const tRect = track.getBoundingClientRect();
+        const aRect = activeCard.getBoundingClientRect();
+        const pad = 12;
+        if (aRect.left >= tRect.left + pad && aRect.right <= tRect.right - pad) return;
+        const left = activeCard.offsetLeft - (track.clientWidth - activeCard.clientWidth) / 2;
+        track.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+    }
+
+    function ensureActiveRowVisible() {
+        const row = document.querySelector('#lotes-list .lotes-row.active');
+        if (!row) return;
+        try {
+            row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } catch (_) { /* ignore */ }
     }
 
     // ---- Render principal ----------------------------------------------
@@ -321,6 +451,8 @@ const LotesView = (() => {
         // Si App vació el DOM o el canvas desapareció, remonta el shell.
         if (!shellMounted || !document.getElementById('lotes-canvas')) {
             shellMounted = false;
+            local.fxEntered = false;
+            local.fxLastFamily = null;
             renderShell();
         }
         syncToolbar();
@@ -332,7 +464,8 @@ const LotesView = (() => {
         if (s && s.value !== local.search) s.value = local.search;
     }
 
-    function renderContent() {
+    function renderContent(opts = {}) {
+        const soft = !!opts.soft;
         const list = families();
 
         if (list.length && (!local.selected || !list.find(f => f.key === local.selected))) {
@@ -346,48 +479,44 @@ const LotesView = (() => {
         const family = list.find(f => f.key === local.selected) || null;
         if (family) {
             const stillThere = family.variants.find(v => v.lote.id === local.selectedVariant);
-            const stillVisible = stillThere && isVariantVisible(stillThere.lote, stillThere.calc);
-            if (!stillVisible) local.selectedVariant = pickVisible(family)?.lote?.id || null;
+            // Mantener Finalizada / deep-link; solo resetear si la variante ya no existe.
+            if (!stillThere) local.selectedVariant = pickVisible(family)?.lote?.id || null;
         }
 
         const variantRow = family
             ? family.variants.find(v => v.lote.id === local.selectedVariant) || pickVisible(family)
             : null;
 
-        const nProd = list.length;
-        const nTotal = totalProductCount();
-        const nVar = window.State.lotes.length;
-        const subEl = document.getElementById('lotes-header-sub');
-        if (subEl) {
-            subEl.textContent = isMobile()
-                ? (nProd === nTotal
-                    ? `${nProd} producto${nProd === 1 ? '' : 's'} · ${nVar} variante${nVar === 1 ? '' : 's'}`
-                    : `${nProd} de ${nTotal} productos`)
-                : (nProd === nTotal
-                    ? `${nProd} producto${nProd === 1 ? '' : 's'} · ${nVar} variante${nVar === 1 ? '' : 's'} · Arrastra la línea vertical para redimensionar`
-                    : `${nProd} de ${nTotal} productos · ${nVar} variantes · Arrastra la línea vertical para redimensionar`);
+        if (!soft) {
+            const nProd = list.length;
+            const nTotal = totalProductCount();
+            const nVar = window.State.lotes.length;
+            const statsEl = document.getElementById('lotes-stats');
+            if (statsEl) statsEl.innerHTML = renderStats({ nProd, nTotal, nVar });
+            let catalogHost = document.getElementById('lotes-catalog-shelf');
+            if (!catalogHost) {
+                const mailTop = document.querySelector('#view-lotes .lotes-mail-top');
+                if (mailTop) {
+                    catalogHost = document.createElement('div');
+                    catalogHost.id = 'lotes-catalog-shelf';
+                    mailTop.appendChild(catalogHost);
+                }
+            }
+            if (catalogHost) catalogHost.innerHTML = renderCatalogShelf(list, local.selected);
+            const chipsEl = document.getElementById('lotes-chips');
+            if (chipsEl) chipsEl.innerHTML = renderChips();
+            const listEl = document.getElementById('lotes-list');
+            if (listEl) listEl.innerHTML = renderList(list);
+        } else {
+            syncSelectionClasses();
         }
 
-        document.getElementById('lotes-stats').innerHTML = renderStats();
-        let catalogHost = document.getElementById('lotes-catalog-shelf');
-        if (!catalogHost) {
-            const stats = document.getElementById('lotes-stats');
-            if (stats) {
-                catalogHost = document.createElement('div');
-                catalogHost.id = 'lotes-catalog-shelf';
-                stats.insertAdjacentElement('afterend', catalogHost);
-            }
-        }
-        if (catalogHost) catalogHost.innerHTML = renderCatalogShelf(list, local.selected);
-        document.getElementById('lotes-chips').innerHTML = renderChips();
-        document.getElementById('lotes-list').innerHTML = renderList(list);
-        document.getElementById('lotes-detail').innerHTML = renderDetail(family, variantRow);
+        const detailEl = document.getElementById('lotes-detail');
+        if (detailEl) detailEl.innerHTML = renderDetail(family, variantRow);
+        kickProdFx(family?.key || null, { soft });
         requestAnimationFrame(() => {
-            const track = document.getElementById('lotes-catalog-track');
-            const activeCard = track?.querySelector('.prod-shelf-card.is-active');
-            if (!track || !activeCard) return;
-            const left = activeCard.offsetLeft - (track.clientWidth - activeCard.clientWidth) / 2;
-            track.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+            ensureActiveShelfVisible();
+            ensureActiveRowVisible();
         });
 
         const split = document.getElementById('lotes-split');
@@ -395,138 +524,71 @@ const LotesView = (() => {
             split.classList.toggle('mobile-detail-open', isMobile() && !!local.mobileDetail && !!family);
         }
 
-        bindDynamicEvents();
+        if (soft) bindDetailEvents();
+        else bindDynamicEvents();
+
         if (window.Keepa?.hydrate) {
-            Keepa.hydrate(document.getElementById('lotes-detail'));
+            const detailHost = document.getElementById('lotes-detail');
+            if (detailHost) Keepa.hydrate(detailHost);
         }
 
-        window.App?.refreshNavCounts?.();
+        if (!soft) window.App?.refreshNavCounts?.();
     }
 
-    // ---- Stats strip ---------------------------------------------------
-    function statPctBlock(ratio, label, tone = '') {
-        const r = Number(ratio);
-        const safe = Number.isFinite(r) ? r : 0;
-        const w = Math.max(0, Math.min(100, Math.round(Math.abs(safe) * 1000) / 10));
-        const toneCls = tone ? ` is-${tone}` : '';
-        return `
-            <div class="stat-pct${toneCls}">
-                <div class="stat-pct-top">
-                    <span class="stat-pct-num">${Calc.fmtPct(safe)}</span>
-                    <span class="stat-pct-lbl">${label}</span>
-                </div>
-                <div class="stat-meter" aria-hidden="true">
-                    <div class="stat-meter-fill" style="--p:${w}%"></div>
-                </div>
-            </div>`;
+    function mpKicker() {
+        const mp = window.State.marketplace === 'amazon' ? 'amazon' : 'meli';
+        return Data.mpBrand?.(mp) || (mp === 'amazon' ? 'Amazon' : 'Mercado Libre');
     }
 
-    /** Bloque % vacío / N/A (sin barra engañosa). */
-    function statPctNA(label, note = '—') {
-        return `
-            <div class="stat-pct is-na">
-                <div class="stat-pct-top">
-                    <span class="stat-pct-num">${note}</span>
-                    <span class="stat-pct-lbl">${label}</span>
-                </div>
-                <div class="stat-meter" aria-hidden="true">
-                    <div class="stat-meter-fill" style="--p:0%"></div>
-                </div>
-            </div>`;
-    }
-
-    function renderStats() {
+    // ---- KPIs tipo dashboard ------------------------------------------
+    function renderStats(opts = {}) {
         const agg = Calc.aggregate(window.State.lotes, window.State.settings);
-        const nProd = totalProductCount();
-        const escN = agg.strategyCount.ESCALAR || 0;
-        const manN = agg.strategyCount.MANTENER || 0;
-        const liqN = agg.strategyCount.LIQUIDAR || 0;
-        const agoN = agg.strategyCount.AGOTADO || 0;
-        const pauN = agg.strategyCount.PAUSADA || 0;
-        const finN = agg.strategyCount.FINALIZADA || 0;
-        const nVar = agg.rows.length;
-        const activos = agg.rows.filter(r => r.calc.inventarioRestante > 0).length;
+        const nProd = opts.nProd != null ? opts.nProd : totalProductCount();
+        const nTotal = opts.nTotal != null ? opts.nTotal : totalProductCount();
+        const nVar = opts.nVar != null ? opts.nVar : agg.rows.length;
         const utilPot = agg.rows.reduce((s, r) => s + r.calc.utilidad * r.calc.inventarioRestante, 0);
-        const total = nVar || 1;
-        const pctConStock = nVar > 0 ? activos / nVar : 0;
-        const capital = agg.capitalDesplegado || 0;
-        const pctEnInventario = capital > 0 ? agg.valorInventario / capital : 0;
+        const piezasStock = agg.rows.reduce((s, r) => s + (Number(r.calc.inventarioRestante) || 0), 0);
+        const piezasCompradas = Number(agg.totalUds) || 0;
+        const capital = agg.valorInventario || 0;
         const hasSales = (agg.totalVendidas || 0) > 0 || Math.abs(agg.gananciaRealizada || 0) > 0.009;
-        const roiCapital = capital > 0 ? agg.gananciaRealizada / capital : null;
-        const upsideTotal = agg.gananciaRealizada + utilPot;
-        // Si hay pérdida realizada, el % pendiente se acota a 0–100% para no engañar
-        const pctUpsidePendiente = upsideTotal > 0.009
-            ? Math.max(0, Math.min(1, utilPot / upsideTotal))
-            : (utilPot > 0.009 ? 1 : 0);
-        const barTotal = (escN + manN + liqN + agoN + pauN + finN) || 1;
-        const pctEscalar = escN / total;
-        const roiTone = (roiCapital || 0) >= 0 ? 'pos' : 'neg';
-        const gananciaPct = !hasSales
-            ? statPctNA('sin ventas', '—')
-            : (capital > 0
-                ? statPctBlock(roiCapital, 'ROI capital', roiTone)
-                : statPctNA('sin capital', '—'));
-
+        const ganCls = !hasSales ? '' : (agg.gananciaRealizada >= 0 ? 'pos' : 'neg');
+        const utilCls = utilPot >= 0 ? 'pos' : 'neg';
+        const catalogFoot = nProd === nTotal
+            ? `${nProd === 1 ? 'producto' : 'productos'} · ${nVar} var.`
+            : `de ${nTotal} · ${nVar} var.`;
+        const piezasFoot = piezasCompradas > 0
+            ? `en stock · ${piezasCompradas} compradas`
+            : 'Sin piezas';
         return `
-            <div class="stat">
-                <div class="stat-label"><span class="stat-icon">📦</span>Productos</div>
-                <div class="stat-main">
-                    <div class="stat-value">${nProd}</div>
-                    ${statPctBlock(pctConStock, 'con stock', 'info')}
+            <section class="lotes-sum" aria-label="Resumen de inventario">
+                <div class="lotes-sum-hero">
+                    <p class="lotes-sum-eyebrow"><span aria-hidden="true"></span> Capital en inventario</p>
+                    <p class="lotes-sum-figure" data-fx-num="${capital}" data-fx-fmt="mxn">${Calc.fmtMXN(capital)}</p>
+                    <p class="lotes-sum-caption">Costo del stock disponible · ${piezasStock} pieza${piezasStock === 1 ? '' : 's'}</p>
                 </div>
-                <div class="stat-sub">${nVar} variante${nVar === 1 ? '' : 's'} · ${activos} activa${activos === 1 ? '' : 's'}</div>
-            </div>
-            <div class="stat">
-                <div class="stat-label"><span class="stat-icon">💰</span>Capital desplegado</div>
-                <div class="stat-main">
-                    <div class="stat-value">${Calc.fmtMXN(capital)}</div>
-                    ${capital > 0
-                        ? statPctBlock(pctEnInventario, 'en inventario', 'warn')
-                        : statPctNA('sin capital', '—')}
+                <div class="lotes-sum-grid">
+                    <article class="lotes-sum-cell" style="--cell-i:0">
+                        <span class="lotes-sum-cell-name">Piezas totales</span>
+                        <strong class="lotes-sum-cell-value" data-fx-num="${piezasStock}" data-fx-fmt="int">${piezasStock}</strong>
+                        <span class="lotes-sum-cell-note">${esc(piezasFoot)}</span>
+                    </article>
+                    <article class="lotes-sum-cell" style="--cell-i:1">
+                        <span class="lotes-sum-cell-name">Catálogo</span>
+                        <strong class="lotes-sum-cell-value" data-fx-num="${nProd}" data-fx-fmt="int">${nProd}</strong>
+                        <span class="lotes-sum-cell-note">${esc(catalogFoot)}</span>
+                    </article>
+                    <article class="lotes-sum-cell is-strong" style="--cell-i:2">
+                        <span class="lotes-sum-cell-name">Ganancia realizada</span>
+                        <strong class="lotes-sum-cell-value ${ganCls}"${hasSales ? ` data-fx-num="${agg.gananciaRealizada}" data-fx-fmt="mxn"` : ''}>${hasSales ? Calc.fmtMXN(agg.gananciaRealizada) : '—'}</strong>
+                        <span class="lotes-sum-cell-note ${ganCls}">${hasSales ? `${agg.totalVendidas || 0} uds vendidas` : 'Aún sin ventas'}</span>
+                    </article>
+                    <article class="lotes-sum-cell" style="--cell-i:3">
+                        <span class="lotes-sum-cell-name">Ganancia potencial</span>
+                        <strong class="lotes-sum-cell-value ${utilCls}" data-fx-num="${utilPot}" data-fx-fmt="mxn">${Calc.fmtMXN(utilPot)}</strong>
+                        <span class="lotes-sum-cell-note">Si se vende el stock</span>
+                    </article>
                 </div>
-                <div class="stat-sub">${Calc.fmtMXN(agg.valorInventario)} al costo</div>
-            </div>
-            <div class="stat">
-                <div class="stat-label"><span class="stat-icon">📈</span>Ganancia realizada</div>
-                <div class="stat-main">
-                    <div class="stat-value ${!hasSales ? '' : (agg.gananciaRealizada >= 0 ? 'pos' : 'neg')}">${hasSales ? Calc.fmtMXN(agg.gananciaRealizada) : '—'}</div>
-                    ${gananciaPct}
-                </div>
-                <div class="stat-sub">${hasSales ? 'Por precio real de cada venta' : 'Registra una venta para ver ROI'}</div>
-            </div>
-            <div class="stat">
-                <div class="stat-label"><span class="stat-icon">🎯</span>Utilidad potencial</div>
-                <div class="stat-main">
-                    <div class="stat-value ${utilPot >= 0 ? 'pos' : 'neg'}">${Calc.fmtMXN(utilPot)}</div>
-                    ${statPctBlock(pctUpsidePendiente, 'del upside', utilPot >= 0 ? 'pos' : 'neg')}
-                </div>
-                <div class="stat-sub">Al vender inventario restante</div>
-            </div>
-            <div class="stat stat-dist">
-                <div class="stat-dist-head">
-                    <div class="stat-label"><span class="stat-icon">🚦</span>Semáforo de estrategia</div>
-                    <div class="stat-pct-pill is-pos">
-                        <span class="stat-pct-num">${Calc.fmtPct(pctEscalar)}</span>
-                        <span class="stat-pct-lbl">escalar</span>
-                    </div>
-                </div>
-                <div class="dist-track">
-                    <div class="dist-seg esc" style="width:${(escN/barTotal)*100}%"></div>
-                    <div class="dist-seg man" style="width:${(manN/barTotal)*100}%"></div>
-                    <div class="dist-seg liq" style="width:${(liqN/barTotal)*100}%"></div>
-                    <div class="dist-seg ago" style="width:${(agoN/barTotal)*100}%"></div>
-                    <div class="dist-seg pau" style="width:${(pauN/barTotal)*100}%"></div>
-                    ${finN > 0 ? `<div class="dist-seg fin" style="width:${(finN/barTotal)*100}%"></div>` : ''}
-                </div>
-                <div class="dist-legend">
-                    <button class="d-leg" data-strat="ESCALAR"><span class="d esc"></span>Escalar ${escN}</button>
-                    <button class="d-leg" data-strat="MANTENER"><span class="d man"></span>Mantener ${manN}</button>
-                    <button class="d-leg" data-strat="LIQUIDAR"><span class="d liq"></span>Liquidar ${liqN}</button>
-                    ${agoN > 0 ? `<button class="d-leg" data-strat="AGOTADO"><span class="d ago"></span>Agotado ${agoN}</button>` : ''}
-                    ${pauN > 0 ? `<button class="d-leg" data-strat="PAUSADA"><span class="d pau"></span>Pausada ${pauN}</button>` : ''}
-                    ${finN > 0 ? `<button class="d-leg" data-strat="FINALIZADA"><span class="d fin"></span>Archivadas ${finN}</button>` : ''}
-                </div>
-            </div>
+            </section>
         `;
     }
 
@@ -591,18 +653,18 @@ const LotesView = (() => {
             const noCatalog = !window.State.lotes.length;
             const onlyFin = local.strategies.size === 1 && local.strategies.has('FINALIZADA');
             return head + `<div class="lotes-empty-list">
-                <div style="font-size:32px; opacity:0.35; margin-bottom:8px">${noCatalog ? '📦' : (onlyFin ? '🗄' : '🔍')}</div>
-                <div>${noCatalog
+                <h3>${noCatalog ? 'Sin productos aún.' : (onlyFin ? 'Nada archivado.' : 'Sin resultados.')}</h3>
+                <p class="muted">${noCatalog
                     ? (isAmz
-                        ? 'Catálogo Amazon vacío. Agrega tus propios productos (no usa los de Mercado Libre).'
-                        : 'Sin productos. Crea tu primer lote.')
+                        ? 'Agrega tus propios productos de Amazon (no usa los de Mercado Libre). Usa Agregar arriba.'
+                        : 'Usa Agregar arriba para crear tu primer producto.')
                     : onlyFin
-                        ? 'Nada archivado aún. Marca un producto como Finalizada para guardarlo fuera del listado activo.'
-                        : 'Sin resultados. Ajusta filtros o crea un nuevo lote.'}</div>
+                        ? 'Marca un producto como Finalizada para guardarlo fuera del listado activo.'
+                        : 'Ajusta los filtros o agrega un producto nuevo.'}</p>
             </div>`;
         }
 
-        const items = list.map(f => {
+        const items = list.map((f, i) => {
             const archived = f.estrategia === 'FINALIZADA'
                 || f.variants.every(v => v.calc.estrategia === 'FINALIZADA');
             const colorLine = f.colores.length
@@ -627,7 +689,7 @@ const LotesView = (() => {
                 `${Calc.fmtMXN(f.utilidad)} util · ${Calc.fmtPct(f.margen)} margen`,
             ].filter(Boolean).join(' · ');
             return `
-            <div class="lotes-row ${f.key===local.selected?'active':''}${archived ? ' is-archived' : ''}" data-select="${esc(f.key)}" title="${tooltipParts}">
+            <div class="lotes-row ${f.key===local.selected?'active':''}${archived ? ' is-archived' : ''}" data-select="${esc(f.key)}" style="--i:${i}" title="${tooltipParts}">
                 <span class="lotes-dot ${cls(f.estrategia)}" title="${label(f.estrategia)}"></span>
                 ${thumb}
                 <div class="lotes-info">
@@ -704,16 +766,16 @@ const LotesView = (() => {
         if (!family || !row) {
             return `
                 <div class="lotes-empty">
-                    <div>
-                        <div class="lotes-empty-icon">📦</div>
-                        <div><strong>Selecciona un producto</strong></div>
-                        <div class="small muted" style="margin-top:4px">Su desglose y recomendaciones aparecerán aquí</div>
+                    <div class="lotes-empty-mail">
+                        <span class="lotes-empty-mail-mark" aria-hidden="true"></span>
+                        <h3>Selecciona un producto</h3>
+                        <p class="muted">El detalle aparece aquí, limpio y al instante.</p>
                     </div>
                 </div>
             `;
         }
         const { lote, calc } = row;
-        const visibleVariants = family.variants.filter(v => isVariantVisible(v.lote, v.calc));
+        const visibleVariants = listableVariants(family);
         const multi = visibleVariants.length > 1;
         const imagen = safeImageSrc(family.imagen || lote.imagen || '');
         const productId = family.productId || lote.productId || '';
@@ -765,7 +827,7 @@ const LotesView = (() => {
 
         return `
             <div class="lotes-detail-stack">
-                <header class="lotes-detail-head">
+                <header class="lotes-detail-head lotes-act lotes-act-1">
                     <button type="button" class="btn ghost btn-sm mobile-back" data-action="mobile-back" aria-label="Volver a la lista">← Productos</button>
                     <div class="lotes-detail-topline">
                         <div class="lotes-detail-meta">
@@ -802,23 +864,23 @@ const LotesView = (() => {
                             </div>
                         </div>
                     </div>
-                </header>
 
-                <section class="lotes-detail-identity">
-                    <div class="lotes-detail-title-row">
-                        ${imageBlock}
-                        <div class="lotes-detail-title-text">
-                            <h2 class="lotes-detail-name">${esc(displayName(lote.producto))}</h2>
-                            ${colorPills}
-                            <div class="lotes-detail-variant">
-                                ${multi ? '' : `<strong>${esc(lote.variante || '—')}</strong> · `}
-                                <span class="editable-price" data-edit-field="precio" data-id="${lote.id}" title="Click para editar precio">${Calc.fmtMXN(lote.precio)}</span>
-                                ${lote.precioCompetencia ? `· <span class="muted">Competencia: ${Calc.fmtMXN(lote.precioCompetencia)}</span>` : ''}
-                                · <span class="badge ${cls(calc.estrategia)}">${calc.estrategia === 'FINALIZADA' ? '🗄 Archivada' : label(calc.estrategia)}</span>
+                    <section class="lotes-detail-identity">
+                        <div class="lotes-detail-title-row">
+                            ${imageBlock}
+                            <div class="lotes-detail-title-text">
+                                <h2 class="lotes-detail-name">${esc(displayName(lote.producto))}</h2>
+                                ${colorPills}
+                                <div class="lotes-detail-variant">
+                                    ${multi ? '' : `<strong>${esc(lote.variante || '—')}</strong> · `}
+                                    <span class="editable-price" data-edit-field="precio" data-id="${lote.id}" title="Click para editar precio">${Calc.fmtMXN(lote.precio)}</span>
+                                    ${lote.precioCompetencia ? `· <span class="muted">Competencia: ${Calc.fmtMXN(lote.precioCompetencia)}</span>` : ''}
+                                    · <span class="badge ${cls(calc.estrategia)}">${calc.estrategia === 'FINALIZADA' ? '🗄 Archivada' : label(calc.estrategia)}</span>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </section>
+                    </section>
+                </header>
 
                 ${calc.estrategia === 'FINALIZADA' ? `
                 <div class="lote-archive-banner" role="status">
@@ -829,60 +891,63 @@ const LotesView = (() => {
                     <button type="button" class="btn btn-sm" data-action="status" data-id="${lote.id}">Cambiar estatus</button>
                 </div>` : ''}
 
-                <section class="lotes-metrics">
+                <section class="lotes-metrics lotes-act lotes-act-2" aria-label="Veredicto del producto">
                     <div class="lotes-hero-util ${calc.utilidad >= 0 ? 'pos' : 'neg'}">
-                        <div class="lotes-hero-label">Utilidad</div>
+                        <div class="lotes-hero-label">Utilidad por unidad</div>
                         <div class="lotes-hero-value">${Calc.fmtMXN(calc.utilidad)}</div>
+                        <span class="lotes-hero-mark" aria-hidden="true"></span>
                     </div>
                     <div class="lotes-metrics-row">
-                        <span>Margen <strong>${Calc.fmtPct(calc.margen)}</strong></span>
-                        <span>Stock <strong class="editable-stock" data-edit-field="stock" data-id="${lote.id}" title="Click para editar unidades del lote">${calc.inventarioRestante}<small style="opacity:0.5">/${lote.unidades}</small></strong></span>
-                        <span>ROI <strong>${Calc.fmtPct(calc.roi)}</strong></span>
+                        <span class="lotes-metric-chip"><em>Margen</em><strong>${Calc.fmtPct(calc.margen)}</strong></span>
+                        <span class="lotes-metric-chip"><em>Stock</em><strong class="editable-stock" data-edit-field="stock" data-id="${lote.id}" title="Click para editar unidades del lote">${calc.inventarioRestante}<small>/${lote.unidades}</small></strong></span>
+                        <span class="lotes-metric-chip"><em>ROI</em><strong>${Calc.fmtPct(calc.roi)}</strong></span>
                     </div>
                 </section>
 
-                ${isAmzMarketplace() ? `
-                <details class="lotes-logistica" ${logOpen ? 'open' : ''}>
-                    <summary class="lotes-logistica-summary">
-                        <span class="lotes-logistica-title">Logística</span>
-                        <span class="lotes-logistica-status">${esc(logSummary)}</span>
-                    </summary>
-                    <div class="lotes-logistica-body">
-                        <div class="logistica-bar" role="group" aria-label="Logística Amazon">
-                            <span class="logistica-bar-label">¿Quién envía?</span>
-                            <button type="button" class="logistica-opt ${tipo === 'FBA' ? 'active' : ''}"
-                                data-action="set-logistica" data-id="${lote.id}" data-tipo="FBA">
-                                FBA · Amazon
-                            </button>
-                            <button type="button" class="logistica-opt ${tipo === 'FBM' ? 'active' : ''}"
-                                data-action="set-logistica" data-id="${lote.id}" data-tipo="FBM">
-                                FBM · Tú envías
-                            </button>
-                        </div>
-                        ${renderEnvioPanel(family, lote)}
+                <section class="lotes-act lotes-act-3">
+                    <nav class="detail-tabs" role="tablist">
+                        ${tabs.map(t => `
+                            <button class="detail-tab ${local.detailTab===t.key?'active':''}" data-detail-tab="${t.key}">${t.label}</button>
+                        `).join('')}
+                    </nav>
+
+                    <div class="detail-tab-content">
+                        ${renderDetailTab(lote, calc)}
                     </div>
-                </details>` : ''}
 
-                ${isAmzMarketplace() && lote.asin && !window.Keepa?.panelPrefs?.().off
-                    ? `${renderKeepaMini(lote, calc)}
-                       <div class="lotes-float-block lotes-keepa-block">
-                        <h4 class="lotes-float-block-title">Keepa detalle</h4>
-                        <div class="lotes-keepa" data-keepa-asin="${esc(lote.asin)}"
-                            data-keepa-product-id="${esc(lote.id)}"></div>
-                       </div>`
-                    : ''}
+                    ${isAmzMarketplace() ? `
+                    <details class="lotes-logistica" ${logOpen ? 'open' : ''}>
+                        <summary class="lotes-logistica-summary">
+                            <span class="lotes-logistica-title">Logística</span>
+                            <span class="lotes-logistica-status">${esc(logSummary)}</span>
+                        </summary>
+                        <div class="lotes-logistica-body">
+                            <div class="logistica-bar" role="group" aria-label="Logística Amazon">
+                                <span class="logistica-bar-label">¿Quién envía?</span>
+                                <button type="button" class="logistica-opt ${tipo === 'FBA' ? 'active' : ''}"
+                                    data-action="set-logistica" data-id="${lote.id}" data-tipo="FBA">
+                                    FBA · Amazon
+                                </button>
+                                <button type="button" class="logistica-opt ${tipo === 'FBM' ? 'active' : ''}"
+                                    data-action="set-logistica" data-id="${lote.id}" data-tipo="FBM">
+                                    FBM · Tú envías
+                                </button>
+                            </div>
+                            ${renderEnvioPanel(family, lote)}
+                        </div>
+                    </details>` : ''}
 
-                <nav class="detail-tabs" role="tablist">
-                    ${tabs.map(t => `
-                        <button class="detail-tab ${local.detailTab===t.key?'active':''}" data-detail-tab="${t.key}">${t.label}</button>
-                    `).join('')}
-                </nav>
+                    ${isAmzMarketplace() && lote.asin && !window.Keepa?.panelPrefs?.().off
+                        ? `${renderKeepaMini(lote, calc)}
+                           <div class="lotes-float-block lotes-keepa-block">
+                            <h4 class="lotes-float-block-title">Keepa detalle</h4>
+                            <div class="lotes-keepa" data-keepa-asin="${esc(lote.asin)}"
+                                data-keepa-product-id="${esc(lote.id)}"></div>
+                           </div>`
+                        : ''}
 
-                <div class="detail-tab-content">
-                    ${renderDetailTab(lote, calc)}
-                </div>
-
-                ${renderProductShelf(family, lote)}
+                    ${renderProductShelf(family, lote)}
+                </section>
             </div>
         `;
     }
@@ -911,75 +976,42 @@ const LotesView = (() => {
         return `hsl(${h % 360} 42% 62%)`;
     }
 
-    /** Vitrina superior: catálogo completo (estilo Apple Accessories). */
+    /** Riel mini de thumbs (no vitrina grande). */
     function renderCatalogShelf(list, selectedKey) {
         const pool = (list || [])
             .slice()
             .sort((a, b) => (b.utilidad || 0) - (a.utilidad || 0));
         if (pool.length < 2) return '';
 
-        const cards = pool.map(f => {
+        const thumbs = pool.map(f => {
             const best = pickVisible(f);
             if (!best?.lote) return '';
             const img = safeImageSrc(f.imagen || best.lote.imagen || '');
             const active = f.key === selectedKey;
-            const util = best.calc?.utilidad ?? f.utilidad ?? 0;
-            const margen = best.calc?.margen ?? f.margen ?? 0;
-            const utilCls = util >= 0 ? 'is-pos' : 'is-neg';
-            const dots = f.colores.length > 1
-                ? `<div class="prod-shelf-dots" aria-hidden="true">
-                    ${f.colores.slice(0, 6).map(c => {
-                        const hex = variantSwatch(c);
-                        const light = /#f|#e/i.test(hex) || hex === '#f2f2f7' || hex === '#f5f0e6' || hex === '#e8d5b7' || hex === '#e8dcc8' || hex === '#f3e5d0';
-                        return `<span class="prod-shelf-dot${light ? ' is-light' : ''}" style="--swatch:${hex}"></span>`;
-                    }).join('')}
-                   </div>`
-                : '';
             return `
-                <article class="prod-shelf-card${active ? ' is-active' : ''}" data-select-family="${esc(f.key)}">
-                    <div class="prod-shelf-media">
-                        ${img
-                            ? `<img src="${img}" alt="" loading="lazy">`
-                            : `<div class="prod-shelf-ph" aria-hidden="true"></div>`}
-                    </div>
-                    ${dots}
-                    <div class="prod-shelf-copy">
-                        <h4 class="prod-shelf-title">${esc(displayName(f.producto))}</h4>
-                        <p class="prod-shelf-price">${Calc.fmtMXN(best.lote.precio)}</p>
-                        <div class="prod-shelf-kpis">
-                            <span class="prod-shelf-kpi ${utilCls}">
-                                <small>Util</small>
-                                <strong>${Calc.fmtMXN(util)}</strong>
-                            </span>
-                            <span class="prod-shelf-kpi">
-                                <small>Margen</small>
-                                <strong>${Calc.fmtPct(margen)}</strong>
-                            </span>
-                        </div>
-                    </div>
-                </article>`;
+                <button type="button"
+                    class="prod-rail-thumb${active ? ' is-active' : ''}"
+                    data-select-family="${esc(f.key)}"
+                    title="${esc(displayName(f.producto))} · ${Calc.fmtMXN(best.lote.precio)}">
+                    ${img
+                        ? `<img src="${img}" alt="" loading="lazy">`
+                        : `<span class="prod-rail-ph" aria-hidden="true"></span>`}
+                </button>`;
         }).filter(Boolean);
 
-        if (!cards.length) return '';
+        if (!thumbs.length) return '';
         return `
-            <section class="prod-shelf prod-shelf-top" aria-label="También en tu catálogo">
-                <div class="prod-shelf-head">
-                    <h3>También en tu catálogo.</h3>
-                    <div class="prod-shelf-nav">
-                        <button type="button" class="prod-shelf-arrow" data-prod-shelf-scroll="-1" data-prod-shelf-track="lotes-catalog-track" aria-label="Anterior">‹</button>
-                        <button type="button" class="prod-shelf-arrow" data-prod-shelf-scroll="1" data-prod-shelf-track="lotes-catalog-track" aria-label="Siguiente">›</button>
-                    </div>
+            <div class="prod-rail" aria-label="Catálogo rápido">
+                <div class="prod-rail-track" id="lotes-catalog-track">
+                    ${thumbs.join('')}
                 </div>
-                <div class="prod-shelf-track" id="lotes-catalog-track">
-                    ${cards.join('')}
-                </div>
-            </section>`;
+            </div>`;
     }
 
     /** Vitrina inferior del detalle: solo variantes/colores del producto actual. */
     function renderProductShelf(family, activeLote) {
         if (!family) return '';
-        const variants = family.variants.filter(v => isVariantVisible(v.lote, v.calc));
+        const variants = listableVariants(family);
         if (variants.length < 2) return '';
         const famImg = safeImageSrc(family.imagen || '');
 
@@ -1158,11 +1190,30 @@ const LotesView = (() => {
         const fbaNote = isAmz && calc.fbaMeta?.source === 'tabla'
             ? ` · ${calc.fbaMeta.tamano} · ${calc.fbaMeta.peso} kg`
             : (isAmz && calc.fbaMeta?.source === 'manual' ? ' · override' : '');
+        // Utilidad + inversión = lo que llega por venta (precio − fees), mismo criterio que Caja.
+        const recibesPorVenta = Math.max(0, (Number(lote.costo) || 0) + (Number(calc.utilidad) || 0));
+        const piezas = Math.max(0, Number(calc.inventarioRestante) || 0)
+            || Math.max(0, Number(lote.unidades) || 0);
+        const recibesTotal = recibesPorVenta * piezas;
+        const inversionPiezas = Math.max(0, Number(lote.costo) || 0) * piezas;
+        const ventasReg = Array.isArray(lote.ventas) ? lote.ventas : [];
+        const udsVendidas = Math.max(0, Number(calc.vendidas) || 0);
+        let acumuladoVentas = 0;
+        if (ventasReg.length && Data.ventaLiberacionAmount) {
+            const settings = window.State.settings;
+            ventasReg.forEach(v => {
+                acumuladoVentas += Number(Data.ventaLiberacionAmount(lote, v, settings)) || 0;
+            });
+        } else if (udsVendidas > 0) {
+            acumuladoVentas = recibesPorVenta * udsVendidas;
+        }
+        acumuladoVentas = Math.round(acumuladoVentas * 100) / 100;
+        const nPedidos = ventasReg.length || (udsVendidas > 0 ? 1 : 0);
 
         return `
-            <div class="lotes-float-block">
+            <div class="lotes-float-block lotes-costos">
                 <h4 class="lotes-float-block-title">Costos</h4>
-                <div class="breakdown">
+                <div class="breakdown breakdown--costos">
                     <div class="breakdown-row"><span class="label">Precio de venta</span><span class="val">${Calc.fmtMXN(lote.precio)}</span></div>
                     <div class="breakdown-row"><span class="label">Costo unitario</span><span class="val">− ${Calc.fmtMXN(lote.costo)}</span></div>
                     <div class="breakdown-row"><span class="label">${comLabel}${isAmz && calc.referidoMinimo ? ` · mín ${Calc.fmtMXN(calc.referidoMinimo)}` : ''}</span><span class="val">− ${Calc.fmtMXN(calc.comisionVariable)}</span></div>
@@ -1174,11 +1225,60 @@ const LotesView = (() => {
                     <div class="breakdown-row"><span class="label">Retención IVA SAT</span><span class="val">− ${Calc.fmtMXN(calc.retIVA)}</span></div>
                     <div class="breakdown-row"><span class="label">Retención ISR SAT</span><span class="val">− ${Calc.fmtMXN(calc.retISR)}</span></div>
                     ` : ''}
-                    <div class="breakdown-row total">
-                        <span class="label">Utilidad neta por unidad</span>
-                        <span class="val ${calc.utilidad>=0?'pos':'neg'}">${Calc.fmtMXN(calc.utilidad)}</span>
+                </div>
+
+                <div class="costos-outcome" aria-label="Resultado por unidad">
+                    <div class="costos-outcome-row">
+                        <div class="costos-outcome-copy">
+                            <span class="costos-outcome-k">Utilidad neta</span>
+                            <span class="costos-outcome-h">por unidad</span>
+                        </div>
+                        <span class="costos-outcome-v ${calc.utilidad >= 0 ? 'pos' : 'neg'}">${Calc.fmtMXN(calc.utilidad)}</span>
+                    </div>
+                    <div class="costos-outcome-row is-hero" title="Utilidad + costo · lo que entra a Caja por unidad">
+                        <div class="costos-outcome-copy">
+                            <span class="costos-outcome-k">Recibes por venta</span>
+                            <span class="costos-outcome-h">utilidad + inversión</span>
+                        </div>
+                        <span class="costos-outcome-v">${Calc.fmtMXN(recibesPorVenta)}</span>
                     </div>
                 </div>
+
+                ${udsVendidas > 0 ? `
+                <div class="costos-accum" title="Suma de lo que recibes en las ventas ya registradas (mismo criterio que Caja)">
+                    <div class="costos-accum-top">
+                        <span class="costos-accum-badge">Acumulado</span>
+                        <span class="costos-accum-meta">${udsVendidas} ud · ${nPedidos} pedido${nPedidos === 1 ? '' : 's'}</span>
+                    </div>
+                    <div class="costos-accum-body">
+                        <div class="costos-accum-copy">
+                            <span class="costos-accum-k">En ventas registradas</span>
+                            <span class="costos-accum-h">Lo que ya entra a Caja al marcar Cobrado</span>
+                        </div>
+                        <span class="costos-accum-v"${UI.fxAttrs?.(acumuladoVentas, 'mxn') || ''}>${Calc.fmtMXN(acumuladoVentas)}</span>
+                    </div>
+                    <span class="costos-accum-mark" aria-hidden="true"></span>
+                </div>` : ''}
+
+                ${piezas > 1 ? `
+                <div class="costos-stock" aria-label="Resumen por inventario">
+                    <div class="costos-stock-head">
+                        <span class="costos-stock-n">${piezas}</span>
+                        <span class="costos-stock-l">piezas en inventario</span>
+                    </div>
+                    <div class="costos-stock-grid">
+                        <div class="costos-stock-cell" title="Costo unitario × ${piezas}">
+                            <span class="costos-stock-k">Inversión inicial</span>
+                            <span class="costos-stock-v">${Calc.fmtMXN(inversionPiezas)}</span>
+                            <span class="costos-stock-h">costo × ${piezas}</span>
+                        </div>
+                        <div class="costos-stock-cell is-focus" title="Recibes por venta × ${piezas}">
+                            <span class="costos-stock-k">Si las vendes</span>
+                            <span class="costos-stock-v">${Calc.fmtMXN(recibesTotal)}</span>
+                            <span class="costos-stock-h">recibes × ${piezas}</span>
+                        </div>
+                    </div>
+                </div>` : ''}
             </div>
 
             <h4 style="margin-top:18px">Ads vs tope CPA</h4>
@@ -1206,7 +1306,7 @@ const LotesView = (() => {
                 stockRest: calc.inventarioRestante,
                 stockTotal: Number(lote.unidades) || 0,
             };
-        const visibleVariants = family.variants.filter(v => isVariantVisible(v.lote, v.calc));
+        const visibleVariants = listableVariants(family);
         const multi = visibleVariants.length > 1;
         const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
         const sparkHTML = ventasSparkline(ventas, calc);
@@ -1682,6 +1782,102 @@ const LotesView = (() => {
     }
 
     // ---- Eventos dinámicos ---------------------------------------------
+    /** Solo nodos del panel detalle (y acciones locales) tras un soft-render. */
+    function bindDetailEvents() {
+        const root = document.getElementById('lotes-detail');
+        if (!root) return;
+
+        root.querySelectorAll('[data-action="mobile-back"]').forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                local.mobileDetail = false;
+                renderContent({ soft: true });
+            });
+        });
+
+        root.querySelectorAll('[data-pick-variant]').forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                local.selectedVariant = btn.dataset.pickVariant;
+                renderContent({ soft: true });
+            });
+        });
+
+        root.querySelectorAll('[data-prod-shelf-scroll]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.prodShelfTrack || 'prod-shelf-track';
+                const track = document.getElementById(id)
+                    || btn.closest('.prod-shelf')?.querySelector('.prod-shelf-track');
+                if (!track) return;
+                const delta = Number(btn.dataset.prodShelfScroll) || 0;
+                track.scrollBy({ left: delta * Math.min(280, track.clientWidth * 0.85), behavior: 'smooth' });
+            });
+        });
+
+        root.querySelectorAll('[data-detail-tab]').forEach(el => {
+            el.addEventListener('click', () => {
+                local.detailTab = el.dataset.detailTab;
+                renderContent({ soft: true });
+            });
+        });
+
+        bindCompraIdealControls();
+
+        root.querySelectorAll('[data-kebab-btn]').forEach(el => {
+            el.addEventListener('click', e => {
+                e.stopPropagation();
+                const menu = el.closest('[data-kebab]').querySelector('[data-kebab-menu]');
+                menu.hidden = !menu.hidden;
+                if (!menu.hidden) {
+                    const onDocClick = () => { menu.hidden = true; document.removeEventListener('click', onDocClick); };
+                    setTimeout(() => document.addEventListener('click', onDocClick), 10);
+                }
+            });
+        });
+
+        root.querySelectorAll('[data-action]').forEach(btn => {
+            btn.addEventListener('click', async e => {
+                e.stopPropagation();
+                const action = btn.dataset.action;
+                const id = btn.dataset.id;
+                if (action === 'edit') openModal(id);
+                else if (action === 'open-keepa') {
+                    const lote = window.State.lotes.find(item => item.id === id);
+                    if (lote?.asin) window.KeepaView?.openAsin?.(lote.asin);
+                }
+                else if (action === 'set-logistica') setLogistica(id, btn.dataset.tipo);
+                else if (action === 'dup') duplicate(id);
+                else if (action === 'del') await remove(id);
+                else if (action === 'sale') await recordSale(id);
+                else if (action === 'restock') await restock(id);
+                else if (action === 'writeoff') await writeOff(id);
+                else if (action === 'status') await changeStatus(id);
+                else if (action === 'del-venta') await removeSale(btn.dataset.lote, btn.dataset.venta);
+                else if (action === 'pick-image') pickProductImage(btn.dataset.productId);
+                else if (action === 'clear-image') await clearProductImage(btn.dataset.productId);
+            });
+        });
+
+        root.querySelectorAll('.editable-price, .editable-stock, .editable-ads').forEach(el => {
+            el.addEventListener('click', async () => {
+                const id = el.dataset.id;
+                const field = el.dataset.editField;
+                await inlineEdit(id, field);
+            });
+        });
+
+        root.querySelectorAll('[data-ship-estado]').forEach(sel => {
+            sel.addEventListener('change', () => {
+                setVentaEnvioEstado(sel.dataset.lote, sel.dataset.venta, sel.value);
+            });
+        });
+        root.querySelectorAll('[data-fba-inbound]').forEach(sel => {
+            sel.addEventListener('change', () => {
+                setFbaInboundEstado(sel.dataset.lote, sel.value);
+            });
+        });
+    }
+
     function bindDynamicEvents() {
         // Chip filters
         document.querySelectorAll('.chip[data-chip]').forEach(el => {
@@ -1706,50 +1902,26 @@ const LotesView = (() => {
             });
         });
 
-        // Distribution legend chips
-        document.querySelectorAll('[data-strat]').forEach(el => {
-            el.addEventListener('click', () => {
-                const key = el.dataset.strat;
-                if (local.strategies.has(key)) local.strategies.delete(key);
-                else local.strategies.add(key);
-                renderContent();
-            });
-        });
-
-        // Row select (familia)
-        document.querySelectorAll('[data-select]').forEach(row => {
+        // Row select (familia) — misma variante visible que la vitrina
+        document.querySelectorAll('#lotes-list [data-select]').forEach(row => {
             row.addEventListener('click', () => {
                 local.selected = row.dataset.select;
                 const fam = families().find(f => f.key === local.selected);
-                local.selectedVariant = fam ? fam.variants[0].lote.id : null;
+                local.selectedVariant = fam ? (pickVisible(fam)?.lote.id || null) : null;
                 if (isMobile()) local.mobileDetail = true;
-                renderContent();
+                renderContent({ soft: true });
+                document.getElementById('lotes-detail')?.scrollTo?.({ top: 0, behavior: 'smooth' });
             });
             row.addEventListener('dblclick', () => {
                 if (isMobile()) return;
                 const fam = families().find(f => f.key === row.dataset.select);
-                const id = fam?.variants[0]?.lote.id || local.selectedVariant;
+                const id = (fam ? pickVisible(fam)?.lote.id : null) || local.selectedVariant;
                 if (id) openModal(id);
             });
         });
 
-        document.querySelectorAll('[data-action="mobile-back"]').forEach(btn => {
-            btn.addEventListener('click', e => {
-                e.stopPropagation();
-                local.mobileDetail = false;
-                renderContent();
-            });
-        });
-
-        // Color / variante picker
-        document.querySelectorAll('[data-pick-variant]').forEach(btn => {
-            btn.addEventListener('click', e => {
-                e.stopPropagation();
-                local.selectedVariant = btn.dataset.pickVariant;
-                renderContent();
-            });
-        });
-        document.querySelectorAll('[data-select-family]').forEach(btn => {
+        // Vitrina superior: selección sin remount completo
+        document.querySelectorAll('#lotes-catalog-track [data-select-family]').forEach(btn => {
             btn.addEventListener('click', e => {
                 e.stopPropagation();
                 const key = btn.dataset.selectFamily;
@@ -1759,18 +1931,8 @@ const LotesView = (() => {
                 local.selected = fam.key;
                 local.selectedVariant = next.lote.id;
                 if (isMobile()) local.mobileDetail = true;
-                renderContent();
+                renderContent({ soft: true });
                 document.getElementById('lotes-detail')?.scrollTo?.({ top: 0, behavior: 'smooth' });
-            });
-        });
-        document.querySelectorAll('[data-prod-shelf-scroll]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const id = btn.dataset.prodShelfTrack || 'prod-shelf-track';
-                const track = document.getElementById(id)
-                    || btn.closest('.prod-shelf')?.querySelector('.prod-shelf-track');
-                if (!track) return;
-                const delta = Number(btn.dataset.prodShelfScroll) || 0;
-                track.scrollBy({ left: delta * Math.min(280, track.clientWidth * 0.85), behavior: 'smooth' });
             });
         });
 
@@ -1787,73 +1949,7 @@ const LotesView = (() => {
             });
         });
 
-        // Detail tabs
-        document.querySelectorAll('[data-detail-tab]').forEach(el => {
-            el.addEventListener('click', () => {
-                local.detailTab = el.dataset.detailTab;
-                renderContent();
-            });
-        });
-
-        bindCompraIdealControls();
-
-        // Kebab menu
-        document.querySelectorAll('[data-kebab-btn]').forEach(el => {
-            el.addEventListener('click', e => {
-                e.stopPropagation();
-                const menu = el.closest('[data-kebab]').querySelector('[data-kebab-menu]');
-                menu.hidden = !menu.hidden;
-                if (!menu.hidden) {
-                    const onDocClick = () => { menu.hidden = true; document.removeEventListener('click', onDocClick); };
-                    setTimeout(() => document.addEventListener('click', onDocClick), 10);
-                }
-            });
-        });
-
-        // Actions (kebab + inline)
-        document.querySelectorAll('[data-action]').forEach(btn => {
-            btn.addEventListener('click', async e => {
-                e.stopPropagation();
-                const action = btn.dataset.action;
-                const id = btn.dataset.id;
-                if (action === 'edit') openModal(id);
-                else if (action === 'open-keepa') {
-                    const lote = window.State.lotes.find(item => item.id === id);
-                    if (lote?.asin) window.KeepaView?.openAsin?.(lote.asin);
-                }
-                else if (action === 'set-logistica') setLogistica(id, btn.dataset.tipo);
-                else if (action === 'dup') duplicate(id);
-                else if (action === 'del') await remove(id);
-                else if (action === 'sale') await recordSale(id);
-                else if (action === 'restock') await restock(id);
-                else if (action === 'writeoff') await writeOff(id);
-                else if (action === 'status') await changeStatus(id);
-                else if (action === 'del-venta') await removeSale(btn.dataset.lote, btn.dataset.venta);
-                else if (action === 'pick-image') pickProductImage(btn.dataset.productId);
-                else if (action === 'clear-image') await clearProductImage(btn.dataset.productId);
-            });
-        });
-
-        // Inline edit (price, stock, ads)
-        document.querySelectorAll('.editable-price, .editable-stock, .editable-ads').forEach(el => {
-            el.addEventListener('click', async () => {
-                const id = el.dataset.id;
-                const field = el.dataset.editField;
-                await inlineEdit(id, field);
-            });
-        });
-
-        // Estatus de envío por venta (FBM) o inbound FBA
-        document.querySelectorAll('[data-ship-estado]').forEach(sel => {
-            sel.addEventListener('change', () => {
-                setVentaEnvioEstado(sel.dataset.lote, sel.dataset.venta, sel.value);
-            });
-        });
-        document.querySelectorAll('[data-fba-inbound]').forEach(sel => {
-            sel.addEventListener('change', () => {
-                setFbaInboundEstado(sel.dataset.lote, sel.value);
-            });
-        });
+        bindDetailEvents();
     }
 
     function setFbaInboundEstado(loteId, estado) {
@@ -2057,6 +2153,12 @@ const LotesView = (() => {
         if (document.getElementById('palette-host') && document.getElementById('palette-host').innerHTML) return;
         if (isTypingInField()) return;
 
+        if (e.key.toLowerCase() === 'n') {
+            e.preventDefault();
+            openModal(null);
+            return;
+        }
+
         const list = families();
         if (!list.length) return;
         const currentIdx = list.findIndex(f => f.key === local.selected);
@@ -2064,43 +2166,47 @@ const LotesView = (() => {
 
         if (e.key === 'ArrowDown' || e.key === 'j') {
             e.preventDefault();
-            const next = list[Math.min(list.length - 1, Math.max(0, currentIdx) + 1)];
+            const nextIdx = currentIdx < 0 ? 0 : Math.min(list.length - 1, currentIdx + 1);
+            const next = list[nextIdx];
             if (next) {
                 local.selected = next.key;
-                local.selectedVariant = next.variants[0].lote.id;
-                renderContent();
+                local.selectedVariant = pickVisible(next)?.lote?.id || null;
+                if (isMobile()) local.mobileDetail = true;
+                renderContent({ soft: true });
             }
         } else if (e.key === 'ArrowUp' || e.key === 'k') {
             e.preventDefault();
-            const prev = list[Math.max(0, currentIdx - 1)];
+            const prevIdx = currentIdx < 0 ? list.length - 1 : Math.max(0, currentIdx - 1);
+            const prev = list[prevIdx];
             if (prev) {
                 local.selected = prev.key;
-                local.selectedVariant = prev.variants[0].lote.id;
-                renderContent();
+                local.selectedVariant = pickVisible(prev)?.lote?.id || null;
+                if (isMobile()) local.mobileDetail = true;
+                renderContent({ soft: true });
             }
         } else if ((e.key === 'ArrowRight' || e.key === 'l') && local.selected) {
-            // Siguiente color dentro del producto
             e.preventDefault();
             const fam = list.find(f => f.key === local.selected);
-            if (!fam || fam.variants.length < 2) return;
-            const i = fam.variants.findIndex(v => v.lote.id === local.selectedVariant);
-            const next = fam.variants[(i + 1) % fam.variants.length];
-            local.selectedVariant = next.lote.id;
-            renderContent();
+            if (!fam) return;
+            const visible = listableVariants(fam);
+            if (visible.length < 2) return;
+            const i = Math.max(0, visible.findIndex(v => v.lote.id === local.selectedVariant));
+            local.selectedVariant = visible[(i + 1) % visible.length].lote.id;
+            if (isMobile()) local.mobileDetail = true;
+            renderContent({ soft: true });
         } else if ((e.key === 'ArrowLeft' || e.key === 'h') && local.selected) {
             e.preventDefault();
             const fam = list.find(f => f.key === local.selected);
-            if (!fam || fam.variants.length < 2) return;
-            const i = fam.variants.findIndex(v => v.lote.id === local.selectedVariant);
-            const prev = fam.variants[(i - 1 + fam.variants.length) % fam.variants.length];
-            local.selectedVariant = prev.lote.id;
-            renderContent();
+            if (!fam) return;
+            const visible = listableVariants(fam);
+            if (visible.length < 2) return;
+            const i = Math.max(0, visible.findIndex(v => v.lote.id === local.selectedVariant));
+            local.selectedVariant = visible[(i - 1 + visible.length) % visible.length].lote.id;
+            if (isMobile()) local.mobileDetail = true;
+            renderContent({ soft: true });
         } else if (e.key.toLowerCase() === 'e' && variantId) {
             e.preventDefault();
             openModal(variantId);
-        } else if (e.key.toLowerCase() === 'n') {
-            e.preventDefault();
-            openModal(null);
         } else if (e.key.toLowerCase() === 'd' && variantId) {
             e.preventDefault();
             duplicate(variantId);
@@ -2576,13 +2682,14 @@ const LotesView = (() => {
         renderContent();
         window.App?.refreshNavCounts?.();
         UI.playMoneySound?.();
+        UI.burstConfetti?.();
         const shipMsg = envioEstado && envioEstado !== 'enviado'
             ? ' · quedó en Envíos'
             : '';
         const cajaMsg = ' · por cobrar en Caja';
         UI.toast(multi
             ? `Venta registrada · ${l.variante || 'variante'} (−${uds})${shipMsg}${cajaMsg}`
-            : `Venta registrada${shipMsg}${cajaMsg}`);
+            : `Venta registrada${shipMsg}${cajaMsg}`, 'success', { pulse: true });
     }
 
     async function removeSale(loteId, ventaId) {

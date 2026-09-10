@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=240">
+    <link rel="stylesheet" href="css/styles.css?v=362">
 </head>
 <body>
 
@@ -47,10 +47,6 @@
             <button type="button" class="sb-item" data-gx-jump="gx-pulso">
                 <span class="sb-icon" data-icon="dashboard"></span>
                 <span>Hoy</span>
-            </button>
-            <button type="button" class="sb-item" data-gx-jump="gx-checklist">
-                <span class="sb-icon" data-icon="checklist"></span>
-                <span>Checklist</span>
             </button>
             <button type="button" class="sb-item" data-gx-jump="gx-acciones">
                 <span class="sb-icon" data-icon="agenda"></span>
@@ -100,6 +96,11 @@
                 <span class="sb-icon" data-icon="wishlist"></span>
                 <span>Wishlist</span>
                 <span class="badge-count" id="sb-count-wishlist" hidden>0</span>
+            </button>
+            <button class="sb-item" data-tab="ofertas" role="tab" aria-selected="false" data-mp-only="amazon" hidden>
+                <span class="sb-icon" data-icon="ofertas"></span>
+                <span>Ofertas</span>
+                <span class="badge-count" id="sb-count-ofertas" hidden>0</span>
             </button>
             <button class="sb-item" data-tab="keepa" role="tab" aria-selected="false" data-mp-only="amazon" hidden>
                 <span class="sb-icon" data-icon="keepa"></span>
@@ -211,6 +212,9 @@
 
         <!-- ============ WISHLIST (Amazon arbitraje) ============ -->
         <section class="view" id="view-wishlist" hidden aria-label="Wishlist"></section>
+
+        <!-- ============ OFERTAS (retail → Amazon) ============ -->
+        <section class="view" id="view-ofertas" hidden aria-label="Ofertas"></section>
 
         <!-- ============ KEEPA LAB (Amazon research) ============ -->
         <section class="view" id="view-keepa" hidden aria-label="Keepa Lab"></section>
@@ -325,6 +329,26 @@
                         La extensión Premium de Keepa <strong>no incluye</strong> la API: necesitas la key en
                         <a href="https://keepa.com/#!api" target="_blank" rel="noopener">keepa.com/#!api</a>.
                         Corre la app con <code>python3 serve.py</code> (proxy CORS). Con ASIN, verás precio/BSR en Wishlist y Productos.
+                    </p>
+                </div>
+
+                <div class="card" data-mp-only="amazon" hidden>
+                    <h3>SerpAPI (Shopping + Immersive MX)</h3>
+                    <label><span>API key</span>
+                        <input type="password" id="set-serpapi-key" name="serpapi-api-key"
+                            placeholder="Pégala desde serpapi.com/manage-api-key"
+                            autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+                            data-lpignore="true" data-1p-ignore data-bwignore>
+                    </label>
+                    <div class="row-actions" style="gap:8px;margin-top:8px;flex-wrap:wrap">
+                        <button type="button" class="btn" id="btn-serpapi-save">Guardar key</button>
+                        <button type="button" class="btn ghost" id="btn-serpapi-test">Probar conexión</button>
+                    </div>
+                    <p class="muted small" id="serpapi-status" style="margin-top:8px">Sin configurar.</p>
+                    <p class="muted small">
+                        Usado en <strong>Ofertas</strong>: Google Shopping + Immersive Product (todas las tiendas del mismo ítem). ~2 créditos por investigación.
+                        Key en <a href="https://serpapi.com/manage-api-key" target="_blank" rel="noopener">serpapi.com</a>.
+                        Requiere <code>python3 serve.py</code>. Alternativa: variable de entorno <code>SERPAPI_KEY</code>.
                     </p>
                 </div>
 
@@ -550,25 +574,28 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/calc.js?v=24"></script>
-<script src="js/data.js?v=57"></script>
+<script src="js/data.js?v=61"></script>
 <script src="js/excel.js?v=8"></script>
-<script src="js/icons.js?v=2"></script>
-<script src="js/ui.js?v=9"></script>
+<script src="js/icons.js?v=3"></script>
+<script src="js/ui.js?v=15"></script>
 <script src="js/freight.js?v=1"></script>
 <script src="js/alloc.js?v=1"></script>
-<script src="js/keepa.js?v=22"></script>
+<script src="js/stores.js?v=3"></script>
+<script src="js/serpapi.js?v=3"></script>
+<script src="js/keepa.js?v=24"></script>
 <script src="js/keepa-chart.js?v=13"></script>
 <script src="js/keepa-view.js?v=27"></script>
-<script src="js/palette.js?v=13"></script>
-<script src="js/insights.js?v=14"></script>
-<script src="js/lotes.js?v=89"></script>
-<script src="js/envios.js?v=12"></script>
-<script src="js/wishlist.js?v=12"></script>
-<script src="js/dashboard.js?v=114"></script>
-<script src="js/caja.js?v=15"></script>
-<script src="js/sync.js?v=21"></script>
-<script src="js/settings.js?v=23"></script>
-<script src="js/app.js?v=74"></script>
+<script src="js/palette.js?v=14"></script>
+<script src="js/insights.js?v=17"></script>
+<script src="js/lotes.js?v=130"></script>
+<script src="js/envios.js?v=14"></script>
+<script src="js/wishlist.js?v=13"></script>
+<script src="js/ofertas.js?v=24"></script>
+<script src="js/dashboard.js?v=164"></script>
+<script src="js/caja.js?v=22"></script>
+<script src="js/sync.js?v=22"></script>
+<script src="js/settings.js?v=25"></script>
+<script src="js/app.js?v=93"></script>
 
 </body>
 </html>

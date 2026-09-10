@@ -350,7 +350,50 @@ const UI = (() => {
         }[ch]));
     }
 
-    /** Cha-ching corto al registrar venta (Meli y Amazon). */
+    /**
+     * Confeti de celebración.
+     * opts.intensity: 'full' (venta) | 'light' (cobrado / lote)
+     */
+    function burstConfetti(opts = {}) {
+        try {
+            if (typeof window.matchMedia === 'function'
+                && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                return;
+            }
+            const light = opts.intensity === 'light';
+            document.querySelectorAll('.ui-confetti').forEach((el) => el.remove());
+            const host = document.createElement('div');
+            host.className = light ? 'ui-confetti is-light' : 'ui-confetti';
+            host.setAttribute('aria-hidden', 'true');
+            const colors = ['#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#007aff', '#5856d6', '#ff2d55', '#ffffff'];
+            const n = light ? 28 : 64;
+            for (let i = 0; i < n; i++) {
+                const p = document.createElement('i');
+                const side = i % 2 === 0 ? -1 : 1;
+                const x = (light ? 6 + Math.random() * 28 : 8 + Math.random() * 42) * side;
+                const drift = x + (Math.random() * 28 - 14);
+                const rot = Math.floor(Math.random() * 720 - 360);
+                const delay = Math.random() * (light ? 0.1 : 0.18);
+                const dur = (light ? 0.85 : 1.15) + Math.random() * (light ? 0.35 : 0.55);
+                const w = 5 + Math.floor(Math.random() * 7);
+                const h = 8 + Math.floor(Math.random() * 10);
+                p.style.setProperty('--x', `${x}vw`);
+                p.style.setProperty('--dx', `${drift}vw`);
+                p.style.setProperty('--r', `${rot}deg`);
+                p.style.setProperty('--d', `${delay}s`);
+                p.style.setProperty('--t', `${dur}s`);
+                p.style.setProperty('--c', colors[i % colors.length]);
+                p.style.width = `${w}px`;
+                p.style.height = `${h}px`;
+                if (i % 5 === 0) p.classList.add('is-round');
+                host.appendChild(p);
+            }
+            document.body.appendChild(host);
+            window.setTimeout(() => host.remove(), light ? 1600 : 2200);
+        } catch (_) { /* ignore */ }
+    }
+
+    /** Caja registradora al registrar venta (cajón + campana). */
     let _audioCtx = null;
     function playMoneySound() {
         try {
@@ -358,29 +401,164 @@ const UI = (() => {
             if (!AC) return;
             if (!_audioCtx) _audioCtx = new AC();
             const ctx = _audioCtx;
-            if (ctx.state === 'suspended') ctx.resume();
-            const t0 = ctx.currentTime;
+            const run = () => {
+                const t0 = ctx.currentTime + 0.01;
+                const master = ctx.createGain();
+                master.gain.value = 0.85;
+                master.connect(ctx.destination);
 
-            const ding = (freq, start, dur, gain = 0.18) => {
-                const osc = ctx.createOscillator();
-                const g = ctx.createGain();
-                osc.type = 'triangle';
-                osc.frequency.setValueAtTime(freq, t0 + start);
-                osc.frequency.exponentialRampToValueAtTime(freq * 0.85, t0 + start + dur);
-                g.gain.setValueAtTime(0.0001, t0 + start);
-                g.gain.exponentialRampToValueAtTime(gain, t0 + start + 0.02);
-                g.gain.exponentialRampToValueAtTime(0.0001, t0 + start + dur);
-                osc.connect(g);
-                g.connect(ctx.destination);
-                osc.start(t0 + start);
-                osc.stop(t0 + start + dur + 0.02);
+                // 1) Golpe mecánico del cajón
+                const thud = ctx.createOscillator();
+                const thudG = ctx.createGain();
+                thud.type = 'sine';
+                thud.frequency.setValueAtTime(95, t0);
+                thud.frequency.exponentialRampToValueAtTime(48, t0 + 0.09);
+                thudG.gain.setValueAtTime(0.0001, t0);
+                thudG.gain.exponentialRampToValueAtTime(0.55, t0 + 0.008);
+                thudG.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+                thud.connect(thudG);
+                thudG.connect(master);
+                thud.start(t0);
+                thud.stop(t0 + 0.14);
+
+                // 2) “Cha” — ruido corto del mecanismo
+                const nLen = Math.max(1, Math.floor(ctx.sampleRate * 0.07));
+                const noiseBuf = ctx.createBuffer(1, nLen, ctx.sampleRate);
+                const data = noiseBuf.getChannelData(0);
+                for (let i = 0; i < nLen; i++) {
+                    data[i] = (Math.random() * 2 - 1) * (1 - i / nLen);
+                }
+                const noise = ctx.createBufferSource();
+                noise.buffer = noiseBuf;
+                const noiseBp = ctx.createBiquadFilter();
+                noiseBp.type = 'bandpass';
+                noiseBp.frequency.value = 1800;
+                noiseBp.Q.value = 0.85;
+                const noiseG = ctx.createGain();
+                noiseG.gain.setValueAtTime(0.0001, t0);
+                noiseG.gain.exponentialRampToValueAtTime(0.28, t0 + 0.004);
+                noiseG.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.07);
+                noise.connect(noiseBp);
+                noiseBp.connect(noiseG);
+                noiseG.connect(master);
+                noise.start(t0);
+                noise.stop(t0 + 0.08);
+
+                // 3) Campana “ching” metálica
+                const bellAt = t0 + 0.05;
+                const ring = (freq, start, dur, gain, type = 'triangle') => {
+                    const osc = ctx.createOscillator();
+                    const g = ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, start);
+                    g.gain.setValueAtTime(0.0001, start);
+                    g.gain.exponentialRampToValueAtTime(gain, start + 0.012);
+                    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+                    osc.connect(g);
+                    g.connect(master);
+                    osc.start(start);
+                    osc.stop(start + dur + 0.02);
+                };
+                ring(1568, bellAt, 0.55, 0.22);           // G6
+                ring(2093, bellAt + 0.015, 0.7, 0.16);    // C7
+                ring(3136, bellAt + 0.03, 0.45, 0.08);    // G7
+                ring(4186, bellAt + 0.04, 0.35, 0.04, 'sine');
             };
-
-            // “cha” + “ching”
-            ding(980, 0, 0.12, 0.16);
-            ding(1310, 0.08, 0.22, 0.2);
-            ding(1760, 0.12, 0.35, 0.12);
+            if (ctx.state === 'suspended') {
+                ctx.resume().then(run).catch(() => {});
+            } else {
+                run();
+            }
         } catch (_) { /* sin audio / autoplay bloqueado */ }
+    }
+
+    /** Atributos HTML para un número animable. */
+    function fxAttrs(n, fmt = 'mxn') {
+        const num = Number(n);
+        if (!Number.isFinite(num)) return '';
+        return ` data-fx-num="${num}" data-fx-fmt="${fmt}"`;
+    }
+
+    /** Limpia fingerprint de reconteo en el scope de countUp. */
+    function clearCountFx(root) {
+        const scope = typeof root === 'string' ? document.querySelector(root) : root;
+        if (!scope?.dataset) return;
+        delete scope.dataset.fxFingerprint;
+    }
+
+    function easeOutExpo(t) {
+        return t >= 1 ? 1 : 1 - Math.pow(2, -10 * t);
+    }
+
+    function formatFx(n, fmt) {
+        if (fmt === 'mxn') return (window.Calc?.fmtMXN || ((x) => String(x)))(n);
+        if (fmt === 'pct') return (window.Calc?.fmtPct || ((x) => `${Math.round(x * 100)}%`))(n);
+        if (fmt === 'signed-mxn') {
+            const s = (window.Calc?.fmtMXN || ((x) => String(x)))(n);
+            return n > 0.009 ? `+${s}` : s;
+        }
+        return String(Math.round(n));
+    }
+
+    /**
+     * Reconteo marcado en [data-fx-num] dentro de root.
+     * Reanima si cambian los valores, o con force (p. ej. al entrar a la vista).
+     */
+    function countUp(root = document, opts = {}) {
+        const scope = typeof root === 'string' ? document.querySelector(root) : (root || document);
+        if (!scope?.querySelectorAll) return;
+        const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+        const force = !!opts.force;
+        const dur = Number(opts.duration) > 0 ? Number(opts.duration) : 1100;
+        const stagger = Number.isFinite(opts.stagger) ? opts.stagger : 85;
+        const nodes = [...scope.querySelectorAll('[data-fx-num]')];
+        if (!nodes.length) return;
+
+        const fingerprint = nodes.map((el) => `${el.dataset.fxFmt || 'int'}:${el.dataset.fxNum}`).join('|');
+        if (!force && scope.dataset && scope.dataset.fxFingerprint === fingerprint) {
+            nodes.forEach((el) => {
+                const target = Number(el.dataset.fxNum);
+                const fmt = el.dataset.fxFmt || 'int';
+                if (Number.isFinite(target)) el.textContent = formatFx(target, fmt);
+                el.classList.remove('is-counting');
+            });
+            return;
+        }
+        if (scope.dataset) scope.dataset.fxFingerprint = fingerprint;
+
+        nodes.forEach((el, i) => {
+            const target = Number(el.dataset.fxNum);
+            if (!Number.isFinite(target)) return;
+            const fmt = el.dataset.fxFmt || 'int';
+            if (reduce) {
+                el.textContent = formatFx(target, fmt);
+                el.classList.remove('is-counting');
+                return;
+            }
+            const from = 0;
+            const delay = i * stagger;
+            const t0 = performance.now() + delay;
+            el.classList.add('is-counting');
+            el.textContent = formatFx(from, fmt);
+            const tick = (now) => {
+                if (now < t0) {
+                    requestAnimationFrame(tick);
+                    return;
+                }
+                const p = Math.min(1, (now - t0) / dur);
+                const eased = easeOutExpo(p);
+                el.textContent = formatFx(from + (target - from) * eased, fmt);
+                if (p < 1) {
+                    requestAnimationFrame(tick);
+                } else {
+                    el.textContent = formatFx(target, fmt);
+                    el.classList.remove('is-counting');
+                    el.classList.add('is-count-done');
+                    window.setTimeout(() => el.classList.remove('is-count-done'), 420);
+                }
+            };
+            requestAnimationFrame(tick);
+        });
     }
 
     return {
@@ -394,6 +572,10 @@ const UI = (() => {
         pulseRainbow,
         escapeHTML,
         playMoneySound,
+        burstConfetti,
+        fxAttrs,
+        clearCountFx,
+        countUp,
     };
 })();
 window.UI = UI;

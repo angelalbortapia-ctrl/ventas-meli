@@ -151,6 +151,11 @@ const CajaView = (() => {
         }
     }
 
+    function celebrateCobro() {
+        UI.playMoneySound?.();
+        UI.burstConfetti?.({ intensity: 'light' });
+    }
+
     function markMany(rows) {
         let n = 0;
         let total = 0;
@@ -165,7 +170,12 @@ const CajaView = (() => {
             window.State.save();
             window.App?.refreshNavCounts?.();
             if (window.State.view === 'dashboard') DashboardView.render();
-            UI.toast(`${n} cobrada${n === 1 ? '' : 's'} · ${Calc.fmtMXN(total)} → bolsitas`);
+            celebrateCobro();
+            UI.toast(
+                `${n} cobrada${n === 1 ? '' : 's'} · ${Calc.fmtMXN(total)} → bolsitas`,
+                'success',
+                { pulse: true },
+            );
         } else {
             UI.toast('No se pudo cobrar ninguna', 'error');
         }
@@ -174,7 +184,7 @@ const CajaView = (() => {
 
     function layToolbar(pendingVisible, todayRows) {
         const mp = Data.currentMarketplace();
-        const mpLabel = mp === 'amazon' ? 'Amazon' : 'Mercado Libre';
+        const mpLabel = Data.mpBrand(mp);
         return `
             <div class="caja-toolbar">
                 <label class="caja-search">
@@ -317,12 +327,16 @@ const CajaView = (() => {
 
             <div class="caja-kpis">
                 <div class="caja-kpi${pendingAll.length ? ' is-warn' : ''}">
-                    <div class="caja-kpi-n">${pendingAll.length}</div>
-                    <div class="caja-kpi-l">Por cobrar · ${Calc.fmtMXN((kpi.porCobrarAmt || 0) + (kpi.porAsignarAmt || 0))}</div>
+                    <div class="caja-kpi-n"${UI.fxAttrs?.(pendingAll.length, 'int') || ''}>${pendingAll.length}</div>
+                    <div class="caja-kpi-l">Por cobrar · <span${UI.fxAttrs?.(kpi.pendingSaleAmt || 0, 'mxn') || ''}>${Calc.fmtMXN(kpi.pendingSaleAmt || 0)}</span></div>
+                    <div class="caja-kpi-sub muted small">A repartir en bolsitas ${Calc.fmtMXN(kpi.pendingRepartirAmt || 0)} <span class="caja-kpi-hint">(venta − fees)</span></div>
                 </div>
                 <div class="caja-kpi">
-                    <div class="caja-kpi-n">${kpi.asignadoN || 0}</div>
-                    <div class="caja-kpi-l">Ya cobrados</div>
+                    <div class="caja-kpi-n"${UI.fxAttrs?.(kpi.asignadoN || 0, 'int') || ''}>${kpi.asignadoN || 0}</div>
+                    <div class="caja-kpi-l">Ya cobrados · <span${UI.fxAttrs?.(kpi.asignadoSaleAmt || 0, 'mxn') || ''}>${Calc.fmtMXN(kpi.asignadoSaleAmt || 0)}</span></div>
+                    ${(kpi.asignadoAmt || 0) > 0.009
+                        ? `<div class="caja-kpi-sub muted small">En bolsitas ${Calc.fmtMXN(kpi.asignadoAmt || 0)}</div>`
+                        : ''}
                 </div>
             </div>
 
@@ -372,6 +386,7 @@ const CajaView = (() => {
         `;
 
         bind(root, { pending, todayRows });
+        UI.countUp?.(root);
     }
 
     function bind(root, { pending, todayRows }) {
@@ -419,7 +434,12 @@ const CajaView = (() => {
                     local.selected.delete(btn.getAttribute('data-venta'));
                     window.State.save();
                     window.App?.refreshNavCounts?.();
-                    UI.toast(`Cobrado · ${Calc.fmtMXN(Number(btn.getAttribute('data-amount')) || 0)} → bolsitas`);
+                    celebrateCobro();
+                    UI.toast(
+                        `Cobrado · ${Calc.fmtMXN(Number(btn.getAttribute('data-amount')) || 0)} → bolsitas`,
+                        'success',
+                        { pulse: true },
+                    );
                     if (window.State.view === 'dashboard') DashboardView.render();
                     render();
                 }

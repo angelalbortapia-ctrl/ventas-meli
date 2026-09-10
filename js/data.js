@@ -23,6 +23,7 @@ const Data = (() => {
             id: 'meli',
             label: 'Mercado Libre',
             short: 'Meli',
+            brand: 'Ventas Meli',
             lotesKey: 'ventas-meli:v1',
             settingsKey: 'ventas-meli:settings:v1',
             useSeed: true,
@@ -31,6 +32,7 @@ const Data = (() => {
             id: 'amazon',
             label: 'Amazon',
             short: 'Amazon',
+            brand: 'MITIENDITASHOP',
             lotesKey: 'ventas-amazon:v1',
             settingsKey: 'ventas-amazon:settings:v1',
             useSeed: false,
@@ -55,6 +57,12 @@ const Data = (() => {
 
     function mpMeta(mp = currentMarketplace()) {
         return MARKETPLACES[normalizeMarketplace(mp)];
+    }
+
+    /** Nombre comercial del catálogo (marca de la tienda). */
+    function mpBrand(mp = currentMarketplace()) {
+        const meta = mpMeta(mp);
+        return meta.brand || meta.label || 'Ventas';
     }
 
     /** Lee ambos catálogos (sin cambiar State). Lotes llevan `_mp` en memoria. */
@@ -359,16 +367,24 @@ const Data = (() => {
 
     function cobroKpis(lotes = window.State?.lotes, settings = window.State?.settings) {
         const { porCobrar, porAsignar, historial } = listVentasCobro(lotes, settings);
+        const pending = [...porCobrar, ...porAsignar];
         const sumAmt = (arr) => roundMoney(arr.reduce((s, r) => s + (r.amount || 0), 0));
         const sumSale = (arr) => roundMoney(arr.reduce((s, r) => s + (r.saleTotal || 0), 0));
         return {
-            ventasTotal: sumSale([...porCobrar, ...porAsignar, ...historial]),
+            ventasTotal: sumSale([...pending, ...historial]),
             porCobrarN: porCobrar.length,
+            /** Monto a bolsitas (venta − fees ≈ costo + utilidad). */
             porCobrarAmt: sumAmt(porCobrar),
+            /** Total de ventas pendientes (lo que cobras al cliente / marketplace). */
+            porCobrarSaleAmt: sumSale(porCobrar),
             porAsignarN: porAsignar.length,
             porAsignarAmt: sumAmt(porAsignar),
+            porAsignarSaleAmt: sumSale(porAsignar),
+            pendingSaleAmt: sumSale(pending),
+            pendingRepartirAmt: sumAmt(pending),
             asignadoN: historial.length,
             asignadoAmt: sumAmt(historial),
+            asignadoSaleAmt: sumSale(historial),
         };
     }
 
@@ -1598,6 +1614,7 @@ const Data = (() => {
         normalizeMpView,
         currentMarketplace,
         mpMeta,
+        mpBrand,
         loadBothCatalogs,
         loadLotes,
         peekLotes,

@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Dashboard — Progreso · P&G · flujo de caja · Asignación · Portafolio · Ranking
+   Dashboard — Progreso · P&G · flujo de caja · Asignación · Portafolio
    ========================================================================== */
 
 const DashboardView = (() => {
@@ -15,7 +15,7 @@ const DashboardView = (() => {
 
         const lotes = window.State.lotes || [];
         const isAmz = window.State.marketplace === 'amazon';
-        const mpLabel = isAmz ? 'Amazon' : 'Mercado Libre';
+        const mpLabel = isAmz ? Data.mpBrand('amazon') : Data.mpBrand('meli');
         const themeCls = isAmz ? 'is-amz' : 'is-meli';
         const shellCls = `dash-shell dash-shell-home is-fx ${themeCls}`;
         const mastheadAmbience = `
@@ -123,19 +123,12 @@ const DashboardView = (() => {
                         <div class="dash-section-head">
                             <div class="dash-section-copy">
                                 <h2 class="dash-section-title">P&amp;G estimado</h2>
-                                <p class="dash-section-lead">Resultado del periodo con ganancias, pérdidas y bonificaciones.</p>
+                                <p class="dash-section-lead">${esc(pygPeriod?.label || 'Periodo')} · ${pygCtx.agg?.totalVendidas || 0} uds · por fecha de venta</p>
                             </div>
                             ${layPyGPeriodChips(pygPeriod)}
                         </div>
                         ${layPyGCompact(pygCtx)}`;
                         })()}
-                    </section>
-                    <section class="dash-section dash-section-rise">
-                        <div class="dash-section-copy">
-                            <h2 class="dash-section-title">Top 3 · utilidad</h2>
-                            <p class="dash-section-lead">Lo que más aporta en <span class="dash-mp-tag">${esc(mpLabel)}</span></p>
-                        </div>
-                        ${layRankingTop3(ctx)}
                     </section>
                     <section class="dash-section dash-section-rise" id="dash-asignacion">
                         <div class="dash-section-copy">
@@ -147,7 +140,7 @@ const DashboardView = (() => {
                     <div class="dash-hint-general">
                         <p>Estas bolsitas son de <strong>${esc(mpLabel)}</strong> y alimentan el consolidado de
                             <button type="button" class="dash-link-inline" data-dash-goto-mp="general">General</button>.
-                            Caja, Portafolio y ranking completo también viven ahí.</p>
+                            Caja y Portafolio también viven ahí.</p>
                     </div>
                 </div>
             </div>
@@ -233,6 +226,7 @@ const DashboardView = (() => {
                             <p class="dash-masthead-kicker">General</p>
                             <h1 class="dash-masthead-title">Empieza en un canal.</h1>
                         </header>
+                        ${layHeroKPIs([])}
                         <div class="dash-empty-full">
                             <h2>Vista ejecutiva vacía</h2>
                             <p>Agrega productos en Mercado Libre o Amazon para ver el consolidado.</p>
@@ -265,6 +259,7 @@ const DashboardView = (() => {
                         <p class="dash-masthead-kicker">General</p>
                         <h1 class="dash-masthead-title">Ambos canales,<br>un solo pulso.</h1>
                     </header>
+                    ${layHeroKPIs(lotesAll)}
                     ${layGeneralExecutive(exec)}
                     <section class="dash-section dash-section-rise" id="gx-progreso">
                         <div class="dash-section-head">
@@ -303,21 +298,14 @@ const DashboardView = (() => {
                         <div class="dash-section-head">
                             <div class="dash-section-copy">
                                 <h2 class="dash-section-title">P&amp;G estimado</h2>
-                                <p class="dash-section-lead">Resultado consolidado del periodo</p>
+                                <p class="dash-section-lead">${esc(pygPeriod?.label || 'Periodo')} · ${pygCtx.agg?.totalVendidas || 0} uds · por fecha de venta</p>
                             </div>
                             ${layPyGPeriodChips(pygPeriod)}
                         </div>
                         ${layPyGCompact(pygCtx)}
                     </section>
-                    <section class="dash-section dash-section-rise">
-                        <div class="dash-section-copy">
-                            <h2 class="dash-section-title">Top 3 · utilidad</h2>
-                            <p class="dash-section-lead">Lo que más aporta en ambos canales</p>
-                        </div>
-                        ${layRankingTop3(ctx)}
-                    </section>
                     <details class="gx-more dash-section-rise" id="gx-finanzas-more" data-gx-more-persist="finanzas"${moreFlags.finanzas ? ' open' : ''}>
-                        <summary class="gx-more-summary">Más finanzas · detalle, caja, portafolio y ranking</summary>
+                        <summary class="gx-more-summary">Más finanzas · detalle, caja y portafolio</summary>
                         <div class="gx-more-body">
                             <div class="gx-fin-stack">
                                 <div>
@@ -340,10 +328,6 @@ const DashboardView = (() => {
                                     <h3 class="gx-fin-h">Bolsitas consolidadas</h3>
                                     <p class="dash-section-lead" style="margin:0 0 12px">Suma de Meli + Amazon. Para usar o ajustar %, abre cada marketplace.</p>
                                     ${layAsignacionDualReadonly()}
-                                </div>
-                                <div>
-                                    <h3 class="gx-fin-h">Ranking completo</h3>
-                                    ${layRanking(ctx)}
                                 </div>
                             </div>
                         </div>
@@ -566,16 +550,13 @@ const DashboardView = (() => {
             pctMeli = 100;
             pctAmz = 0;
         }
-        let winner = 'Empate';
         let line = 'Ambos canales rinden parecido; reparte según capacidad operativa.';
         if (pctMeli >= pctAmz + 8) {
-            winner = 'Mercado Libre';
             line = `Meli rinde mejor por capital/rotación. Sugiere ~${pctMeli}% del próximo peso ahí.`;
         } else if (pctAmz >= pctMeli + 8) {
-            winner = 'Amazon';
             line = `Amazon rinde mejor por capital/rotación. Sugiere ~${pctAmz}% del próximo peso ahí.`;
         }
-        return { pctMeli, pctAmz, winner, line, scoreMeli: sM, scoreAmz: sA };
+        return { pctMeli, pctAmz, line };
     }
 
     function buildNextBuyLists(rows) {
@@ -750,7 +731,6 @@ const DashboardView = (() => {
         const moreFlags = readGxMoreOpen();
         // BC: si el flag legacy era boolean, lo usábamos como "canales open".
         const moreOpen = moreFlags.canales;
-        const checklist = readDailyChecklist();
 
         return `
             <section class="dash-section dash-exec gx-exec dash-section-rise" id="gx-pulso">
@@ -766,7 +746,7 @@ const DashboardView = (() => {
                     </div>
                     <div class="gx-hero-metric tone-${healthUtil}">
                         <div class="gx-hero-metric-label">Utilidad del mes</div>
-                        <div class="gx-hero-metric-value">${Calc.fmtMXN(monthStats.ganancia)}</div>
+                        <div class="gx-hero-metric-value"${UI.fxAttrs?.(monthStats.ganancia, 'mxn') || ''}>${Calc.fmtMXN(monthStats.ganancia)}</div>
                         <div class="gx-hero-metric-meta">
                             <span class="gx-chip tone-${healthUtil}">${esc(healthLabel)}</span>
                             <span>${goalUtil > 0 ? `${fmtGoalPct(pctUtil)} de meta` : 'Sin meta'}</span>
@@ -778,6 +758,7 @@ const DashboardView = (() => {
                     ${layScoreMetric({
                         label: 'Cash in del mes',
                         value: Calc.fmtMXN(monthStats.cashIn),
+                        fxNum: monthStats.cashIn,
                         tone: 'neutral',
                         hint: goalCash > 0 ? `${fmtGoalPct(pctCash)} de meta` : `${monthStats.unidades} uds`,
                         foot: `Proy. ${Calc.fmtMXN(monthStats.projCash)}`,
@@ -786,6 +767,7 @@ const DashboardView = (() => {
                     ${layScoreMetric({
                         label: 'Capital atrapado',
                         value: Calc.fmtMXN(trapped),
+                        fxNum: trapped,
                         tone: trapped > 0 ? 'warn' : 'ok',
                         hint: 'Inventario al costo',
                         foot: `Disponible ${Calc.fmtMXN(reinversion)}`,
@@ -793,40 +775,13 @@ const DashboardView = (() => {
                     ${layScoreMetric({
                         label: 'Atención',
                         value: String(alertN),
+                        fxNum: alertN,
+                        fxFmt: 'int',
                         tone: alertN > 0 ? 'bad' : 'ok',
                         hint: alertN > 0 ? 'Requieren acción' : 'Sin críticas',
                         foot: alerts.line,
                     })}
                 </div>
-            </section>
-
-            <section class="dash-section dash-section-rise" id="gx-checklist">
-                <div class="dash-section-copy">
-                    <h2 class="dash-section-title">Checklist · 3 minutos</h2>
-                    <p class="dash-section-lead">Ventas · stock crítico · una acción</p>
-                </div>
-                <ul class="gx-daily-check">
-                    <li class="${checklist.ventas ? 'is-done' : ''}">
-                        <label>
-                            <input type="checkbox" data-daily-check="ventas" ${checklist.ventas ? 'checked' : ''}>
-                            <span><strong>Ventas nuevas</strong><small>Registra o importa lo de hoy</small></span>
-                        </label>
-                        <button type="button" class="btn btn-sm" data-dash-goto-mp="meli">Ir a catálogo</button>
-                    </li>
-                    <li class="${checklist.stock ? 'is-done' : ''}">
-                        <label>
-                            <input type="checkbox" data-daily-check="stock" ${checklist.stock ? 'checked' : ''}>
-                            <span><strong>Stock crítico</strong><small>${alerts.nEscLow || 0} ESCALAR bajos · ${alerts.nAgot || 0} agotados</small></span>
-                        </label>
-                        <button type="button" class="btn btn-sm" data-goto-insights>Insights</button>
-                    </li>
-                    <li class="${checklist.agenda ? 'is-done' : ''}">
-                        <label>
-                            <input type="checkbox" data-daily-check="agenda" ${checklist.agenda ? 'checked' : ''}>
-                            <span><strong>1 acción de Agenda</strong><small>${esc(checklist.agendaHint || 'Marca un pendiente abajo')}</small></span>
-                        </label>
-                    </li>
-                </ul>
             </section>
 
             <section class="dash-section dash-section-rise" id="gx-acciones">
@@ -935,57 +890,27 @@ const DashboardView = (() => {
         `;
     }
 
-    function readDailyChecklist() {
-        const key = agendaDayKey();
-        const store = window.State.ui?.dailyChecklist && typeof window.State.ui.dailyChecklist === 'object'
-            ? window.State.ui.dailyChecklist
-            : {};
-        const day = store[key] && typeof store[key] === 'object' ? store[key] : {};
-        const agenda = buildAgendaForChecklistHint();
-        return {
-            ventas: !!day.ventas,
-            stock: !!day.stock,
-            agenda: !!day.agenda,
-            agendaHint: agenda,
-        };
-    }
-
-    function buildAgendaForChecklistHint() {
-        try {
-            const { set } = readAgendaDone();
-            // hint from last render's agenda is rebuilt in bind; keep short
-            return set.size ? 'Marca un pendiente de la agenda' : 'Revisa prioridades o crea una acción';
-        } catch {
-            return 'Una acción concreta';
-        }
-    }
-
-    function saveDailyChecklist(patch) {
-        const key = agendaDayKey();
-        const store = { ...(window.State.ui?.dailyChecklist || {}) };
-        store[key] = { ...(store[key] || {}), ...patch };
-        window.State.ui = { ...window.State.ui, dailyChecklist: store };
-        window.State.saveUI();
-    }
-
     function fmtGoalPct(ratio) {
         if (ratio == null || !Number.isFinite(ratio)) return '—';
         return `${Math.round(ratio * 100)}%`;
     }
 
-    function layScoreMetric({ label, value, tone, hint, foot, progress = null, primary = false }) {
+    function layScoreMetric({ label, value, tone, hint, foot, progress = null, primary = false, fxNum = null, fxFmt = 'mxn' }) {
         const t = tone || 'neutral';
         const bar = progress == null ? '' : `
             <div class="gx-metric-bar" aria-hidden="true">
                 <span style="width:${Math.round(progress * 100)}%"></span>
             </div>`;
+        const fx = fxNum != null && Number.isFinite(Number(fxNum))
+            ? (UI.fxAttrs?.(fxNum, fxFmt) || '')
+            : '';
         return `
             <article class="gx-metric tone-${t}${primary ? ' is-primary' : ''}">
                 <div class="gx-metric-top">
                     <span class="gx-metric-label">${esc(label)}</span>
                     <span class="gx-metric-status" aria-hidden="true"></span>
                 </div>
-                <div class="gx-metric-value">${value}</div>
+                <div class="gx-metric-value"${fx}>${value}</div>
                 ${bar}
                 <div class="gx-metric-hint">${esc(hint || '')}</div>
                 <div class="gx-metric-foot">${esc(foot || '')}</div>
@@ -1086,7 +1011,7 @@ const DashboardView = (() => {
         return `
             <div class="dash-panel dash-capital-unified">
                 <div class="dash-bolsa-hero-label">Total en bolsitas</div>
-                <div class="dash-bolsa-hero-value mono">${Calc.fmtMXN(st.total)}</div>
+                <div class="dash-bolsa-hero-value mono"${UI.fxAttrs?.(st.total, 'mxn') || ''}>${Calc.fmtMXN(st.total)}</div>
                 <div class="dash-bolsa-stack" role="img" aria-label="Composición unificada">${stack}</div>
                 <ul class="dash-legend-list" style="margin-top:12px">
                     ${ALLOC_BUCKETS.map(b => `
@@ -1145,28 +1070,9 @@ const DashboardView = (() => {
         root.querySelectorAll('[data-general-snapshot]').forEach(btn => {
             btn.addEventListener('click', () => openGeneralSnapshot(exec));
         });
-        root.querySelectorAll('[data-daily-check]').forEach(input => {
-            input.addEventListener('change', () => {
-                const key = input.dataset.dailyCheck;
-                if (!key) return;
-                saveDailyChecklist({ [key]: !!input.checked });
-                input.closest('li')?.classList.toggle('is-done', input.checked);
-            });
-        });
         root.querySelectorAll('[data-lote-new]').forEach(btn => {
             btn.addEventListener('click', () => {
                 window.LotesView?.openModal?.(null);
-            });
-        });
-        root.querySelectorAll('[data-goto-insights]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                window.App?.switchTab?.('insights');
-            });
-        });
-        root.querySelectorAll('[data-goto-caja]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const sub = btn.getAttribute('data-goto-caja') || 'cobrar';
-                window.CajaView?.open?.(sub);
             });
         });
         root.querySelectorAll('details[data-gx-more-persist]').forEach(el => {
@@ -1352,7 +1258,7 @@ const DashboardView = (() => {
         return `
             <div class="dash-split-2">
                 ${layAsignacionReadonlyBlock('Mercado Libre', 'meli')}
-                ${layAsignacionReadonlyBlock('Amazon', 'amazon')}
+                ${layAsignacionReadonlyBlock(Data.mpBrand('amazon'), 'amazon')}
             </div>
         `;
     }
@@ -1441,19 +1347,108 @@ const DashboardView = (() => {
         return !!(v && Data.hasAsignacion?.(v));
     }
 
+    /** Periodos del resumen: 7d · 30d · mes calendario · año calendario. */
+    const SUM_PERIODS = ['7d', '30d', 'month', 'year'];
+
+    function readSumPeriod() {
+        const raw = window.State.ui?.dashSumPeriod;
+        return SUM_PERIODS.includes(raw) ? raw : '30d';
+    }
+
     /**
-     * Estadísticas del periodo actual (últimos N días) y del periodo previo
-     * de igual duración, para el Hero de KPIs con delta chip. Legacy sin
-     * eventos no cae en ninguno de los buckets: no tiene fecha confiable.
+     * Ventanas [curStart…curEnd] y [prevStart…prevEnd] (días locales inclusivos).
+     * Mes/año: compara el tramo corrido vs el mismo tramo del periodo anterior
+     * (día 14 de ago → 1–14 jul), no el mes completo.
+     */
+    function resolveSumRange(periodKey = '30d', now = new Date()) {
+        const today = Calc.startOfLocalDay(now);
+        const y = today.getFullYear();
+        const m = today.getMonth();
+        const d = today.getDate();
+        const dayMs = 86400000;
+        const addDays = (date, n) => Calc.startOfLocalDay(new Date(date.getTime() + n * dayMs));
+        const clampDay = (yy, mm, dd) => {
+            const last = new Date(yy, mm + 1, 0).getDate();
+            return Calc.startOfLocalDay(new Date(yy, mm, Math.min(dd, last)));
+        };
+        const monthShort = (date) => date.toLocaleDateString('es-MX', { month: 'short' }).replace(/\./g, '');
+        const monthLong = (date) => date.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+
+        if (periodKey === '7d') {
+            const curStart = addDays(today, -6);
+            return {
+                key: '7d',
+                label: '7 días',
+                compareLabel: 'vs 7d prev.',
+                curStart,
+                curEnd: today,
+                prevStart: addDays(today, -13),
+                prevEnd: addDays(today, -7),
+            };
+        }
+        if (periodKey === 'month') {
+            const curStart = Calc.startOfLocalDay(new Date(y, m, 1));
+            const prevEnd = clampDay(y, m - 1, d);
+            const prevStart = Calc.startOfLocalDay(new Date(y, m - 1, 1));
+            return {
+                key: 'month',
+                label: monthLong(today),
+                compareLabel: `vs ${monthShort(prevStart)}`,
+                curStart,
+                curEnd: today,
+                prevStart,
+                prevEnd,
+            };
+        }
+        if (periodKey === 'year') {
+            const curStart = Calc.startOfLocalDay(new Date(y, 0, 1));
+            const prevStart = Calc.startOfLocalDay(new Date(y - 1, 0, 1));
+            const prevEnd = clampDay(y - 1, m, d);
+            return {
+                key: 'year',
+                label: String(y),
+                compareLabel: `vs ${y - 1}`,
+                curStart,
+                curEnd: today,
+                prevStart,
+                prevEnd,
+            };
+        }
+        // 30d (default)
+        const curStart = addDays(today, -29);
+        return {
+            key: '30d',
+            label: '30 días',
+            compareLabel: 'vs mes ant.',
+            curStart,
+            curEnd: today,
+            prevStart: addDays(today, -59),
+            prevEnd: addDays(today, -30),
+        };
+    }
+
+    function inDayRange(day, start, end) {
+        return !!(day && start && end && day >= start && day <= end);
+    }
+
+    /**
+     * Estadísticas del periodo actual y del previo (misma duración / tramo).
+     * Legacy sin fecha confiable no cae en ningún bucket.
      * Fechas solo-día usan Calc.effectiveSaleDay (futuro → hoy).
      */
-    function heroPeriodStats(lotes, days = 30) {
+    function heroPeriodStats(lotes, periodOrDays = 30) {
         const now = new Date();
-        const todayStart = Calc.startOfLocalDay(now);
-        const curStart = Calc.startOfLocalDay(new Date(now.getTime() - days * 86400000));
-        const prevStart = Calc.startOfLocalDay(new Date(now.getTime() - 2 * days * 86400000));
-        const cur = { cobrado: 0, vendido: 0, ganancia: 0, uds: 0 };
-        const prev = { cobrado: 0, vendido: 0, ganancia: 0, uds: 0 };
+        const range = typeof periodOrDays === 'object' && periodOrDays?.curStart
+            ? periodOrDays
+            : resolveSumRange(
+                periodOrDays === 7 ? '7d' : periodOrDays === 365 ? 'year' : '30d',
+                now,
+            );
+        const { curStart, curEnd, prevStart, prevEnd } = range;
+        // vendido = bruto; cobrado = lo repartido en bolsitas (venta − fees);
+        // inversion = costo × uds; recibes = venta − fees (Caja)
+        const cur = { cobrado: 0, vendido: 0, inversion: 0, recibes: 0, ganancia: 0, uds: 0 };
+        const prev = { cobrado: 0, vendido: 0, inversion: 0, recibes: 0, ganancia: 0, uds: 0 };
         let hasAnyPrev = false;
         let hasAnyCur = false;
 
@@ -1465,41 +1460,54 @@ const DashboardView = (() => {
                 if (!uds) return;
                 const precio = Number(v.precio) || 0;
                 const loteAt = loteAtSaleCost(lote, v);
+                const costoUd = Number(loteAt.costo) || 0;
                 const util = Calc.utilidadAtPrice(loteAt, precio, settings).utilidad;
+                const inversion = Math.max(0, costoUd * uds);
+                const recibes = typeof Data.ventaLiberacionAmount === 'function'
+                    ? (Number(Data.ventaLiberacionAmount(lote, v, settings)) || 0)
+                    : Math.max(0, (costoUd + (Number(util) || 0)) * uds);
                 const saleDay = Calc.effectiveSaleDay(v.fecha, now);
 
-                if (saleDay && curStart && todayStart) {
-                    if (saleDay >= curStart && saleDay <= todayStart) {
-                        cur.vendido += precio * uds;
-                        cur.ganancia += util * uds;
-                        cur.uds += uds;
-                        hasAnyCur = true;
-                    } else if (prevStart && saleDay >= prevStart && saleDay < curStart) {
-                        prev.vendido += precio * uds;
-                        prev.ganancia += util * uds;
-                        prev.uds += uds;
-                        hasAnyPrev = true;
-                    }
+                if (inDayRange(saleDay, curStart, curEnd)) {
+                    cur.vendido += precio * uds;
+                    cur.inversion += inversion;
+                    cur.recibes += recibes;
+                    cur.ganancia += util * uds;
+                    cur.uds += uds;
+                    hasAnyCur = true;
+                } else if (inDayRange(saleDay, prevStart, prevEnd)) {
+                    prev.vendido += precio * uds;
+                    prev.inversion += inversion;
+                    prev.recibes += recibes;
+                    prev.ganancia += util * uds;
+                    prev.uds += uds;
+                    hasAnyPrev = true;
                 }
                 if (ventaIsCobrado(v)) {
                     const cobroDay = Calc.effectiveSaleDay(v.cobradoAt, now) || saleDay;
-                    if (cobroDay && curStart && todayStart) {
-                        if (cobroDay >= curStart && cobroDay <= todayStart) {
-                            cur.cobrado += precio * uds;
-                        } else if (prevStart && cobroDay >= prevStart && cobroDay < curStart) {
-                            prev.cobrado += precio * uds;
-                            hasAnyPrev = true;
-                        }
+                    // Siempre venta − fees (liberación), no el bruto ni splits viejos mal guardados.
+                    const cobradoAmt = recibes;
+                    if (inDayRange(cobroDay, curStart, curEnd)) {
+                        cur.cobrado += cobradoAmt;
+                    } else if (inDayRange(cobroDay, prevStart, prevEnd)) {
+                        prev.cobrado += cobradoAmt;
+                        hasAnyPrev = true;
                     }
                 }
             });
         });
-        return { cur, prev, hasAnyPrev, hasAnyCur, days };
+        cur.inversion = round2(cur.inversion);
+        prev.inversion = round2(prev.inversion);
+        cur.recibes = round2(cur.recibes);
+        prev.recibes = round2(prev.recibes);
+        cur.cobrado = round2(cur.cobrado);
+        prev.cobrado = round2(prev.cobrado);
+        return { cur, prev, hasAnyPrev, hasAnyCur, range };
     }
 
     /**
-     * Hero KPIs: Vendido → Cobrado → Ganancia → Bonif → Total → (Deuda FBA).
-     * Delta = (cur - prev) / prev%; si no hay periodo previo con datos, "Sin datos previos".
+     * Hero KPIs en una sola banda ordenada:
+     *   Bruta → Fees → Neta → Cobrado → Costo → Ganancia → Bonif → Resultado → (Deuda FBA)
      */
     /** Resumen deuda flete inbound FBA (Amazon Inicio). Ledger completo en Envíos. */
     function readAmazonFreightBalance() {
@@ -1521,44 +1529,101 @@ const DashboardView = (() => {
     }
 
     function layHeroKPIs(lotes, opts = {}) {
-        const days = Number.isFinite(opts.days) ? opts.days : 30;
-        const stats = heroPeriodStats(lotes, days);
-        const label = days === 30 ? '30 días' : `${days} días`;
-        const compareLabel = days === 30 ? 'vs mes ant.' : `vs ${days}d prev.`;
+        const periodKey = SUM_PERIODS.includes(opts.period) ? opts.period : readSumPeriod();
+        const range = resolveSumRange(periodKey);
+        const stats = heroPeriodStats(lotes, range);
+        const label = range.label;
+        const compareLabel = range.compareLabel;
         const isAmazon = window.State.marketplace === 'amazon' && window.State.ui?.mpView !== 'general';
 
-        const bonif = bonifHeroStats(days);
+        const bonif = bonifHeroStats(range);
         const totalCur = round2((stats.cur.ganancia || 0) + (bonif.cur || 0));
         const totalPrev = round2((stats.prev.ganancia || 0) + (bonif.prev || 0));
 
-        // Orden: flujo P&L → resultado → deuda (Amazon)
-        const cards = [
-            { key: 'vendido', title: 'Vendido', tone: '', value: stats.cur.vendido, prev: stats.prev.vendido },
-            { key: 'cobrado', title: 'Cobrado', tone: tone(stats.cur.cobrado), value: stats.cur.cobrado, prev: stats.prev.cobrado },
-            { key: 'ganancia', title: 'Ganancia', tone: tone(stats.cur.ganancia), value: stats.cur.ganancia, prev: stats.prev.ganancia },
+        const feesCur = round2(Math.max(0, (stats.cur.vendido || 0) - (stats.cur.recibes || 0)));
+        const feesPrev = round2(Math.max(0, (stats.prev.vendido || 0) - (stats.prev.recibes || 0)));
+        const cobradoPctCur = (stats.cur.recibes || 0) > 0.009
+            ? Math.min(999, (stats.cur.cobrado / stats.cur.recibes) * 100)
+            : null;
+        const cobradoPctLabel = cobradoPctCur == null
+            ? null
+            : (cobradoPctCur >= 99.95
+                ? '100%'
+                : (cobradoPctCur >= 10
+                    ? `${Math.round(cobradoPctCur)}%`
+                    : `${cobradoPctCur.toFixed(1)}%`));
+        const gananciaPctCur = Math.abs(stats.cur.recibes || 0) > 0.009
+            ? (stats.cur.ganancia / stats.cur.recibes) * 100
+            : null;
+        const gananciaPctLabel = gananciaPctCur == null
+            ? null
+            : (Math.abs(gananciaPctCur) >= 10
+                ? `${Math.round(gananciaPctCur)}%`
+                : `${gananciaPctCur.toFixed(1)}%`);
+
+        // Variación vs periodo anterior, en texto plano (null = no hay con qué comparar).
+        const trend = (cur, prev) => {
+            if (!stats.hasAnyPrev || Math.abs(prev) < 0.005) return null;
+            const rel = (cur - prev) / Math.abs(prev);
+            if (Math.abs(rel) < 0.0001) return { text: `Sin cambio ${compareLabel}`, tone: '' };
+            const pct = Math.abs(rel * 100);
+            return {
+                text: `${rel > 0 ? '↑' : '↓'} ${pct >= 100 ? Math.round(pct) : pct.toFixed(1)}% ${compareLabel}`,
+                tone: rel > 0 ? 'pos' : 'neg',
+                title: `Periodo actual: ${Calc.fmtMXN(cur)} · anterior: ${Calc.fmtMXN(prev)}`,
+            };
+        };
+
+        // El Resultado manda; lo de abajo sólo lo explica.
+        // Bruta → Fees → Neta → Cobrado → Costo → Ganancia → Bonif → (Deuda FBA)
+        const cells = [
             {
-                key: 'bonif',
-                title: 'Bonificaciones',
-                tone: bonif.cur > 0.009 ? 'pos' : '',
-                value: bonif.cur,
-                prev: bonif.prev,
-                clickable: true,
-                clickAttr: 'data-dash-open-bonif',
-                deltaHtml: bonif.nCur > 0
-                    ? `<div class="hero-kpi-delta is-pos">${bonif.nCur} · editar</div>`
-                    : `<div class="hero-kpi-delta is-na">Registrar</div>`,
+                name: 'Venta bruta',
+                value: stats.cur.vendido,
+                note: 'Lo que pagó el cliente',
             },
             {
-                key: 'total',
-                title: 'Total',
-                tone: tone(totalCur),
-                value: totalCur,
-                prev: totalPrev,
-                accent: 'total',
-                // Pie corto: el % vs periodo previo vive en el chip cuando no hay bonif.
-                deltaHtml: Math.abs(bonif.cur) > 0.009
-                    ? `<div class="hero-kpi-delta ${totalCur >= 0 ? 'is-pos' : 'is-neg'}">Ganancia + bonif.</div>`
-                    : undefined,
+                name: 'Fees',
+                value: feesCur,
+                tone: feesCur > 0.009 ? 'neg' : '',
+                note: feesCur > 0.009 ? 'Comisiones y envío' : 'Sin fees',
+                noteTitle: 'Venta bruta − venta neta · comisiones, envío, ads del marketplace',
+            },
+            {
+                name: 'Venta neta',
+                value: stats.cur.recibes,
+                strong: true,
+                note: 'Bruta − fees',
+                noteTitle: 'Lo que entra a Caja / bolsitas',
+            },
+            {
+                name: 'Cobrado',
+                value: stats.cur.cobrado,
+                note: cobradoPctLabel ? `${cobradoPctLabel} de la neta` : 'Sin cobros',
+                noteTone: (stats.cur.cobrado || 0) > 0.009 ? 'pos' : '',
+                noteTitle: 'Cobrado ÷ venta neta del periodo · lo repartido en bolsitas',
+            },
+            {
+                name: 'Costo',
+                value: stats.cur.inversion,
+                note: (stats.cur.uds || 0) > 0 ? `${stats.cur.uds} ud vendidas` : 'Sin ventas',
+                noteTitle: 'Lo invertido en las unidades vendidas',
+            },
+            {
+                name: 'Ganancia',
+                value: stats.cur.ganancia,
+                tone: tone(stats.cur.ganancia),
+                strong: true,
+                note: gananciaPctLabel ? `${gananciaPctLabel} de la neta` : 'Sin venta neta',
+                noteTone: gananciaPctLabel ? (stats.cur.ganancia >= 0 ? 'pos' : 'neg') : '',
+                noteTitle: 'Ganancia ÷ venta neta del periodo',
+            },
+            {
+                name: 'Bonificaciones',
+                value: bonif.cur,
+                tone: bonif.cur > 0.009 ? 'pos' : '',
+                clickAttr: 'data-dash-open-bonif',
+                note: bonif.nCur > 0 ? `${bonif.nCur} registradas` : 'Registrar',
             },
         ];
 
@@ -1567,66 +1632,61 @@ const DashboardView = (() => {
             const ledgerLen = Array.isArray(window.State.ui?.fbaInboundFreight?.ledger)
                 ? window.State.ui.fbaInboundFreight.ledger.length
                 : 0;
-            cards.push({
-                key: 'freight',
-                title: 'Deuda FBA',
-                periodLabel: 'saldo',
-                tone: freightBal > 0 ? 'neg' : '',
+            cells.push({
+                name: 'Deuda FBA',
                 value: freightBal,
-                clickable: true,
+                tone: freightBal > 0 ? 'neg' : '',
                 clickAttr: 'data-dash-goto-envios',
-                deltaHtml: freightBal > 0
-                    ? `<div class="hero-kpi-delta is-neg">Pendiente</div>`
-                    : (ledgerLen
-                        ? `<div class="hero-kpi-delta is-zero">Al día</div>`
-                        : `<div class="hero-kpi-delta is-na">Envíos</div>`),
+                note: freightBal > 0 ? 'Pendiente' : (ledgerLen ? 'Al día' : 'Envíos'),
+                noteTone: freightBal > 0 ? 'neg' : '',
             });
         }
 
-        const chip = (cur, prev) => {
-            if (!stats.hasAnyPrev && !(Math.abs(prev) > 0.009 || Math.abs(cur) > 0.009)) {
-                return `<div class="hero-kpi-delta is-na">Sin datos previos</div>`;
-            }
-            if (!stats.hasAnyPrev && Math.abs(prev) < 0.005) {
-                return `<div class="hero-kpi-delta is-na">Sin datos previos</div>`;
-            }
-            if (Math.abs(prev) < 0.005) {
-                if (Math.abs(cur) < 0.005) {
-                    return `<div class="hero-kpi-delta is-zero">Sin cambio</div>`;
-                }
-                return `<div class="hero-kpi-delta is-pos" title="Nuevo vs periodo anterior sin ventas">Nuevo ${compareLabel}</div>`;
-            }
-            const rel = (cur - prev) / Math.abs(prev);
-            const pct = Math.abs(rel * 100);
-            const arrow = rel > 0 ? '↑' : rel < 0 ? '↓' : '·';
-            const cls = rel > 0.0001 ? 'is-pos' : rel < -0.0001 ? 'is-neg' : 'is-zero';
-            const pctStr = pct >= 100 ? Math.round(pct) : pct.toFixed(1);
-            return `<div class="hero-kpi-delta ${cls}" title="Periodo actual: ${Calc.fmtMXN(cur)} · anterior: ${Calc.fmtMXN(prev)}">${arrow} ${pctStr}% ${compareLabel}</div>`;
+        const renderCell = (c, i) => {
+            const tag = c.clickAttr ? 'button' : 'div';
+            const cls = `dash-sum-cell${c.strong ? ' is-strong' : ''}${c.clickAttr ? ' is-action' : ''}`;
+            const open = c.clickAttr
+                ? `<button type="button" class="${cls}" style="--cell-i:${i}" ${c.clickAttr}>`
+                : `<div class="${cls}" style="--cell-i:${i}">`;
+            const noteCls = c.noteTone ? ` is-${c.noteTone}` : '';
+            const noteTitle = c.noteTitle ? ` title="${esc(c.noteTitle)}"` : '';
+            return `${open}
+                        <span class="dash-sum-cell-name">${esc(c.name)}</span>
+                        <span class="dash-sum-cell-value ${c.tone || ''}"${UI.fxAttrs?.(c.value, 'mxn') || ''}>${fmtHeroMXN(c.value)}</span>
+                        <span class="dash-sum-cell-note${noteCls}"${noteTitle}>${esc(c.note)}</span>
+                    </${tag}>`;
         };
 
-        const colsClass = cards.length >= 6 ? ' is-6'
-            : (cards.length >= 5 ? ' is-5' : (cards.length >= 4 ? ' is-4' : ''));
+        const heroTrend = trend(totalCur, totalPrev);
+        const heroCaption = Math.abs(bonif.cur) > 0.009
+            ? 'Ganancia del periodo más bonificaciones'
+            : 'Utilidad neta del periodo';
+
         return `
-            <div class="dash-hero-kpis${colsClass}">
-                ${cards.map((c, i) => {
-                    const tag = c.clickable ? 'button' : 'div';
-                    const clickAttr = c.clickAttr || (c.clickable ? 'data-dash-goto-envios' : '');
-                    const accent = c.accent ? ` is-${c.accent}` : '';
-                    const attrs = c.clickable
-                        ? ` type="button" class="hero-kpi hero-kpi-btn${accent}" style="--kpi-i:${i}" ${clickAttr}`
-                        : ` class="hero-kpi${accent}" style="--kpi-i:${i}"`;
-                    const period = c.periodLabel || label;
-                    const delta = c.deltaHtml != null ? c.deltaHtml : chip(c.value, c.prev);
-                    return `
-                    <${tag}${attrs}>
-                        <div class="hero-kpi-head">
-                            <span class="hero-kpi-name">${esc(c.title)}</span>
-                            <span class="hero-kpi-period">${esc(period)}</span>
-                        </div>
-                        <div class="hero-kpi-value ${c.tone || ''}" title="${esc(Calc.fmtMXN(c.value))}">${fmtHeroMXN(c.value)}</div>
-                        <div class="hero-kpi-foot">${delta}</div>
-                    </${tag}>`;
-                }).join('')}
+            <div class="dash-hero-kpis is-rows" aria-label="Indicadores del periodo">
+                <div class="dash-sum-toolbar">
+                    <div class="dash-sum-seg" role="group" aria-label="Periodo del resumen">
+                        <button type="button" class="dash-sum-seg-btn${periodKey === '7d' ? ' is-active' : ''}" data-dash-sum-period="7d">7 días</button>
+                        <button type="button" class="dash-sum-seg-btn${periodKey === '30d' ? ' is-active' : ''}" data-dash-sum-period="30d">30 días</button>
+                        <button type="button" class="dash-sum-seg-btn${periodKey === 'month' ? ' is-active' : ''}" data-dash-sum-period="month">Este mes</button>
+                        <button type="button" class="dash-sum-seg-btn${periodKey === 'year' ? ' is-active' : ''}" data-dash-sum-period="year">Este año</button>
+                    </div>
+                </div>
+                <section class="dash-sum" aria-label="Resumen del periodo">
+                    <div class="dash-sum-hero">
+                        <p class="dash-sum-eyebrow">Resultado · ${esc(label)}</p>
+                        <p class="dash-sum-figure ${tone(totalCur)}"${UI.fxAttrs?.(totalCur, 'mxn') || ''}>${fmtHeroMXN(totalCur)}</p>
+                        <p class="dash-sum-caption">
+                            <span>${esc(heroCaption)}</span>
+                            ${heroTrend
+                                ? `<span class="dash-sum-trend is-${heroTrend.tone || 'flat'}" title="${esc(heroTrend.title || '')}">${esc(heroTrend.text)}</span>`
+                                : ''}
+                        </p>
+                    </div>
+                    <div class="dash-sum-grid">
+                        ${cells.map(renderCell).join('')}
+                    </div>
+                </section>
             </div>
         `;
     }
@@ -1657,7 +1717,7 @@ const DashboardView = (() => {
         const mpView = window.State.ui?.mpView;
         const mpLabel = mpView === 'general'
             ? 'General (ambos)'
-            : (window.State.marketplace === 'amazon' ? 'Amazon' : 'Mercado Libre');
+            : Data.mpBrand(window.State.marketplace);
         const modeHint = cashMode === 'cobrado'
             ? 'Solo marcado Cobrado en Caja'
             : 'Todas las ventas registradas';
@@ -1766,7 +1826,11 @@ const DashboardView = (() => {
                     const precio = Number(v.precio) || 0;
                     const loteAt = loteAtSaleCost(lote, v);
                     const u = Calc.utilidadAtPrice(loteAt, precio, settings).utilidad;
-                    b.cashIn += precio * uds;
+                    const liberacion = typeof Data.ventaLiberacionAmount === 'function'
+                        ? (Number(Data.ventaLiberacionAmount(lote, v, settings)) || 0)
+                        : Math.max(0, ((Number(loteAt.costo) || 0) + (Number(u) || 0)) * uds);
+                    // Cobrado = venta − fees (liberación a bolsitas); Vendido = bruto.
+                    b.cashIn += mode === 'cobrado' ? liberacion : (precio * uds);
                     b.ganancia += u * uds;
                     b.unidades += uds;
                     b.pedidos += 1;
@@ -2399,6 +2463,23 @@ const DashboardView = (() => {
         `;
     }
 
+    function sumUtilSides(aggRows) {
+        let ganancias = 0;
+        let perdidas = 0;
+        let nGain = 0;
+        let nLoss = 0;
+        collectVentaPnLRows(aggRows).forEach(r => {
+            if (r.util > 0.005) {
+                ganancias += r.util;
+                nGain += 1;
+            } else if (r.util < -0.005) {
+                perdidas += Math.abs(r.util);
+                nLoss += 1;
+            }
+        });
+        return { ganancias, perdidas, nGain, nLoss };
+    }
+
     function layPyG({ agg, fees, costoVendido, gastoAds, isAmazon, isGeneral, rows, pygPeriod, bonificaciones = 0, bonificacionesN = 0 }) {
         const bruto = agg.cashIn - costoVendido;
         const neto = agg.gananciaRealizada;
@@ -2410,25 +2491,15 @@ const DashboardView = (() => {
                 ? '− Fees Amazon (est.)'
                 : '− Fees ML + retenciones (est.)');
 
-        // Separar utilidad positiva vs pérdidas (mismo motor que Detalle por venta)
-        let ganancias = 0;
-        let perdidas = 0;
-        let nGain = 0;
-        let nLoss = 0;
-        collectVentaPnLRows(rows).forEach(r => {
-            if (r.util >= -0.005) {
-                if (r.util > 0.005) { ganancias += r.util; nGain += 1; }
-            } else {
-                perdidas += Math.abs(r.util);
-                nLoss += 1;
-            }
-        });
+        const { ganancias, perdidas, nGain, nLoss } = sumUtilSides(rows);
 
+        const ventaNeta = round2(Math.max(0, (Number(agg.cashIn) || 0) - (Number(fees) || 0)));
         const lines = [
-            { label: 'Ingresos (cash in)', value: agg.cashIn },
-            { label: '− Costo de lo vendido', value: -costoVendido },
-            { label: '= Utilidad bruta est.', value: bruto, bold: true },
+            { label: 'Venta bruta (ingresos)', value: agg.cashIn },
             { label: feeLabel, value: -fees },
+            { label: '= Venta neta', value: ventaNeta, bold: true },
+            { label: '− Costo de lo vendido', value: -costoVendido },
+            { label: '= Utilidad bruta est.', value: bruto },
             { label: '= Ganancia realizada', value: neto, bold: true },
         ];
         if (ganancias > 0.009 || perdidas > 0.009) {
@@ -2519,73 +2590,114 @@ const DashboardView = (() => {
     }
 
     /**
-     * P&G compacto: solo el flujo Ingresos → Utilidad. El desglose largo
-     * (fees, ads, composición) queda detrás de un "Ver desglose" que
-     * expande a la vista original.
+     * P&G compacto: Ingresos (bruta + neta) → Utilidad → Bonificaciones → Resultado.
+     * Venta neta = bruta − fees (mismo criterio que Caja / hero KPIs).
      */
     function layPyGCompact(ctx) {
         const { agg, fees, costoVendido, gastoAds, pygPeriod, bonificaciones = 0 } = ctx;
         const cashIn = agg.cashIn || 0;
+        const feesAmt = Number(fees) || 0;
+        const ventaNeta = round2(Math.max(0, cashIn - feesAmt));
         const neto = agg.gananciaRealizada || 0;
         const bonif = Number(bonificaciones) || 0;
         const resultado = neto + bonif;
         const bruto = cashIn - costoVendido;
         const marginPct = cashIn > 0 ? (neto / cashIn) : 0;
         const periodLabel = pygPeriod?.label || resolvePyGPeriod().label;
+        const { ganancias, perdidas } = sumUtilSides(ctx.rows);
 
-        let ganancias = 0;
-        let perdidas = 0;
-        collectVentaPnLRows(ctx.rows).forEach(r => {
-            if (r.util > 0.005) ganancias += r.util;
-            else if (r.util < -0.005) perdidas += Math.abs(r.util);
-        });
-
-        const showResult = Math.abs(bonif) > 0.009;
+        const fx = (n) => UI.fxAttrs?.(n, 'mxn') || '';
         return `
-            <div class="dash-panel dash-pyg-compact">
-                <p class="dash-pyg-period-label">${esc(periodLabel)} · ${agg.totalVendidas || 0} uds</p>
-                <div class="dash-pyg-strip" aria-label="Resumen del periodo">
-                    <div class="dash-pyg-chip is-gain">
-                        <span class="dash-pyg-chip-k">Ganancias</span>
-                        <span class="dash-pyg-chip-v pos">${Calc.fmtMXN(ganancias)}</span>
-                    </div>
-                    <div class="dash-pyg-chip is-loss">
-                        <span class="dash-pyg-chip-k">Pérdidas</span>
-                        <span class="dash-pyg-chip-v neg">${Calc.fmtMXN(perdidas ? -perdidas : 0)}</span>
-                    </div>
-                    <button type="button" class="dash-pyg-chip is-bonif" data-dash-open-bonif title="Registrar o editar bonificaciones">
-                        <span class="dash-pyg-chip-k">Bonificaciones</span>
-                        <span class="dash-pyg-chip-v ${bonif > 0.009 ? 'pos' : ''}">${Calc.fmtMXN(bonif)}</span>
-                    </button>
+            <div class="dash-pyg-sheet" aria-label="Estado de resultados del periodo · ${esc(periodLabel)} · ${agg.totalVendidas || 0} uds">
+                <ol class="dash-pyg-steps">
+                    <li class="dash-pyg-step is-ingresos" style="--i:1">
+                        <div class="dash-pyg-step-main">
+                            <span class="dash-pyg-step-n" aria-hidden="true">1</span>
+                            <div class="dash-pyg-step-body">
+                                <span class="dash-pyg-label">Ingresos</span>
+                                <span class="dash-pyg-hint">Bruta y neta del periodo</span>
+                            </div>
+                            <span class="dash-pyg-amount"${fx(ventaNeta)}>${Calc.fmtMXN(ventaNeta)}</span>
+                        </div>
+                        <div class="dash-pyg-pair" aria-label="Venta bruta y venta neta">
+                            <div class="dash-pyg-chip is-bruta" title="Precio × unidades">
+                                <div class="dash-pyg-chip-top">
+                                    <span class="dash-pyg-chip-k">Venta bruta</span>
+                                    <span class="dash-pyg-chip-h">Lo que pagó el cliente</span>
+                                </div>
+                                <span class="dash-pyg-chip-v"${fx(cashIn)}>${Calc.fmtMXN(cashIn)}</span>
+                            </div>
+                            <span class="dash-pyg-chip-op" aria-hidden="true">→</span>
+                            <div class="dash-pyg-chip is-neta" title="Venta bruta menos fees · lo que entra a Caja">
+                                <div class="dash-pyg-chip-top">
+                                    <span class="dash-pyg-chip-k">Venta neta</span>
+                                    <span class="dash-pyg-chip-h">Bruta − fees</span>
+                                </div>
+                                <span class="dash-pyg-chip-v"${fx(ventaNeta)}>${Calc.fmtMXN(ventaNeta)}</span>
+                            </div>
+                        </div>
+                    </li>
+                    <li class="dash-pyg-step is-util" style="--i:2">
+                        <div class="dash-pyg-step-main">
+                            <span class="dash-pyg-step-n" aria-hidden="true">2</span>
+                            <div class="dash-pyg-step-body">
+                                <span class="dash-pyg-label">Utilidad</span>
+                                <span class="dash-pyg-hint">${Calc.fmtPct(marginPct)} de margen</span>
+                            </div>
+                            <span class="dash-pyg-amount ${tone(neto)}"${fx(neto)}>${Calc.fmtMXN(neto)}</span>
+                        </div>
+                        <div class="dash-pyg-pair" aria-label="Ganancias menos pérdidas">
+                            <button type="button" class="dash-pyg-chip is-gain" data-dash-pyg-filter="gain" title="Ver ventas en verde">
+                                <div class="dash-pyg-chip-top">
+                                    <span class="dash-pyg-chip-k">Ganancias</span>
+                                    <span class="dash-pyg-chip-h">Toca para ver el detalle</span>
+                                </div>
+                                <span class="dash-pyg-chip-v pos"${fx(ganancias)}>${Calc.fmtMXN(ganancias)}</span>
+                            </button>
+                            <span class="dash-pyg-chip-op" aria-hidden="true">−</span>
+                            <button type="button" class="dash-pyg-chip is-loss" data-dash-pyg-filter="loss" title="Ver ventas en rojo">
+                                <div class="dash-pyg-chip-top">
+                                    <span class="dash-pyg-chip-k">Pérdidas</span>
+                                    <span class="dash-pyg-chip-h">Toca para ver el detalle</span>
+                                </div>
+                                <span class="dash-pyg-chip-v neg"${fx(perdidas ? -perdidas : 0)}>${Calc.fmtMXN(perdidas ? -perdidas : 0)}</span>
+                            </button>
+                        </div>
+                    </li>
+                    <li class="dash-pyg-step is-bonif" style="--i:3">
+                        <span class="dash-pyg-step-n" aria-hidden="true">3</span>
+                        <div class="dash-pyg-step-body">
+                            <span class="dash-pyg-label">Bonificaciones</span>
+                            <span class="dash-pyg-hint">${Math.abs(bonif) > 0.009 ? 'Se suman al resultado' : 'Edita arriba en Bonificaciones'}</span>
+                        </div>
+                        <span class="dash-pyg-amount ${bonif > 0.009 ? 'pos' : ''}"${fx(bonif)}>${bonif > 0.009 ? '+' : ''}${Calc.fmtMXN(bonif)}</span>
+                    </li>
+                </ol>
+
+                <div class="dash-pyg-hero">
+                    <span class="dash-pyg-kicker">Resultado</span>
+                    <span class="dash-pyg-hero-value ${tone(resultado)}"${fx(resultado)}>${Calc.fmtMXN(resultado)}</span>
+                    <span class="dash-pyg-hero-hint">Utilidad + bonificaciones</span>
+                    <span class="dash-pyg-hero-meta">${esc(periodLabel)} · ${agg.totalVendidas || 0} uds</span>
                 </div>
-                <div class="dash-pyg-flow${showResult ? ' is-3' : ''}">
-                    <div class="dash-pyg-node">
-                        <div class="dash-pyg-node-label">Ingresos</div>
-                        <div class="dash-pyg-node-value">${Calc.fmtMXN(cashIn)}</div>
-                    </div>
-                    <div class="dash-pyg-arrow" aria-hidden="true"></div>
-                    <div class="dash-pyg-node is-util">
-                        <div class="dash-pyg-node-label">Utilidad</div>
-                        <div class="dash-pyg-node-value ${tone(neto)}">${Calc.fmtMXN(neto)}</div>
-                        <div class="dash-pyg-node-sub">${Calc.fmtPct(marginPct)} margen · ${agg.totalVendidas || 0} uds</div>
-                    </div>
-                    ${showResult ? `
-                    <div class="dash-pyg-arrow" aria-hidden="true"></div>
-                    <div class="dash-pyg-node is-result">
-                        <div class="dash-pyg-node-label">Resultado</div>
-                        <div class="dash-pyg-node-value ${tone(resultado)}">${Calc.fmtMXN(resultado)}</div>
-                        <div class="dash-pyg-node-sub">utilidad + bonificaciones</div>
-                    </div>` : ''}
-                </div>
-                <details class="dash-pyg-details">
+
+                <details class="dash-pyg-details" data-dash-pyg-details>
                     <summary>Ver desglose</summary>
                     <div class="dash-pyg-details-body">
                         ${layPyG(ctx)}
                         ${(gastoAds || 0) > 0 ? `<p class="muted small" style="margin-top:8px">Ads (referencia, no restado arriba): ${Calc.fmtMXN(gastoAds)}</p>` : ''}
                         <p class="muted small" style="margin:6px 0 0">Utilidad bruta est.: ${Calc.fmtMXN(bruto)} · Fees: ${Calc.fmtMXN(fees)}.</p>
                         <div class="dash-venta-detalle-embed">
-                            <h3 class="dash-venta-detalle-h">Detalle por venta</h3>
+                            <div class="dash-pyg-venta-head">
+                                <h3 class="dash-venta-detalle-h" data-dash-pyg-venta-title>Detalle por venta</h3>
+                                <div class="dash-pyg-venta-filters" role="group" aria-label="Filtrar por utilidad">
+                                    <button type="button" class="dash-pyg-filter-btn active" data-dash-pyg-filter="all">Todas</button>
+                                    <button type="button" class="dash-pyg-filter-btn" data-dash-pyg-filter="gain">Ganancias</button>
+                                    <button type="button" class="dash-pyg-filter-btn" data-dash-pyg-filter="loss">Pérdidas</button>
+                                </div>
+                            </div>
                             ${layVentaDetalle(ctx, { variant: 'compact' })}
+                            <p class="muted small dash-pyg-venta-empty" data-dash-pyg-venta-empty hidden>Sin ventas en esta categoría.</p>
                             <p class="muted small dash-venta-detalle-jump">
                                 Completo en
                                 <button type="button" class="dash-link-inline" data-gx-jump="gx-finanzas">Finanzas (General)</button>.
@@ -2727,8 +2839,9 @@ const DashboardView = (() => {
         const totMargen = tot.cash > 0 ? tot.util / tot.cash : 0;
         const nPedidos = rows.length;
 
+        const utilSide = (u) => (u > 0.005 ? 'gain' : (u < -0.005 ? 'loss' : 'flat'));
         const tableRows = rows.map(r => `
-            <tr class="is-click" data-dash-lote="${esc(r.loteId)}" data-dash-mp="${esc(r.mp)}" title="Abrir producto">
+            <tr class="is-click" data-dash-lote="${esc(r.loteId)}" data-dash-mp="${esc(r.mp)}" data-util-side="${utilSide(r.util)}" title="Abrir producto">
                 <td class="dash-venta-fecha">${fmtVentaFecha(r.fecha)}${r.legacy ? ' <span class="muted" title="Sin eventos de venta">·</span>' : ''}</td>
                 <td class="dash-venta-prod">
                     <span class="dash-venta-name">${esc(short(r.producto, variant === 'compact' ? 36 : 48))}</span>
@@ -2744,7 +2857,7 @@ const DashboardView = (() => {
         `).join('');
 
         const cards = rows.map(r => `
-            <button type="button" class="dash-venta-card" data-dash-lote="${esc(r.loteId)}" data-dash-mp="${esc(r.mp)}">
+            <button type="button" class="dash-venta-card" data-dash-lote="${esc(r.loteId)}" data-dash-mp="${esc(r.mp)}" data-util-side="${utilSide(r.util)}">
                 <div class="dash-venta-card-top">
                     <span class="dash-venta-card-name">${esc(short(r.producto, 40))}</span>
                     <span class="dash-venta-card-util mono ${tone(r.util)}">${Calc.fmtMXN(r.util)}</span>
@@ -2782,7 +2895,7 @@ const DashboardView = (() => {
                         </thead>
                         <tbody>${tableRows}</tbody>
                         <tfoot>
-                            <tr class="is-bold">
+                            <tr class="is-bold" data-util-totals>
                                 <td colspan="2">Total · ${nPedidos} pedido${nPedidos === 1 ? '' : 's'} · ${tot.uds} uds</td>
                                 <td class="num">${tot.uds}</td>
                                 <td class="num">${Calc.fmtMXN(tot.cash)}</td>
@@ -2796,7 +2909,7 @@ const DashboardView = (() => {
                 </div>
                 <div class="dash-venta-cards" aria-label="Detalle por venta">
                     ${cards}
-                    <div class="dash-venta-card dash-venta-card-total">
+                    <div class="dash-venta-card dash-venta-card-total" data-util-totals>
                         <div class="dash-venta-card-top">
                             <span class="dash-venta-card-name">Total · ${nPedidos} pedido${nPedidos === 1 ? '' : 's'}</span>
                             <span class="dash-venta-card-util mono ${tone(tot.util)}">${Calc.fmtMXN(tot.util)}</span>
@@ -2813,55 +2926,27 @@ const DashboardView = (() => {
         `;
     }
 
-    /**
-     * Ranking Top-3 por utilidad — una sola columna, no las 3 paralelas.
-     * El ranking completo (utilidad + margen + ROI en 3 cols top 8) vive
-     * ahora en General.
-     */
-    function layRankingTop3({ rows }) {
-        const active = rows.filter(r => isRankable(r));
-        const byProduct = groupBestByProduct(active);
-        const top = [...byProduct].sort((a, b) => b.calc.utilidad - a.calc.utilidad).slice(0, 3);
-        return `
-            <div class="dash-rank-board">
-                ${top.length
-                    ? `<ol class="dash-rank-cards">
-                        ${top.map((r, i) => `
-                            <li class="dash-rank-card is-${i + 1}" style="--rank-i:${i}"
-                                data-dash-lote="${esc(r.lote.id)}" data-dash-mp="${esc(r.lote._mp || '')}"
-                                role="button" tabindex="0">
-                                <span class="dash-rank-badge">${i + 1}</span>
-                                <div class="dash-rank-body">
-                                    <span class="dash-rank-name" title="${esc(r.lote.producto)}${r.lote.variante ? ' · ' + esc(r.lote.variante) : ''}">
-                                        ${esc(short(r.lote.producto, 48))}
-                                    </span>
-                                    ${r.lote.variante ? `<span class="dash-rank-var">${esc(short(r.lote.variante, 28))}</span>` : ''}
-                                    <span class="dash-rank-util ${tone(r.calc.utilidad)}">${Calc.fmtMXN(r.calc.utilidad)}</span>
-                                </div>
-                            </li>
-                        `).join('')}
-                    </ol>
-                    <p class="dash-rank-hint">Ranking completo (margen y ROI) en <button type="button" class="dash-link-inline" data-dash-goto-mp="general">General</button>.</p>`
-                    : '<div class="dash-panel dash-panel-quiet"><p class="muted small" style="margin:0">Sin lotes rankeables todavía.</p></div>'}
-            </div>
-        `;
-    }
-
-    /** Cash de ventas marcadas Cobrado en Caja (o legacy sin eventos). */
+    /** Cash de ventas marcadas Cobrado en Caja (monto en bolsitas, no bruto). */
     function sumCashCobrado(rows) {
         let cash = 0;
         (rows || []).forEach(({ lote }) => {
+            const settings = settingsForTaggedLote(lote);
             const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
             if (ventas.length) {
                 ventas.forEach(v => {
                     if (!ventaIsCobrado(v)) return;
-                    cash += (Number(v.precio) || 0) * Math.max(0, Number(v.unidades) || 0);
+                    cash += typeof Data.ventaLiberacionAmount === 'function'
+                        ? (Number(Data.ventaLiberacionAmount(lote, v, settings)) || 0)
+                        : (Number(v.precio) || 0) * Math.max(0, Number(v.unidades) || 0);
                 });
                 return;
             }
             // Legacy: vendidas sin eventos → se trata como ya cobrado
             const vendidas = Math.max(0, Number(lote.vendidas) || 0);
-            if (vendidas > 0) cash += (Number(lote.precio) || 0) * vendidas;
+            if (vendidas > 0) {
+                const calc = Calc.computeLote(lote, settings);
+                cash += Math.max(0, ((Number(lote.costo) || 0) + (Number(calc.utilidad) || 0)) * vendidas);
+            }
         });
         return round2(cash);
     }
@@ -2998,11 +3083,15 @@ const DashboardView = (() => {
         return { total: round2(total), n };
     }
 
-    function bonifHeroStats(days = 30) {
+    function bonifHeroStats(periodOrDays = 30) {
         const now = new Date();
-        const today = Calc.startOfLocalDay(now);
-        const curStart = Calc.startOfLocalDay(new Date(now.getTime() - days * 86400000));
-        const prevStart = Calc.startOfLocalDay(new Date(now.getTime() - 2 * days * 86400000));
+        const range = typeof periodOrDays === 'object' && periodOrDays?.curStart
+            ? periodOrDays
+            : resolveSumRange(
+                periodOrDays === 7 ? '7d' : periodOrDays === 365 ? 'year' : '30d',
+                now,
+            );
+        const { curStart, curEnd, prevStart, prevEnd } = range;
         let cur = 0;
         let prev = 0;
         let nCur = 0;
@@ -3010,10 +3099,10 @@ const DashboardView = (() => {
             const d = Calc.effectiveSaleDay(b.fecha, now);
             if (!d) return;
             const m = Number(b.monto) || 0;
-            if (today && curStart && d >= curStart && d <= today) {
+            if (inDayRange(d, curStart, curEnd)) {
                 cur += m;
                 nCur += 1;
-            } else if (prevStart && curStart && d >= prevStart && d < curStart) {
+            } else if (inDayRange(d, prevStart, prevEnd)) {
                 prev += m;
             }
         });
@@ -3023,7 +3112,7 @@ const DashboardView = (() => {
     async function openBonificacionesDialog() {
         if (!UI?.dialog) return;
         const mp = window.State.marketplace === 'amazon' ? 'amazon' : 'meli';
-        const mpLabel = mp === 'amazon' ? 'Amazon' : 'Mercado Libre';
+        const mpLabel = Data.mpBrand(mp);
         const todayIso = toISODate(new Date());
 
         const paintList = (wrap) => {
@@ -3383,22 +3472,6 @@ const DashboardView = (() => {
         `;
     }
 
-    function layRanking({ rows }) {
-        // Un renglón por producto (no por color). Sin variantes archivadas / finalizadas.
-        const active = rows.filter(r => isRankable(r));
-        const byProduct = groupBestByProduct(active);
-        const byUtil = [...byProduct].sort((a, b) => b.calc.utilidad - a.calc.utilidad);
-        const byMargen = [...byProduct].sort((a, b) => b.calc.margen - a.calc.margen);
-        const byRoi = [...byProduct].sort((a, b) => b.calc.roi - a.calc.roi);
-        return `
-            <div class="dash-split-3">
-                ${rankCol('Por utilidad / ud', byUtil, r => Calc.fmtMXN(r.calc.utilidad), r => tone(r.calc.utilidad))}
-                ${rankCol('Por margen', byMargen, r => Calc.fmtPct(r.calc.margen), r => tone(r.calc.margen))}
-                ${rankCol('Por ROI', byRoi, r => (Number(r.lote.costo) > 0 ? Calc.fmtPct(r.calc.roi) : '—'), r => (Number(r.lote.costo) > 0 ? tone(r.calc.roi) : ''))}
-            </div>
-        `;
-    }
-
     function isRankable({ lote, calc }) {
         const est = String(lote.estatus || '');
         if (est.includes('Finalizada')) return false;
@@ -3420,23 +3493,6 @@ const DashboardView = (() => {
             if (!prev || r.calc.utilidad > prev.calc.utilidad) map.set(key, r);
         });
         return [...map.values()];
-    }
-
-    function rankCol(title, list, fmt, toneFn) {
-        return `
-            <div class="dash-panel">
-                <h3>${esc(title)}</h3>
-                <ol class="dash-rank-ol">
-                    ${list.slice(0, 8).map((r, i) => `
-                        <li data-dash-lote="${esc(r.lote.id)}" data-dash-mp="${esc(r.lote._mp || '')}">
-                            <span class="n">${i + 1}</span>
-                            <span class="name" title="${esc(r.lote.producto)}${r.lote.variante ? ' · ' + esc(r.lote.variante) : ''}">${esc(short(r.lote.producto, 28))}${r.lote.variante ? ` <small class="muted">${esc(short(r.lote.variante, 10))}</small>` : ''}${r.lote._mp ? ` <small class="dash-mp-mini">${r.lote._mp === 'amazon' ? 'Amz' : 'Meli'}</small>` : ''}</span>
-                            <span class="num ${toneFn(r)}">${fmt(r)}</span>
-                        </li>
-                    `).join('') || '<li class="muted">Sin datos</li>'}
-                </ol>
-            </div>
-        `;
     }
 
     function kpi(label, value, t, sub) {
@@ -3554,6 +3610,47 @@ const DashboardView = (() => {
         root.querySelectorAll('[data-dash-open-bonif]').forEach(btn => {
             btn.addEventListener('click', () => { openBonificacionesDialog(); });
         });
+        const applyPyGVentaFilter = (side) => {
+            const next = side === 'gain' || side === 'loss' ? side : 'all';
+            const details = root.querySelector('[data-dash-pyg-details]');
+            if (!details) return;
+            const sheet = details.closest('.dash-pyg-sheet') || details;
+            details.open = true;
+            sheet.querySelectorAll('[data-dash-pyg-filter]').forEach(btn => {
+                const v = btn.dataset.dashPygFilter || 'all';
+                if (btn.classList.contains('dash-pyg-filter-btn')) {
+                    btn.classList.toggle('active', v === next);
+                }
+                if (btn.classList.contains('dash-pyg-chip')) {
+                    btn.classList.toggle('is-active', v === next);
+                }
+            });
+            const title = details.querySelector('[data-dash-pyg-venta-title]');
+            if (title) {
+                title.textContent = next === 'gain'
+                    ? 'Detalle · ganancias'
+                    : next === 'loss'
+                        ? 'Detalle · pérdidas'
+                        : 'Detalle por venta';
+            }
+            let visible = 0;
+            details.querySelectorAll('.dash-venta-detalle [data-util-side]').forEach(el => {
+                const show = next === 'all' || el.getAttribute('data-util-side') === next;
+                el.hidden = !show;
+                if (show) visible += 1;
+            });
+            details.querySelectorAll('.dash-venta-detalle [data-util-totals]').forEach(el => {
+                el.hidden = next !== 'all';
+            });
+            const empty = details.querySelector('[data-dash-pyg-venta-empty]');
+            if (empty) empty.hidden = next === 'all' || visible > 0;
+            details.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        };
+        root.querySelectorAll('[data-dash-pyg-filter]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                applyPyGVentaFilter(btn.dataset.dashPygFilter || 'all');
+            });
+        });
         root.querySelectorAll('[data-dash-lote]').forEach(el => {
             const open = () => openDashLote(el.dataset.dashLote, el.dataset.dashMp);
             el.addEventListener('click', open);
@@ -3583,6 +3680,15 @@ const DashboardView = (() => {
                     dashChartPeriod: period,
                     dashChartFrom: iso || '',
                 });
+            });
+        });
+        root.querySelectorAll('[data-dash-sum-period]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const period = btn.dataset.dashSumPeriod;
+                if (!SUM_PERIODS.includes(period) || period === readSumPeriod()) return;
+                window.State.ui = { ...window.State.ui, dashSumPeriod: period };
+                window.State.saveUI();
+                renderPreservingScroll();
             });
         });
         root.querySelectorAll('[data-dash-range]').forEach(btn => {
@@ -3884,13 +3990,6 @@ const DashboardView = (() => {
                 });
                 renderPreservingScroll('.dash-alloc-panel');
             });
-            allocPanel.querySelectorAll('[data-goto-caja]').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const sub = btn.getAttribute('data-goto-caja') || 'asignar';
-                    window.CajaView?.open?.(sub);
-                });
-            });
             allocPanel.querySelectorAll('[data-alloc-undo-spend]').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.preventDefault();
@@ -3939,6 +4038,8 @@ const DashboardView = (() => {
             const focusHit = hits.find(h => Number(h.dataset.dashPoint) === focusIdx) || hits[hits.length - 1];
             if (focusHit) setDetail(focusHit);
         }
+
+        UI.countUp?.(root);
     }
 
     function init() {
