@@ -5,3 +5,7 @@ Meli/
 
 # Local diagnostic dumps
 .diag/
+
+# macOS app bundles / compiled icons (keep launch script + PNG source)
+*.app/
+*.icns

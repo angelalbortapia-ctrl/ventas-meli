@@ -19,9 +19,11 @@ const LotesView = (() => {
         mobileDetail: false,     // iPhone: lista ↔ detalle a pantalla completa
         fxEntered: false,        // entrada FX solo una vez por montaje
         fxLastFamily: null,
+        sheetTab: 'catalog',     // catalog | ventas — subpestaña de Productos
         salesChart: {
             range: '12w',       // 4w | 12w | 6m | ytd
             metric: 'unidades', // unidades | cash | ganancia
+            focusId: null,      // familyKey | null — filtrar curva a un producto
         },
     };
 
@@ -260,17 +262,21 @@ const LotesView = (() => {
                 <div class="lotes-studio-title-row">
                     <div class="lotes-studio-copy">
                         <p class="dash-masthead-kicker">${esc(mpKicker())}</p>
-                        <h1 class="lotes-studio-title">Tu catálogo.</h1>
-                        <p class="lotes-studio-lead">Inventario, rentabilidad y estrategia en un solo lugar.</p>
+                        <h1 class="lotes-studio-title" data-sheet-title>Tu catálogo.</h1>
+                        <p class="lotes-studio-lead" data-sheet-lead>Inventario, rentabilidad y estrategia en un solo lugar.</p>
                     </div>
                     <div class="view-actions">
                         <button class="btn primary lotes-add-btn" id="lotes-new"><span aria-hidden="true">＋</span> Agregar producto</button>
                     </div>
                 </div>
+                <nav class="lotes-sheet-tabs" role="tablist" aria-label="Secciones de Productos">
+                    <button type="button" class="lotes-sheet-tab" role="tab" data-sheet-tab="catalog" aria-controls="lotes-pane-catalog">Catálogo</button>
+                    <button type="button" class="lotes-sheet-tab" role="tab" data-sheet-tab="ventas" aria-controls="lotes-pane-ventas">Ventas</button>
+                </nav>
                 <div id="lotes-stats" class="dash-hero-kpis-band is-flow lotes-hero-kpis" aria-label="Resumen del catálogo"></div>
             </header>
 
-            <div class="lotes-shell is-mail">
+            <div class="lotes-shell is-mail" id="lotes-pane-catalog" data-sheet-pane="catalog" role="tabpanel">
                 <div class="lotes-mail-top">
                     <div class="lotes-toolbar">
                         <div class="grow">
@@ -288,11 +294,66 @@ const LotesView = (() => {
                 </div>
             </div>
 
-            <div id="lotes-sales-chart" class="prod-sales-host" aria-label="Ventas en el tiempo"></div>
+            <div id="lotes-pane-ventas" class="lotes-ventas-pane" data-sheet-pane="ventas" role="tabpanel" hidden>
+                <div id="lotes-sales-chart" class="prod-sales-host" aria-label="Ventas en el tiempo"></div>
+            </div>
         `;
         bindShellEvents();
         initResizer();
+        syncSheetTab();
         shellMounted = true;
+    }
+
+    function syncSheetTab() {
+        const tab = local.sheetTab === 'ventas' ? 'ventas' : 'catalog';
+        local.sheetTab = tab;
+        const canvas = document.getElementById('lotes-canvas');
+        if (canvas) canvas.dataset.sheetTab = tab;
+
+        document.querySelectorAll('#view-lotes [data-sheet-tab]').forEach(btn => {
+            const on = btn.dataset.sheetTab === tab;
+            btn.classList.toggle('is-on', on);
+            btn.setAttribute('aria-selected', on ? 'true' : 'false');
+            btn.tabIndex = on ? 0 : -1;
+        });
+        document.querySelectorAll('#view-lotes [data-sheet-pane]').forEach(pane => {
+            const on = pane.dataset.sheetPane === tab;
+            pane.hidden = !on;
+            pane.setAttribute('aria-hidden', on ? 'false' : 'true');
+        });
+
+        const title = document.querySelector('#view-lotes [data-sheet-title]');
+        const lead = document.querySelector('#view-lotes [data-sheet-lead]');
+        if (title) title.textContent = tab === 'ventas' ? 'Ventas.' : 'Tu catálogo.';
+        if (lead) {
+            lead.textContent = tab === 'ventas'
+                ? 'Curva del catálogo, delta vs periodo anterior y qué está jalando.'
+                : 'Inventario, rentabilidad y estrategia en un solo lugar.';
+        }
+
+        const stats = document.getElementById('lotes-stats');
+        if (stats) stats.hidden = tab === 'ventas';
+        const addBtn = document.getElementById('lotes-new');
+        if (addBtn) addBtn.hidden = tab === 'ventas';
+    }
+
+    function setSheetTab(next) {
+        const tab = next === 'ventas' ? 'ventas' : 'catalog';
+        if (local.sheetTab === tab) {
+            syncSheetTab();
+            return;
+        }
+        local.sheetTab = tab;
+        if (tab === 'catalog' && isMobile()) local.mobileDetail = false;
+        syncSheetTab();
+        if (tab === 'ventas') {
+            refreshSalesChart();
+            requestAnimationFrame(() => {
+                document.getElementById('lotes-pane-ventas')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+            });
+        } else {
+            renderContent({ soft: true });
+        }
     }
 
     function bindShellEvents() {
@@ -305,6 +366,11 @@ const LotesView = (() => {
             });
         }
         if (neu) neu.addEventListener('click', () => openModal(null));
+        document.querySelectorAll('#view-lotes [data-sheet-tab]').forEach(btn => {
+            if (btn.dataset.boundSheetTab === '1') return;
+            btn.dataset.boundSheetTab = '1';
+            btn.addEventListener('click', () => setSheetTab(btn.dataset.sheetTab));
+        });
     }
 
     function initResizer() {
@@ -492,6 +558,8 @@ const LotesView = (() => {
             ? family.variants.find(v => v.lote.id === local.selectedVariant) || pickVisible(family)
             : null;
 
+        syncSheetTab();
+
         if (!soft) {
             const nProd = list.length;
             const nTotal = totalProductCount();
@@ -519,22 +587,30 @@ const LotesView = (() => {
         }
 
         const detailEl = document.getElementById('lotes-detail');
-        if (detailEl) detailEl.innerHTML = renderDetail(family, variantRow);
+        if (detailEl && local.sheetTab === 'catalog') {
+            detailEl.innerHTML = renderDetail(family, variantRow);
+        }
         kickProdFx(family?.key || null, { soft });
         requestAnimationFrame(() => {
-            ensureActiveShelfVisible();
-            ensureActiveRowVisible();
+            if (local.sheetTab === 'catalog') {
+                ensureActiveShelfVisible();
+                ensureActiveRowVisible();
+            }
         });
 
         const split = document.getElementById('lotes-split');
         if (split) {
-            split.classList.toggle('mobile-detail-open', isMobile() && !!local.mobileDetail && !!family);
+            split.classList.toggle('mobile-detail-open', isMobile() && !!local.mobileDetail && !!family && local.sheetTab === 'catalog');
         }
 
-        if (soft) bindDetailEvents();
-        else bindDynamicEvents();
+        if (soft) {
+            if (local.sheetTab === 'catalog') bindDetailEvents();
+            else bindSalesChartEvents();
+        } else {
+            bindDynamicEvents();
+        }
 
-        if (window.Keepa?.hydrate) {
+        if (window.Keepa?.hydrate && local.sheetTab === 'catalog') {
             const detailHost = document.getElementById('lotes-detail');
             if (detailHost) Keepa.hydrate(detailHost);
         }
@@ -1901,7 +1977,8 @@ const LotesView = (() => {
         });
 
         const metric = local.salesChart.metric || 'unidades';
-        const buckets = slots.map(s => {
+        const focusId = local.salesChart.focusId || null;
+        let buckets = slots.map(s => {
             const b = slotMap.get(s.key);
             const top = [...b.products.values()]
                 .sort((a, c) => (c[metric] || 0) - (a[metric] || 0) || c.unidades - a.unidades)
@@ -1913,20 +1990,40 @@ const LotesView = (() => {
                     cash: p.cash,
                     ganancia: p.ganancia,
                 }));
+            let unidades = b.unidades;
+            let cash = b.cash;
+            let ganancia = b.ganancia;
+            let pedidos = b.pedidos;
+            if (focusId) {
+                const fp = b.products.get(focusId);
+                unidades = fp?.unidades || 0;
+                cash = fp?.cash || 0;
+                ganancia = fp?.ganancia || 0;
+                pedidos = 0;
+            }
             return {
                 key: b.key,
                 label: b.label,
                 tip: b.tip,
-                unidades: b.unidades,
-                cash: b.cash,
-                ganancia: b.ganancia,
-                pedidos: b.pedidos,
-                top,
+                unidades,
+                cash,
+                ganancia,
+                pedidos,
+                top: focusId ? top.filter(p => p.id === focusId) : top,
             };
         });
-        const products = [...byProduct.values()]
-            .sort((a, b) => (b[metric] || 0) - (a[metric] || 0) || b.unidades - a.unidades)
-            .slice(0, 6);
+        let products = [...byProduct.values()]
+            .sort((a, b) => (b[metric] || 0) - (a[metric] || 0) || b.unidades - a.unidades);
+        const focusName = focusId
+            ? (byProduct.get(focusId)?.name || products.find(p => p.id === focusId)?.name || null)
+            : null;
+        if (focusId && !byProduct.has(focusId)) {
+            local.salesChart.focusId = null;
+        }
+        const rankedAll = products.slice(0, 8);
+        products = focusId
+            ? products.filter(p => p.id === focusId).slice(0, 1)
+            : products.slice(0, 6);
         const totals = buckets.reduce((acc, b) => {
             acc.unidades += b.unidades;
             acc.cash += b.cash;
@@ -1958,7 +2055,19 @@ const LotesView = (() => {
             };
         }
 
-        return { period, range, rangeId: cfg.id, buckets, products, totals, metric, delta };
+        return {
+            period,
+            range,
+            rangeId: cfg.id,
+            buckets,
+            products,
+            rankedAll,
+            totals,
+            metric,
+            delta,
+            focusId: local.salesChart.focusId || null,
+            focusName,
+        };
     }
 
     function fmtSalesMetric(metric, n) {
@@ -2073,9 +2182,47 @@ const LotesView = (() => {
         );
     }
 
+    function exportSalesCsv(data) {
+        const { buckets, rankedAll, rangeId, metric, focusName } = data;
+        const lines = [];
+        const stamp = new Date().toISOString().slice(0, 10);
+        lines.push(`# Ventas Meli · rango ${rangeId}${focusName ? ` · filtro ${focusName}` : ''} · métrica ${metric} · ${stamp}`);
+        lines.push('periodo,etiqueta,unidades,vendido,ganancia');
+        buckets.forEach(b => {
+            lines.push([
+                JSON.stringify(b.tip || b.label),
+                JSON.stringify(b.label),
+                b.unidades,
+                (Number(b.cash) || 0).toFixed(2),
+                (Number(b.ganancia) || 0).toFixed(2),
+            ].join(','));
+        });
+        lines.push('');
+        lines.push('producto,unidades,vendido,ganancia,pedidos');
+        (rankedAll || []).forEach(p => {
+            lines.push([
+                JSON.stringify(displayName(p.name)),
+                p.unidades,
+                (Number(p.cash) || 0).toFixed(2),
+                (Number(p.ganancia) || 0).toFixed(2),
+                p.pedidos,
+            ].join(','));
+        });
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `ventas-${rangeId}-${stamp}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+            URL.revokeObjectURL(a.href);
+            a.remove();
+        }, 500);
+    }
+
     function renderCatalogSalesChart() {
         const data = buildCatalogSalesData();
-        const { buckets, products, totals, metric, rangeId, delta } = data;
+        const { buckets, products, rankedAll, totals, metric, rangeId, delta, focusId, focusName } = data;
         const metricLabel = metric === 'unidades' ? 'Unidades' : (metric === 'ganancia' ? 'Ganancia' : 'Vendido');
         const rangeLabel = salesRangeConfig(rangeId).label;
 
@@ -2092,10 +2239,10 @@ const LotesView = (() => {
                 </section>`;
         }
 
-        const topMax = Math.max(1, ...products.map(p => Math.abs(Number(p[metric]) || 0)));
+        const rankSource = focusId ? products : (rankedAll || products);
+        const topMax = Math.max(1, ...rankSource.map(p => Math.abs(Number(p[metric]) || 0)));
         const last = buckets[buckets.length - 1] || { unidades: 0, cash: 0, ganancia: 0 };
         const lastVal = Number(last[metric]) || 0;
-        // Serialize bucket tip payloads for hover
         const tipPayload = buckets.map(b => ({
             tip: b.tip,
             label: b.label,
@@ -2110,6 +2257,11 @@ const LotesView = (() => {
                 ganancia: p.ganancia,
             })),
         }));
+        const focusChip = focusId
+            ? `<button type="button" class="prod-sales-focus is-on" data-sales-focus-clear title="Quitar filtro">
+                    Filtrado: ${esc(displayName(focusName || 'producto'))} ×
+               </button>`
+            : `<span class="prod-sales-focus-hint muted small">Toca ★ en un producto para filtrar la curva</span>`;
 
         return `
             <section class="prod-sales-panel" data-sales-chart>
@@ -2125,6 +2277,7 @@ const LotesView = (() => {
                             ${renderSalesDelta(delta, metric)}
                         </div>
                         <p class="prod-sales-foot muted small">${totals.unidades} uds · ${Calc.fmtMXN(totals.cash)} · ${Calc.fmtMXN(totals.ganancia)} gan. en el rango</p>
+                        <div class="prod-sales-focus-row">${focusChip}</div>
                     </div>
                     <div class="prod-sales-toggles" role="group" aria-label="Vista del gráfico">
                         <div class="prod-sales-seg" data-seg="range">
@@ -2137,6 +2290,7 @@ const LotesView = (() => {
                             <button type="button" class="prod-sales-tog${metric === 'cash' ? ' is-on' : ''}" data-sales-metric="cash">$</button>
                             <button type="button" class="prod-sales-tog${metric === 'ganancia' ? ' is-on' : ''}" data-sales-metric="ganancia">Gan.</button>
                         </div>
+                        <button type="button" class="prod-sales-export" data-sales-export title="Descargar CSV del rango">CSV</button>
                     </div>
                 </div>
                 <div class="prod-sales-body">
@@ -2149,11 +2303,12 @@ const LotesView = (() => {
                             <span class="muted small">${esc(metricLabel)}</span>
                         </div>
                         <ol class="prod-sales-rank">
-                            ${products.length ? products.map((p, i) => {
+                            ${(focusId ? products : (rankedAll || products).slice(0, 6)).length ? (focusId ? products : (rankedAll || products).slice(0, 6)).map((p, i) => {
                                 const v = Number(p[metric]) || 0;
                                 const pct = Math.round((Math.abs(v) / topMax) * 100);
+                                const on = focusId === p.id;
                                 return `
-                                    <li class="prod-sales-rank-item" style="--i:${i}; --pct:${pct}">
+                                    <li class="prod-sales-rank-item${on ? ' is-focus' : ''}" style="--i:${i}; --pct:${pct}">
                                         <button type="button" class="prod-sales-rank-btn" data-sales-select="${esc(p.id)}" title="Abrir ${esc(p.name)}">
                                             <span class="prod-sales-rank-idx">${i + 1}</span>
                                             <span class="prod-sales-rank-main">
@@ -2163,6 +2318,7 @@ const LotesView = (() => {
                                             </span>
                                             <span class="prod-sales-rank-val">${esc(fmtSalesMetric(metric, v))}</span>
                                         </button>
+                                        <button type="button" class="prod-sales-rank-pin${on ? ' is-on' : ''}" data-sales-focus="${esc(p.id)}" title="${on ? 'Quitar filtro' : 'Filtrar curva a este producto'}" aria-label="Filtrar">★</button>
                                     </li>`;
                             }).join('') : `<li class="prod-sales-rank-empty muted small">Sin ventas en este rango</li>`}
                         </ol>
@@ -2323,8 +2479,14 @@ const LotesView = (() => {
                 local.selectedVariant = pickVisible(fam)?.lote?.id || null;
                 local.detailTab = 'inv';
                 if (isMobile()) local.mobileDetail = true;
+                if (local.sheetTab !== 'catalog') {
+                    local.sheetTab = 'catalog';
+                    syncSheetTab();
+                }
                 renderContent({ soft: true });
-                document.getElementById('lotes-detail')?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+                requestAnimationFrame(() => {
+                    document.getElementById('lotes-detail')?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+                });
             });
         });
 
@@ -2350,6 +2512,30 @@ const LotesView = (() => {
                 local.salesChart.metric = m;
                 refreshSalesChart();
             });
+        });
+
+        document.querySelectorAll('[data-sales-focus]').forEach(btn => {
+            if (btn.dataset.boundSales === '1') return;
+            btn.dataset.boundSales = '1';
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                const id = btn.dataset.salesFocus;
+                local.salesChart.focusId = local.salesChart.focusId === id ? null : id;
+                refreshSalesChart();
+            });
+        });
+        document.querySelectorAll('[data-sales-focus-clear]').forEach(btn => {
+            if (btn.dataset.boundSales === '1') return;
+            btn.dataset.boundSales = '1';
+            btn.addEventListener('click', () => {
+                local.salesChart.focusId = null;
+                refreshSalesChart();
+            });
+        });
+        document.querySelectorAll('[data-sales-export]').forEach(btn => {
+            if (btn.dataset.boundSales === '1') return;
+            btn.dataset.boundSales = '1';
+            btn.addEventListener('click', () => exportSalesCsv(buildCatalogSalesData()));
         });
 
         // Hover tooltip
