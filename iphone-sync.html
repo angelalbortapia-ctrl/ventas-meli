@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Cache-Control" content="no-store">
+  <title>Sync iPhone — Ventas Meli</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0; padding: 24px 18px 48px;
+      font-family: ui-rounded, "Segoe UI", system-ui, sans-serif;
+      background: #f3f5f7; color: #15202b;
+    }
+    h1 { font-size: 1.35rem; margin: 0 0 8px; }
+    p { color: #5a6a7a; line-height: 1.45; margin: 0 0 16px; }
+    label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 6px; }
+    input {
+      width: 100%; box-sizing: border-box; padding: 12px 12px;
+      border: 1px solid #c9d2db; border-radius: 10px; font-size: 16px; background: #fff;
+    }
+    button {
+      width: 100%; margin-top: 18px; padding: 14px;
+      border: 0; border-radius: 12px; background: #15202b; color: #fff;
+      font-size: 16px; font-weight: 700;
+    }
+    button:disabled { opacity: .55; }
+    #log {
+      margin-top: 16px; padding: 12px; border-radius: 10px;
+      background: #fff; border: 1px solid #e2e8ef;
+      font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+      white-space: pre-wrap; min-height: 4em;
+    }
+    .ok { color: #0b7a3b; }
+    .err { color: #b00020; }
+    a { color: #0b57d0; }
+  </style>
+</head>
+<body>
+  <h1>Traer nube al iPhone</h1>
+  <p>Página mínima sin Service Worker. Inicia sesión y copia Meli + Amazon a este teléfono.</p>
+
+  <label>Project URL</label>
+  <input id="url" type="url" value="https://xbdvplolnnfwewmntsjq.supabase.co" autocomplete="off">
+
+  <label>anon / publishable key</label>
+  <input id="key" type="text" value="sb_publishable_tTM7lp-xqUpc8tBwOAfMdA_qkNHhJlh" autocomplete="off">
+
+  <label>Email</label>
+  <input id="email" type="email" value="angelalbortapia@gmail.com" autocomplete="username">
+
+  <label>Contraseña</label>
+  <input id="password" type="password" autocomplete="current-password" placeholder="Tu contraseña Sync">
+
+  <button id="go" type="button">Bajar nube a este iPhone</button>
+  <div id="log">Listo. Escribe la contraseña y toca el botón.</div>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const log = (m, cls) => {
+      logEl.textContent += '\n' + m;
+      if (cls) logEl.className = cls;
+    };
+    const setLog = (m, cls) => {
+      logEl.textContent = m;
+      logEl.className = cls || '';
+    };
+
+    async function killSW() {
+      try {
+        const regs = await navigator.serviceWorker?.getRegistrations?.() || [];
+        for (const r of regs) await r.unregister();
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+        log('SW/caché limpios (' + regs.length + ' SW, ' + keys.length + ' caches)');
+      } catch (e) {
+        log('Aviso SW: ' + (e && e.message));
+      }
+    }
+
+    function stripMeta(settings) {
+      const s = Object.assign({}, settings || {});
+      delete s._amazon; delete s._ui; delete s._marketplace; delete s._syncMeta;
+      return s;
+    }
+
+    document.getElementById('go').addEventListener('click', async () => {
+      const btn = document.getElementById('go');
+      btn.disabled = true;
+      setLog('Trabajando…');
+      await killSW();
+
+      const url = document.getElementById('url').value.trim().replace(/\/+$/, '');
+      const key = document.getElementById('key').value.trim();
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      if (!url || !key || !email || !password) {
+        setLog('Faltan URL, key, email o contraseña', 'err');
+        btn.disabled = false;
+        return;
+      }
+
+      try {
+        log('1) Ping auth…');
+        const health = await fetch(url + '/auth/v1/health', {
+          headers: { apikey: key, Authorization: 'Bearer ' + key },
+          cache: 'no-store',
+        });
+        if (!health.ok) throw new Error('Health HTTP ' + health.status);
+        log('   health OK');
+
+        log('2) Login…');
+        const loginRes = await fetch(url + '/auth/v1/token?grant_type=password', {
+          method: 'POST',
+          headers: {
+            apikey: key,
+            Authorization: 'Bearer ' + key,
+            'Content-Type': 'application/json',
+          },
+          cache: 'no-store',
+          body: JSON.stringify({ email, password }),
+        });
+        const session = await loginRes.json();
+        if (!loginRes.ok) {
+          throw new Error(session.error_description || session.msg || session.error || ('Login ' + loginRes.status));
+        }
+        const access = session.access_token;
+        const userId = session.user && session.user.id;
+        if (!access || !userId) throw new Error('Login sin token/user');
+        log('   sesión OK · ' + (session.user.email || email));
+
+        log('3) Bajar estado…');
+        const pullRes = await fetch(
+          url + '/rest/v1/ventas_meli_state?select=lotes,settings,updated_at&user_id=eq.' + encodeURIComponent(userId),
+          {
+            headers: {
+              apikey: key,
+              Authorization: 'Bearer ' + access,
+              Accept: 'application/json',
+            },
+            cache: 'no-store',
+          }
+        );
+        if (!pullRes.ok) throw new Error('Pull HTTP ' + pullRes.status + ' ' + (await pullRes.text()));
+        const rows = await pullRes.json();
+        const row = Array.isArray(rows) ? rows[0] : null;
+        if (!row || !Array.isArray(row.lotes)) throw new Error('Nube vacía o sin fila para este usuario');
+
+        const raw = (row.settings && typeof row.settings === 'object') ? row.settings : {};
+        const meliLotes = row.lotes;
+        const meliSettings = stripMeta(raw);
+        const amz = (raw._amazon && typeof raw._amazon === 'object') ? raw._amazon : {};
+        const amazonLotes = Array.isArray(amz.lotes) ? amz.lotes : [];
+        const amazonSettings = (amz.settings && typeof amz.settings === 'object') ? stripMeta(amz.settings) : {};
+        const ui = (raw._ui && typeof raw._ui === 'object') ? raw._ui : {};
+
+        log('4) Guardar en este iPhone…');
+        localStorage.setItem('ventas-meli:supabase:v1', JSON.stringify({ url, anonKey: key }));
+        // Formato de sesión que entiende @supabase/supabase-js v2
+        const projectRef = (url.match(/^https:\/\/([a-z0-9-]+)\.supabase\.co/i) || [])[1] || 'xbdvplolnnfwewmntsjq';
+        localStorage.setItem('sb-' + projectRef + '-auth-token', JSON.stringify(session));
+
+        localStorage.setItem('ventas-meli:v1', JSON.stringify(meliLotes));
+        localStorage.setItem('ventas-meli:settings:v1', JSON.stringify(Object.assign({ marketplace: 'meli' }, meliSettings)));
+        localStorage.setItem('ventas-amazon:v1', JSON.stringify(amazonLotes));
+        localStorage.setItem('ventas-amazon:settings:v1', JSON.stringify(Object.assign({ marketplace: 'amazon' }, amazonSettings)));
+        if (ui && typeof ui === 'object') {
+          const cleanUi = Object.assign({}, ui);
+          delete cleanUi.keepaApiKey; delete cleanUi.keepaCache; delete cleanUi.keepaLibrary;
+          localStorage.setItem('ventas-meli:ui:v1', JSON.stringify(cleanUi));
+        }
+
+        log('Listo · Meli ' + meliLotes.length + ' · Amazon ' + amazonLotes.length, 'ok');
+        log('Abriendo la app…');
+        setTimeout(() => {
+          location.replace('./?fromPhoneSync=' + Date.now());
+        }, 900);
+      } catch (e) {
+        const msg = (e && e.message) || String(e);
+        setLog('ERROR: ' + msg, 'err');
+        if (/load failed|failed to fetch|networkerror/i.test(msg)) {
+          log('Safari no pudo hablar con Supabase. Apaga «Bloquear contenido» / AdGuard / 1Blocker para esta página y reintenta.', 'err');
+        }
+        btn.disabled = false;
+      }
+    });
+
+    killSW();
+  </script>
+</body>
+</html>

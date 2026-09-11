@@ -11,19 +11,22 @@
     p { color: #5a6a7a; line-height: 1.45; }
     #log { margin-top: 16px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; background: #f4f6f8; padding: 12px; border-radius: 8px; }
     a.btn {
-      display: inline-block; margin-top: 18px; padding: 12px 16px; border-radius: 10px;
+      display: inline-block; margin: 10px 8px 0 0; padding: 12px 16px; border-radius: 10px;
       background: #1a2332; color: #fff; text-decoration: none; font-weight: 600;
     }
+    a.btn.secondary { background: #3d4f63; }
     a.btn[hidden] { display: none; }
   </style>
 </head>
 <body>
   <h1>Limpiando caché…</h1>
-  <p>Borra el Service Worker viejo (causa habitual de <em>Load failed</em> en iPhone) y deja la app lista para Sync.</p>
+  <p>Borra el Service Worker viejo. Después usa <strong>Sync iPhone</strong> para bajar la nube.</p>
   <div id="log">Iniciando…</div>
-  <a class="btn" id="open-app" hidden href="./?fresh=1">Abrir app</a>
+  <a class="btn" id="open-sync" hidden href="./iphone-sync.html">Sync iPhone</a>
+  <a class="btn secondary" id="open-app" hidden href="./?fresh=1">Abrir app</a>
   <script>
     const log = (m) => { document.getElementById('log').textContent += '\n' + m; };
+    const syncBtn = document.getElementById('open-sync');
     const openBtn = document.getElementById('open-app');
     (async () => {
       try {
@@ -39,12 +42,13 @@
       } catch (e) {
         log('Error: ' + (e && e.message));
       }
-      const fresh = './?fresh=' + Date.now();
-      openBtn.href = fresh;
+      const stamp = Date.now();
+      syncBtn.href = './iphone-sync.html?fresh=' + stamp;
+      openBtn.href = './?fresh=' + stamp;
+      syncBtn.hidden = false;
       openBtn.hidden = false;
-      log('Listo. Toca «Abrir app» (no uses la app de pantalla de inicio hasta probar Sync).');
-      // Auto-abrir tras 1.2s; el botón queda por si Safari bloquea el redirect.
-      setTimeout(() => { location.replace(fresh); }, 1200);
+      log('Listo. En iPhone toca «Sync iPhone».');
+      setTimeout(() => { location.replace(syncBtn.href); }, 1000);
     })();
   </script>
 </body>

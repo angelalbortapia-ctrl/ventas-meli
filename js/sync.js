@@ -292,12 +292,33 @@ const Sync = (() => {
     }
 
     async function signIn(email, password) {
-        const c = ensureClient();
-        if (!c) throw new Error('Configura Supabase primero');
+        const cfg = loadConfig();
+        if (!cfg.url || !cfg.anonKey) throw new Error('Configura Supabase primero');
         try {
-            const { data, error } = await c.auth.signInWithPassword({ email, password });
+            // fetch directo: en Safari iOS el cliente supabase-js a veces tira "Load failed"
+            const res = await fetch(`${cfg.url}/auth/v1/token?grant_type=password`, {
+                method: 'POST',
+                headers: {
+                    apikey: cfg.anonKey,
+                    Authorization: `Bearer ${cfg.anonKey}`,
+                    'Content-Type': 'application/json',
+                },
+                cache: 'no-store',
+                body: JSON.stringify({ email, password }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(body.error_description || body.msg || body.error || `Login HTTP ${res.status}`);
+            }
+            const c = ensureClient();
+            if (!c) throw new Error('No se cargó la librería Supabase (recarga)');
+            const { data, error } = await c.auth.setSession({
+                access_token: body.access_token,
+                refresh_token: body.refresh_token,
+            });
             if (error) throw error;
-            setStatus({ state: 'signed_in', email: data.user?.email || email });
+            const user = data.user || data.session?.user;
+            setStatus({ state: 'signed_in', email: user?.email || email });
             await firstSyncChoice();
             await pullAndSubscribe();
             return data;

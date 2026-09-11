@@ -928,12 +928,17 @@ const App = (() => {
 
     // ---- PWA -----------------------------------------------------------
     function initPWA() {
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                // Query bust: GitHub Pages / Safari a veces se quedan con un sw.js viejo.
-                navigator.serviceWorker.register('sw.js?v=457').catch(() => {});
-            });
-        }
+        // En iPhone el SW interceptaba Supabase/CDN y Safari devolvía "Load failed".
+        // Por ahora: desregistrar cualquier SW viejo y NO registrar uno nuevo.
+        if (!('serviceWorker' in navigator)) return;
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.getRegistrations?.().then(regs => {
+                regs.forEach(r => r.unregister().catch(() => {}));
+            }).catch(() => {});
+            if (window.caches?.keys) {
+                caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).catch(() => {});
+            }
+        });
     }
 
     /**
