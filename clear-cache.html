@@ -6,49 +6,27 @@
   <meta http-equiv="Cache-Control" content="no-store">
   <title>Limpiar caché — Ventas Meli</title>
   <style>
-    body { font-family: Calibri, Carlito, Candara, 'Segoe UI', Arial, sans-serif; max-width: 420px; margin: 48px auto; padding: 0 16px; color: #1a2332; }
-    h1 { font-size: 1.25rem; }
-    p { color: #5a6a7a; line-height: 1.45; }
-    #log { margin-top: 16px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; background: #f4f6f8; padding: 12px; border-radius: 8px; }
-    a.btn {
-      display: inline-block; margin: 10px 8px 0 0; padding: 12px 16px; border-radius: 10px;
-      background: #1a2332; color: #fff; text-decoration: none; font-weight: 600;
-    }
-    a.btn.secondary { background: #3d4f63; }
-    a.btn[hidden] { display: none; }
+    body { font-family: "SF Pro Text", "Segoe UI", system-ui, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; color: #1a2332; }
+    a.btn { display:block; margin-top:12px; padding:14px; border-radius:12px; background:#15202b; color:#fff; text-align:center; text-decoration:none; font-weight:700; }
+    #log { margin-top:14px; padding:12px; background:#f4f6f8; border-radius:10px; font-family:ui-monospace,Menlo,monospace; font-size:12px; white-space:pre-wrap; }
   </style>
 </head>
 <body>
-  <h1>Limpiando caché…</h1>
-  <p>Borra el Service Worker viejo. Después usa <strong>Sync iPhone</strong> para bajar la nube.</p>
+  <h1>Limpiando…</h1>
+  <p>Luego instala los datos con el archivo del Mac o la nube.</p>
   <div id="log">Iniciando…</div>
-  <a class="btn" id="open-sync" hidden href="./iphone-sync.html">Sync iPhone</a>
-  <a class="btn secondary" id="open-app" hidden href="./?fresh=1">Abrir app</a>
+  <a class="btn" id="go" href="./iphone-sync.html">Ir a instalar datos</a>
   <script>
     const log = (m) => { document.getElementById('log').textContent += '\n' + m; };
-    const syncBtn = document.getElementById('open-sync');
-    const openBtn = document.getElementById('open-app');
     (async () => {
       try {
         const regs = await navigator.serviceWorker?.getRegistrations?.() || [];
-        for (const r of regs) {
-          await r.unregister();
-          log('SW desregistrado');
-        }
-        if (!regs.length) log('Sin SW registrado');
+        for (const r of regs) { await r.unregister(); log('SW off'); }
         const keys = await caches.keys();
         await Promise.all(keys.map(k => caches.delete(k)));
-        log('Caches borrados: ' + (keys.join(', ') || '(ninguno)'));
-      } catch (e) {
-        log('Error: ' + (e && e.message));
-      }
-      const stamp = Date.now();
-      syncBtn.href = './iphone-sync.html?fresh=' + stamp;
-      openBtn.href = './?fresh=' + stamp;
-      syncBtn.hidden = false;
-      openBtn.hidden = false;
-      log('Listo. En iPhone toca «Sync iPhone».');
-      setTimeout(() => { location.replace(syncBtn.href); }, 1000);
+        log('OK');
+      } catch (e) { log(String(e && e.message || e)); }
+      setTimeout(() => { location.replace('./iphone-sync.html?fresh=' + Date.now()); }, 600);
     })();
   </script>
 </body>

@@ -4,146 +4,151 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Cache-Control" content="no-store">
-  <title>Sync iPhone — Ventas Meli</title>
+  <title>Instalar datos — Ventas Meli</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
-    :root { color-scheme: light; }
     html, body { margin: 0; padding: 0; }
     body {
       min-height: 100dvh;
       font-family: "SF Pro Text", "Segoe UI", system-ui, sans-serif;
-      background: linear-gradient(165deg, #eef2f6 0%, #f7f4ee 55%, #e8eef5 100%);
+      background: #eef2f6;
       color: #15202b;
-      padding: max(20px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom));
+      padding: max(16px, env(safe-area-inset-top)) 14px max(24px, env(safe-area-inset-bottom));
     }
-    .wrap {
-      width: 100%;
-      max-width: 420px;
-      margin: 0 auto;
-    }
+    .wrap { width: 100%; max-width: 440px; margin: 0 auto; }
     .card {
       background: #fff;
-      border: 1px solid rgba(21, 32, 43, 0.08);
-      border-radius: 18px;
-      padding: 22px 18px;
-      box-shadow: 0 10px 30px rgba(21, 32, 43, 0.06);
+      border: 1px solid #dde3ea;
+      border-radius: 16px;
+      padding: 18px 16px;
+      margin-bottom: 12px;
     }
-    h1 {
-      font-size: 1.35rem;
-      line-height: 1.25;
-      margin: 0 0 8px;
-      letter-spacing: -0.02em;
+    h1 { font-size: 1.25rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+    h2 { font-size: 0.95rem; margin: 0 0 10px; }
+    p, .lead { color: #5a6a7a; line-height: 1.45; margin: 0 0 12px; font-size: 0.92rem; }
+    .warn {
+      background: #fff6e8; border: 1px solid #f0d7a8; color: #7a4b00;
+      border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 0.9rem; line-height: 1.4;
     }
-    .lead {
-      color: #5a6a7a;
-      line-height: 1.45;
-      margin: 0 0 18px;
-      font-size: 0.95rem;
+    .okbox {
+      background: #eefaf2; border: 1px solid #c6e8d2; color: #0b7a3b;
+      border-radius: 12px; padding: 12px; margin-top: 12px; font-size: 0.95rem; font-weight: 650;
     }
     label {
-      display: block;
-      font-size: 12px;
-      font-weight: 650;
-      letter-spacing: 0.02em;
-      text-transform: uppercase;
-      color: #5a6a7a;
-      margin: 14px 0 6px;
+      display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+      text-transform: uppercase; color: #5a6a7a; margin: 10px 0 5px;
     }
-    input {
-      display: block;
-      width: 100%;
-      max-width: 100%;
-      padding: 12px 12px;
-      border: 1px solid #cfd7e0;
-      border-radius: 12px;
-      font-size: 16px;
-      background: #fbfcfd;
-      color: #15202b;
+    input[type="url"], input[type="text"], input[type="email"], input[type="password"] {
+      width: 100%; padding: 11px 12px; border: 1px solid #cfd7e0; border-radius: 11px;
+      font-size: 16px; background: #fbfcfd;
     }
-    input:focus {
-      outline: 2px solid #15202b;
-      outline-offset: 1px;
-      background: #fff;
+    button, .filebtn {
+      display: block; width: 100%; margin-top: 12px; padding: 13px 14px; border: 0;
+      border-radius: 12px; background: #15202b; color: #fff; font-size: 15px; font-weight: 700;
+      text-align: center; text-decoration: none;
     }
-    button {
-      display: block;
-      width: 100%;
-      margin-top: 20px;
-      padding: 14px 16px;
-      border: 0;
-      border-radius: 14px;
-      background: #15202b;
-      color: #fff;
-      font-size: 16px;
-      font-weight: 700;
+    button.secondary, .filebtn.secondary { background: #3d4f63; }
+    button.ghost { background: #fff; color: #15202b; border: 1px solid #cfd7e0; }
+    button:disabled { opacity: .5; }
+    #log, #log2 {
+      margin-top: 10px; padding: 10px; border-radius: 10px; background: #f4f6f8;
+      border: 1px solid #e2e8ef; font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+      white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; min-height: 3em;
     }
-    button:disabled { opacity: .55; }
-    #log {
-      margin-top: 14px;
-      padding: 12px;
-      border-radius: 12px;
-      background: #f4f6f8;
-      border: 1px solid #e2e8ef;
-      font-family: ui-monospace, Menlo, monospace;
-      font-size: 12px;
-      line-height: 1.45;
-      white-space: pre-wrap;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-      min-height: 4.5em;
+    .err { color: #9b1c2c !important; background: #fff1f2 !important; border-color: #f0c7cd !important; }
+    .counts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+    .counts div {
+      background: #f4f6f8; border-radius: 10px; padding: 10px; text-align: center;
     }
-    #log.ok { color: #0b7a3b; background: #eefaf2; border-color: #c6e8d2; }
-    #log.err { color: #9b1c2c; background: #fff1f2; border-color: #f0c7cd; }
-    .hint {
-      margin: 14px 0 0;
-      font-size: 13px;
-      color: #5a6a7a;
-      line-height: 1.4;
-    }
+    .counts strong { display: block; font-size: 1.4rem; }
+    .hidden { display: none !important; }
+    input[type="file"] { width: 100%; font-size: 14px; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="card">
-      <h1>Traer nube al iPhone</h1>
-      <p class="lead">Copia Meli + Amazon desde Supabase a este teléfono. Usa Safari (no el ícono de inicio).</p>
+    <div id="standalone-warn" class="warn hidden">
+      Estás en la app de <strong>pantalla de inicio</strong>. Esa copia NO comparte datos con Safari.
+      Cierra esto y abre la misma URL en <strong>Safari</strong>.
+    </div>
 
+    <div class="card">
+      <h1>Instalar datos en este iPhone</h1>
+      <p class="lead">Hazlo en Safari. Opción A (más fácil): importa el JSON del Mac. Opción B: baja desde la nube.</p>
+      <div class="counts" id="now-counts">
+        <div><strong id="now-meli">—</strong>Meli ahora</div>
+        <div><strong id="now-amz">—</strong>Amazon ahora</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>A · Importar archivo del Mac</h2>
+      <p>En el Mac ya está en el Escritorio: <code>ventas-meli-para-iphone.json</code>. AirDrop → Archivos → elige aquí.</p>
+      <input id="file" type="file" accept="application/json,.json">
+      <button type="button" id="btn-file">Instalar archivo</button>
+      <div id="log2"></div>
+    </div>
+
+    <div class="card">
+      <h2>B · Bajar desde la nube</h2>
       <label for="url">Project URL</label>
       <input id="url" type="url" value="https://xbdvplolnnfwewmntsjq.supabase.co" autocomplete="off" spellcheck="false">
-
-      <label for="key">anon / publishable key</label>
+      <label for="key">Key</label>
       <input id="key" type="text" value="sb_publishable_tTM7lp-xqUpc8tBwOAfMdA_qkNHhJlh" autocomplete="off" spellcheck="false">
-
       <label for="email">Email</label>
       <input id="email" type="email" value="angelalbortapia@gmail.com" autocomplete="username">
-
       <label for="password">Contraseña</label>
-      <input id="password" type="password" autocomplete="current-password" placeholder="Tu contraseña Sync">
+      <input id="password" type="password" autocomplete="current-password" placeholder="VentasMeli2026!">
+      <button type="button" id="go">Bajar nube</button>
+      <div id="log"></div>
+    </div>
 
-      <button id="go" type="button">Bajar nube a este iPhone</button>
-      <div id="log">Escribe la contraseña y toca el botón.</div>
-      <p class="hint">Si falla por red: Ajustes → Safari → Bloquear contenido → OFF.</p>
+    <div id="success" class="card hidden">
+      <div class="okbox" id="success-msg">Listo</div>
+      <div class="counts">
+        <div><strong id="ok-meli">0</strong>Meli</div>
+        <div><strong id="ok-amz">0</strong>Amazon</div>
+      </div>
+      <p class="lead" style="margin-top:12px">No uses el ícono viejo de inicio. Abre la app en esta misma pestaña de Safari:</p>
+      <a class="filebtn" id="open-app" href="./?installed=1">Abrir Ventas Meli</a>
+      <button type="button" class="ghost" id="recheck">Volver a contar este teléfono</button>
     </div>
   </div>
 
   <script>
-    const logEl = document.getElementById('log');
-    const log = (m) => { logEl.textContent += '\n' + m; };
-    const setLog = (m, cls) => {
-      logEl.textContent = m;
-      logEl.className = cls || '';
-    };
+    const PENDING = 'ventas-meli:pending-remote:v1';
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true;
+    if (isStandalone) document.getElementById('standalone-warn').classList.remove('hidden');
 
-    async function killSW() {
-      try {
-        const regs = await navigator.serviceWorker?.getRegistrations?.() || [];
-        for (const r of regs) await r.unregister();
-        const keys = await caches.keys();
-        await Promise.all(keys.map(k => caches.delete(k)));
-        if (regs.length || keys.length) log('Caché limpia');
-      } catch (e) {
-        log('Aviso SW: ' + (e && e.message));
-      }
+    function readCounts() {
+      const count = (key) => {
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) return 0;
+          const arr = JSON.parse(raw);
+          return Array.isArray(arr) ? arr.length : 0;
+        } catch { return -1; }
+      };
+      return { meli: count('ventas-meli:v1'), amazon: count('ventas-amazon:v1') };
+    }
+
+    function paintNow() {
+      const c = readCounts();
+      document.getElementById('now-meli').textContent = c.meli;
+      document.getElementById('now-amz').textContent = c.amazon;
+      return c;
+    }
+
+    function showSuccess(meli, amazon, via) {
+      document.getElementById('success').classList.remove('hidden');
+      document.getElementById('ok-meli').textContent = meli;
+      document.getElementById('ok-amz').textContent = amazon;
+      document.getElementById('success-msg').textContent =
+        'Instalado por ' + via + ' · Meli ' + meli + ' · Amazon ' + amazon;
+      document.getElementById('open-app').href = './?installed=' + Date.now() + '&mp=amazon';
+      paintNow();
+      document.getElementById('success').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     function stripMeta(settings) {
@@ -152,106 +157,158 @@
       return s;
     }
 
+    function writeCatalog({ meliLotes, meliSettings, amazonLotes, amazonSettings, ui, syncCfg, session, pendingRow }) {
+      try {
+        if (syncCfg) localStorage.setItem('ventas-meli:supabase:v1', JSON.stringify(syncCfg));
+        if (session) {
+          const url = (syncCfg && syncCfg.url) || '';
+          const projectRef = (url.match(/^https:\/\/([a-z0-9-]+)\.supabase\.co/i) || [])[1] || 'xbdvplolnnfwewmntsjq';
+          localStorage.setItem('sb-' + projectRef + '-auth-token', JSON.stringify(session));
+        }
+        if (pendingRow) localStorage.setItem(PENDING, JSON.stringify(pendingRow));
+
+        localStorage.setItem('ventas-meli:v1', JSON.stringify(meliLotes || []));
+        localStorage.setItem('ventas-meli:settings:v1', JSON.stringify(Object.assign({ marketplace: 'meli' }, meliSettings || {})));
+        localStorage.setItem('ventas-amazon:v1', JSON.stringify(amazonLotes || []));
+        localStorage.setItem('ventas-amazon:settings:v1', JSON.stringify(Object.assign({ marketplace: 'amazon' }, amazonSettings || {})));
+
+        const cleanUi = Object.assign({ mpView: 'amazon', marketplace: 'amazon' }, ui || {});
+        delete cleanUi.keepaApiKey; delete cleanUi.keepaCache; delete cleanUi.keepaLibrary;
+        cleanUi.mpView = 'amazon';
+        cleanUi.marketplace = 'amazon';
+        localStorage.setItem('ventas-meli:ui:v1', JSON.stringify(cleanUi));
+      } catch (e) {
+        throw new Error('No se pudo guardar en el iPhone (' + (e && e.message) + '). ¿Safari privado?');
+      }
+
+      const verify = readCounts();
+      if (verify.meli !== (meliLotes || []).length || verify.amazon !== (amazonLotes || []).length) {
+        throw new Error('Guardó mal: esperaba Meli ' + (meliLotes || []).length + ' / Amazon ' + (amazonLotes || []).length +
+          ' y quedó Meli ' + verify.meli + ' / Amazon ' + verify.amazon);
+      }
+      return verify;
+    }
+
+    function installFromBackup(data) {
+      if (!data || typeof data !== 'object') throw new Error('JSON inválido');
+      let meliLotes = [], meliSettings = {}, amazonLotes = [], amazonSettings = {}, ui = {};
+      if (data.stores) {
+        meliLotes = (data.stores.meli && data.stores.meli.lotes) || [];
+        meliSettings = stripMeta((data.stores.meli && data.stores.meli.settings) || {});
+        amazonLotes = (data.stores.amazon && data.stores.amazon.lotes) || [];
+        amazonSettings = stripMeta((data.stores.amazon && data.stores.amazon.settings) || {});
+        ui = data.ui || {};
+      } else if (Array.isArray(data.lotes)) {
+        // legacy single-MP
+        if (data.marketplace === 'amazon') {
+          amazonLotes = data.lotes; amazonSettings = stripMeta(data.settings || {});
+        } else {
+          meliLotes = data.lotes; meliSettings = stripMeta(data.settings || {});
+        }
+        ui = data.ui || {};
+      } else {
+        throw new Error('El archivo no trae stores.meli / stores.amazon');
+      }
+      if (!meliLotes.length && !amazonLotes.length) throw new Error('El archivo no trae productos');
+      return writeCatalog({ meliLotes, meliSettings, amazonLotes, amazonSettings, ui });
+    }
+
+    function installFromRemoteRow(row, syncCfg, session) {
+      const raw = (row.settings && typeof row.settings === 'object') ? row.settings : {};
+      const amz = (raw._amazon && typeof raw._amazon === 'object') ? raw._amazon : {};
+      const ui = Object.assign({}, raw._ui || {});
+      return writeCatalog({
+        meliLotes: row.lotes || [],
+        meliSettings: stripMeta(raw),
+        amazonLotes: Array.isArray(amz.lotes) ? amz.lotes : [],
+        amazonSettings: stripMeta(amz.settings || {}),
+        ui,
+        syncCfg,
+        session,
+        pendingRow: row,
+      });
+    }
+
+    async function killSW() {
+      try {
+        const regs = await navigator.serviceWorker?.getRegistrations?.() || [];
+        for (const r of regs) await r.unregister();
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      } catch (_) {}
+    }
+
+    document.getElementById('btn-file').addEventListener('click', async () => {
+      const logEl = document.getElementById('log2');
+      logEl.className = '';
+      const file = document.getElementById('file').files && document.getElementById('file').files[0];
+      if (!file) {
+        logEl.textContent = 'Elige el archivo primero';
+        logEl.className = 'err';
+        return;
+      }
+      try {
+        await killSW();
+        const data = JSON.parse(await file.text());
+        const v = installFromBackup(data);
+        logEl.textContent = 'OK archivo';
+        showSuccess(v.meli, v.amazon, 'archivo');
+      } catch (e) {
+        logEl.textContent = 'ERROR: ' + ((e && e.message) || e);
+        logEl.className = 'err';
+      }
+    });
+
     document.getElementById('go').addEventListener('click', async () => {
       const btn = document.getElementById('go');
+      const logEl = document.getElementById('log');
       btn.disabled = true;
-      setLog('Trabajando…');
+      logEl.className = '';
+      logEl.textContent = 'Trabajando…';
       await killSW();
-
       const url = document.getElementById('url').value.trim().replace(/\/+$/, '');
       const key = document.getElementById('key').value.trim();
       const email = document.getElementById('email').value.trim();
       const password = document.getElementById('password').value;
-      if (!url || !key || !email || !password) {
-        setLog('Faltan URL, key, email o contraseña', 'err');
-        btn.disabled = false;
-        return;
-      }
-
       try {
-        log('1) Ping…');
-        const health = await fetch(url + '/auth/v1/health', {
-          headers: { apikey: key, Authorization: 'Bearer ' + key },
-          cache: 'no-store',
-        });
-        if (!health.ok) throw new Error('Health HTTP ' + health.status);
-
-        log('2) Login…');
+        if (!password) throw new Error('Falta la contraseña');
         const loginRes = await fetch(url + '/auth/v1/token?grant_type=password', {
           method: 'POST',
-          headers: {
-            apikey: key,
-            Authorization: 'Bearer ' + key,
-            'Content-Type': 'application/json',
-          },
+          headers: { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
           cache: 'no-store',
           body: JSON.stringify({ email, password }),
         });
         const session = await loginRes.json();
-        if (!loginRes.ok) {
-          throw new Error(session.error_description || session.msg || session.error || ('Login ' + loginRes.status));
-        }
-        const access = session.access_token;
+        if (!loginRes.ok) throw new Error(session.error_description || session.msg || session.error || ('Login ' + loginRes.status));
         const userId = session.user && session.user.id;
-        if (!access || !userId) throw new Error('Login sin token/user');
-
-        log('3) Bajar catálogo…');
         const pullRes = await fetch(
           url + '/rest/v1/ventas_meli_state?select=lotes,settings,updated_at&user_id=eq.' + encodeURIComponent(userId),
-          {
-            headers: {
-              apikey: key,
-              Authorization: 'Bearer ' + access,
-              Accept: 'application/json',
-            },
-            cache: 'no-store',
-          }
+          { headers: { apikey: key, Authorization: 'Bearer ' + session.access_token, Accept: 'application/json' }, cache: 'no-store' }
         );
         if (!pullRes.ok) throw new Error('Pull HTTP ' + pullRes.status);
         const rows = await pullRes.json();
-        const row = Array.isArray(rows) ? rows[0] : null;
-        if (!row || !Array.isArray(row.lotes)) throw new Error('Nube vacía para este usuario');
-
-        const raw = (row.settings && typeof row.settings === 'object') ? row.settings : {};
-        const meliLotes = row.lotes;
-        const meliSettings = stripMeta(raw);
-        const amz = (raw._amazon && typeof raw._amazon === 'object') ? raw._amazon : {};
-        const amazonLotes = Array.isArray(amz.lotes) ? amz.lotes : [];
-        const amazonSettings = (amz.settings && typeof amz.settings === 'object') ? stripMeta(amz.settings) : {};
-        const ui = (raw._ui && typeof raw._ui === 'object') ? Object.assign({}, raw._ui) : {};
-        delete ui.keepaApiKey; delete ui.keepaCache; delete ui.keepaLibrary;
-
-        // Preferir vista Amazon si la nube la tenía (es donde está el catálogo grande)
-        if (!ui.mpView && raw._marketplace) ui.mpView = raw._marketplace;
-        if (!ui.marketplace) ui.marketplace = ui.mpView || raw._marketplace || 'amazon';
-
-        log('4) Guardar en el teléfono…');
-        localStorage.setItem('ventas-meli:supabase:v1', JSON.stringify({ url, anonKey: key }));
-        const projectRef = (url.match(/^https:\/\/([a-z0-9-]+)\.supabase\.co/i) || [])[1] || 'xbdvplolnnfwewmntsjq';
-        localStorage.setItem('sb-' + projectRef + '-auth-token', JSON.stringify(session));
-        // La app aplica esta fila al arrancar (garantiza Amazon aunque falle el cliente JS)
-        localStorage.setItem('ventas-meli:pending-remote:v1', JSON.stringify(row));
-
-        localStorage.setItem('ventas-meli:v1', JSON.stringify(meliLotes));
-        localStorage.setItem('ventas-meli:settings:v1', JSON.stringify(Object.assign({ marketplace: 'meli' }, meliSettings)));
-        localStorage.setItem('ventas-amazon:v1', JSON.stringify(amazonLotes));
-        localStorage.setItem('ventas-amazon:settings:v1', JSON.stringify(Object.assign({ marketplace: 'amazon' }, amazonSettings)));
-        localStorage.setItem('ventas-meli:ui:v1', JSON.stringify(ui));
-
-        setLog('Listo · Meli ' + meliLotes.length + ' · Amazon ' + amazonLotes.length + '\nAbriendo app…', 'ok');
-        setTimeout(() => {
-          location.replace('./?fromPhoneSync=' + Date.now());
-        }, 700);
+        const row = rows && rows[0];
+        if (!row) throw new Error('Nube vacía');
+        const v = installFromRemoteRow(row, { url, anonKey: key }, session);
+        logEl.textContent = 'OK nube';
+        showSuccess(v.meli, v.amazon, 'nube');
       } catch (e) {
-        const msg = (e && e.message) || String(e);
-        setLog('ERROR: ' + msg, 'err');
-        if (/load failed|failed to fetch|networkerror/i.test(msg)) {
-          log('Apaga Bloquear contenido / AdGuard y reintenta.');
+        logEl.textContent = 'ERROR: ' + ((e && e.message) || e);
+        logEl.className = 'err';
+        if (/load failed|failed to fetch/i.test(String(e && e.message))) {
+          logEl.textContent += '\nUsa la Opción A (archivo) o apaga Bloquear contenido.';
         }
+      } finally {
         btn.disabled = false;
       }
     });
 
+    document.getElementById('recheck').addEventListener('click', () => {
+      const c = paintNow();
+      alert('En ESTE Safari hay Meli ' + c.meli + ' · Amazon ' + c.amazon);
+    });
+
+    paintNow();
     killSW();
   </script>
 </body>

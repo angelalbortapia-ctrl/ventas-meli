@@ -1363,6 +1363,15 @@ const App = (() => {
                 mpView: window.State.marketplace === 'amazon' ? 'amazon' : 'meli',
             };
         }
+        // Deep-link desde iphone-sync: forzar Amazon (donde está el catálogo grande)
+        try {
+            const params = new URLSearchParams(location.search);
+            if (params.get('mp') === 'amazon' || params.get('installed')) {
+                window.State.ui = { ...window.State.ui, marketplace: 'amazon', mpView: 'amazon' };
+                window.State.marketplace = 'amazon';
+                window.State.saveUI();
+            }
+        } catch (_) { /* ignore */ }
         window.State.lotes = Data.loadLotes(window.State.marketplace);
         window.State.settings = Data.loadSettings(window.State.marketplace);
 
@@ -1441,6 +1450,13 @@ const App = (() => {
         setTimeout(() => maybeNotifyOpsAlerts().catch(() => {}), 2800);
 
         switchTab('dashboard');
+        // Tras instalar desde iPhone, abrir Productos para ver el catálogo de inmediato
+        try {
+            const params = new URLSearchParams(location.search);
+            if (params.get('installed') || params.get('fromPhoneSync')) {
+                switchTab('lotes');
+            }
+        } catch (_) { /* ignore */ }
         openOfertasDraft();
 
         // Tras Sync: recargar catálogo (iPhone a menudo aplicaba la nube DESPUÉS del primer paint)
