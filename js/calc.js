@@ -47,7 +47,7 @@ const Calc = (() => {
         tarifaReferidoMinima: 8,         // MXN por artículo
         usarTablaCategorias: true,       // false → solo comisionReferido fijo
         referidoSobreSinIVA: true,       // true = igual que Revenue Calculator MX
-        prepEnvioActivo: true,           // vista Envíos + marcar pedidos por preparar
+        prepEnvioActivo: true,           // legacy: estatus FBM en Productos (sin pestaña Envíos)
         categoriaDefault: 'hogar_cocina',
         usarTablaFba: true,              // false → solo tarifaFulfillmentDefault / lote.envio
         tarifaFulfillmentDefault: 64,    // Estándar ~0.3 kg, precio ≥ $499
@@ -694,6 +694,108 @@ const Calc = (() => {
         return recs;
     }
 
+    /**
+     * Sugerencia de reposición (cobertura ~30d sobre velocidad reciente).
+     * action: buy | hold | no
+     */
+    function suggestRestock(lote, settings = DEFAULT_SETTINGS, opts = {}) {
+        const coverDays = Math.max(7, Number(opts.coverDays) || 30);
+        const lookbackDays = Math.max(14, Number(opts.lookbackDays) || 45);
+        const calc = opts.calc || computeLote(lote, settings);
+        const stock = Math.max(0, Number(calc.inventarioRestante) || 0);
+        const costo = Math.max(0, Number(lote.costo) || 0);
+        const ventas = Array.isArray(lote.ventas) ? lote.ventas : [];
+        const now = Date.now();
+        const lookbackMs = lookbackDays * 86400000;
+
+        let udsLookback = 0;
+        ventas.forEach(v => {
+            const raw = v.fecha || v.date;
+            const d = parseSaleDate(raw) || (raw ? new Date(raw) : null);
+            const t = d && !Number.isNaN(d.getTime()) ? d.getTime() : 0;
+            if (!t || now - t > lookbackMs) return;
+            udsLookback += Math.max(1, Number(v.unidades) || Number(v.uds) || 1);
+        });
+
+        const vendidas = Number(calc.vendidas) || 0;
+        const vel = udsLookback / lookbackDays;
+        let suggestUds = vel > 0 ? Math.max(0, Math.ceil(vel * coverDays - stock)) : 0;
+        if (stock <= 0 && vendidas > 0 && suggestUds < 1) suggestUds = 1;
+        if (stock > 0 && stock <= 2 && udsLookback > 0 && suggestUds < 1) {
+            suggestUds = Math.max(1, Math.ceil(vel * coverDays - stock));
+        }
+
+        let action = 'hold';
+        let reason = 'Stock suficiente';
+        const est = calc.estrategia;
+
+        if (est === 'FINALIZADA' || est === 'PAUSADA') {
+            action = 'no';
+            reason = est === 'FINALIZADA' ? 'Archivada' : 'Pausada';
+            suggestUds = 0;
+        } else if (est === 'LIQUIDAR' || (Number(calc.utilidad) || 0) < 0) {
+            action = 'no';
+            reason = (Number(calc.utilidad) || 0) < 0 ? 'Utilidad negativa' : 'LIQUIDAR · no reponer';
+            suggestUds = 0;
+        } else if (vendidas === 0) {
+            action = 'hold';
+            reason = 'Sin ventas aún';
+            suggestUds = 0;
+        } else if (suggestUds > 0) {
+            action = 'buy';
+            reason = stock <= 0
+                ? 'Agotado'
+                : (vel > 0 ? `~${Math.round(stock / vel)} d de stock` : 'Stock bajo');
+            const cap = Math.max(2, Math.min(6, Math.ceil((udsLookback || 1) * 2)));
+            suggestUds = Math.min(suggestUds, cap);
+        } else if (vel > 0) {
+            reason = `~${Math.round(stock / vel)} d de cobertura`;
+        }
+
+        const daysLeft = vel > 0 ? stock / vel : null;
+        return {
+            action,
+            reason,
+            suggestUds,
+            cash: suggestUds * costo,
+            stock,
+            costo,
+            daysLeft,
+            vel,
+            coverDays,
+            lookbackDays,
+            utilidad: calc.utilidad,
+            estrategia: est,
+            vendidas,
+        };
+    }
+
+    function collectRestockPlan(taggedLotes, settingsByMp = {}, opts = {}) {
+        const list = Array.isArray(taggedLotes) ? taggedLotes : [];
+        const items = list.map(l => {
+            const mpKey = l._mp === 'meli' ? 'meli' : (l._mp === 'amazon' ? 'amazon' : 'amazon');
+            const settings = settingsByMp[mpKey]
+                || (mpKey === 'meli' ? DEFAULT_SETTINGS_MELI : DEFAULT_SETTINGS_AMAZON)
+                || DEFAULT_SETTINGS;
+            const s = suggestRestock(l, settings, opts);
+            return { lote: l, mp: mpKey, ...s };
+        });
+        const buy = items
+            .filter(i => i.action === 'buy' && i.suggestUds > 0)
+            .sort((a, b) => (b.cash - a.cash) || ((a.daysLeft ?? 999) - (b.daysLeft ?? 999)));
+        const avoid = items
+            .filter(i => i.action === 'no' && (i.vendidas > 0 || i.stock > 0))
+            .sort((a, b) => (b.stock * b.costo) - (a.stock * a.costo))
+            .slice(0, 6);
+        return {
+            buy,
+            avoid,
+            cashBuy: buy.reduce((s, i) => s + (i.cash || 0), 0),
+            udsBuy: buy.reduce((s, i) => s + (i.suggestUds || 0), 0),
+            items,
+        };
+    }
+
     function aggregate(lotes, settings = DEFAULT_SETTINGS) {
         let capitalDesplegado = 0;
         let cashIn = 0;
@@ -846,6 +948,8 @@ const Calc = (() => {
         estatusKey,
         aggregate,
         getRecomendaciones,
+        suggestRestock,
+        collectRestockPlan,
         fmtMXN,
         fmtPct,
         fmtDate,

@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=368">
+    <link rel="stylesheet" href="css/styles.css?v=376">
 </head>
 <body>
 
@@ -56,14 +56,6 @@
                 <span class="sb-icon" data-icon="ofertas"></span>
                 <span>Cola</span>
             </button>
-            <button type="button" class="sb-item" data-tab="insights">
-                <span class="sb-icon" data-icon="insights"></span>
-                <span>Insights</span>
-            </button>
-            <button type="button" class="sb-item" data-tab="caja">
-                <span class="sb-icon" data-icon="caja"></span>
-                <span>Caja</span>
-            </button>
         </nav>
     </div>
 
@@ -79,16 +71,6 @@
                 <span>Productos</span>
                 <span class="badge-count" id="sb-count-lotes">0</span>
             </button>
-            <button class="sb-item" data-tab="envios" role="tab" aria-selected="false" data-mp-only="amazon" data-feature="prep-envio" hidden>
-                <span class="sb-icon" data-icon="envios"></span>
-                <span>Envíos</span>
-                <span class="badge-count" id="sb-count-envios" hidden>0</span>
-            </button>
-            <button class="sb-item" data-tab="wishlist" role="tab" aria-selected="false" data-mp-only="amazon" hidden data-legacy-wishlist>
-                <span class="sb-icon" data-icon="wishlist"></span>
-                <span>Wishlist</span>
-                <span class="badge-count" id="sb-count-wishlist" hidden>0</span>
-            </button>
             <button class="sb-item" data-tab="ofertas" role="tab" aria-selected="false" data-mp-only="amazon" hidden>
                 <span class="sb-icon" data-icon="ofertas"></span>
                 <span>Ofertas</span>
@@ -98,44 +80,21 @@
                 <span class="sb-icon" data-icon="keepa"></span>
                 <span>Keepa</span>
             </button>
-            <button class="sb-item" data-tab="caja" role="tab" aria-selected="false">
-                <span class="sb-icon" data-icon="caja"></span>
-                <span>Caja</span>
-                <span class="badge-count" id="sb-count-caja" hidden>0</span>
-            </button>
-            <button class="sb-item" data-tab="insights" role="tab" aria-selected="false">
-                <span class="sb-icon" data-icon="insights"></span>
-                <span>Insights</span>
-                <span class="badge-count" id="sb-count-insights" hidden>0</span>
-            </button>
         </nav>
     </div>
 
     <div class="sb-section">
         <h5>Sistema</h5>
         <nav class="sb-nav" role="tablist" aria-label="Sistema">
+            <button class="sb-item" data-tab="caja" role="tab" aria-selected="false">
+                <span class="sb-icon" data-icon="caja"></span>
+                <span>Caja</span>
+                <span class="badge-count" id="sb-count-caja" hidden>0</span>
+            </button>
             <button class="sb-item" data-tab="settings" role="tab" aria-selected="false">
                 <span class="sb-icon" data-icon="settings"></span>
                 <span>Ajustes</span>
                 <span class="sb-item-hint muted small">Sync</span>
-            </button>
-        </nav>
-    </div>
-
-    <div class="sb-section">
-        <h5>Datos</h5>
-        <nav class="sb-nav">
-            <button class="sb-item" id="btn-import">
-                <span class="sb-icon" data-icon="import"></span>
-                <span>Importar Excel</span>
-            </button>
-            <button class="sb-item" id="btn-export">
-                <span class="sb-icon" data-icon="export"></span>
-                <span>Exportar Excel</span>
-            </button>
-            <button class="sb-item" id="btn-backup">
-                <span class="sb-icon" data-icon="backup"></span>
-                <span>Respaldo JSON</span>
             </button>
         </nav>
     </div>
@@ -178,10 +137,6 @@
                 <span class="tb-sync-label"></span>
             </button>
             <span class="pill kbd-hint"><kbd>⌘</kbd><kbd>K</kbd> Comandos</span>
-            <button class="tb-bell" id="tb-bell" aria-label="Ver insights">
-                <span>🔔</span>
-                <span class="tb-bell-count" id="tb-bell-count" hidden>0</span>
-            </button>
             <span class="tb-date" id="tb-date"></span>
         </div>
     </header>
@@ -199,13 +154,7 @@
             <div id="lotes-canvas"></div>
         </section>
 
-        <!-- ============ ENVÍOS (Amazon) ============ -->
-        <section class="view" id="view-envios" hidden aria-label="Envíos"></section>
-
-        <!-- ============ WISHLIST (Amazon arbitraje) ============ -->
-        <section class="view" id="view-wishlist" hidden aria-label="Wishlist"></section>
-
-        <!-- ============ OFERTAS (retail → Amazon) ============ -->
+        <!-- ============ OFERTAS (radar + Guardados) ============ -->
         <section class="view" id="view-ofertas" hidden aria-label="Ofertas"></section>
 
         <!-- ============ KEEPA LAB (Amazon research) ============ -->
@@ -213,9 +162,6 @@
 
         <!-- ============ CAJA (cobro + bolsitas) ============ -->
         <section class="view" id="view-caja" hidden aria-label="Caja"></section>
-
-        <!-- ============ INSIGHTS ============ -->
-        <section class="view" id="view-insights" hidden aria-label="Insights"></section>
 
         <!-- ============ AJUSTES ============ -->
         <section class="view" id="view-settings" hidden>
@@ -320,7 +266,7 @@
                     <p class="muted small">
                         La extensión Premium de Keepa <strong>no incluye</strong> la API: necesitas la key en
                         <a href="https://keepa.com/#!api" target="_blank" rel="noopener">keepa.com/#!api</a>.
-                        Corre la app con <code>python3 serve.py</code> (proxy CORS). Con ASIN, verás precio/BSR en Wishlist y Productos.
+                        Corre la app con <code>python3 serve.py</code> (proxy CORS). Con ASIN, verás precio/BSR en Ofertas y Productos.
                     </p>
                 </div>
 
@@ -353,10 +299,6 @@
                     <label class="check-row">
                         <input type="checkbox" id="set-amz-referido-sin-iva" checked>
                         <span>Referido sobre precio sin IVA (÷ 1.16) — igual que Calculadora Amazon</span>
-                    </label>
-                    <label class="check-row">
-                        <input type="checkbox" id="set-amz-prep-envio" checked>
-                        <span>Preparación de envíos (menú Envíos · FBA a Amazon + FBM al cliente)</span>
                     </label>
                     <label><span>Tarifa mínima referido (MXN / ud)</span><input type="number" step="0.01" id="set-amz-min-referido"></label>
                     <label><span>Categoría default</span>
@@ -405,7 +347,7 @@
 </div>
 
 <!-- Bottom tabs (iPhone) -->
-<!-- 4 tabs principales + Más. Slot 3 = Wishlist en Amazon, Insights en Meli. -->
+<!-- Tabs principales + Más. Slot extra = Ofertas solo en Amazon. -->
 <nav class="mobile-tabbar" id="mobile-tabbar" aria-label="Navegación principal">
     <button type="button" class="mobile-tab active" data-tab="dashboard">
         <span class="mobile-tab-icon" data-icon="dashboard"></span>
@@ -420,11 +362,6 @@
         <span class="mobile-tab-icon" data-icon="ofertas"></span>
         <span>Ofertas</span>
         <span class="mobile-tab-badge" id="m-tab-ofertas" hidden>0</span>
-    </button>
-    <button type="button" class="mobile-tab" data-tab="insights" data-mp-slot="non-amazon">
-        <span class="mobile-tab-icon" data-icon="insights"></span>
-        <span>Insights</span>
-        <span class="mobile-tab-badge" id="m-tab-insights" hidden>0</span>
     </button>
     <button type="button" class="mobile-tab" data-tab="caja">
         <span class="mobile-tab-icon" data-icon="caja"></span>
@@ -565,7 +502,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/calc.js?v=24"></script>
+<script src="js/calc.js?v=25"></script>
 <script src="js/data.js?v=61"></script>
 <script src="js/excel.js?v=8"></script>
 <script src="js/icons.js?v=3"></script>
@@ -576,18 +513,16 @@
 <script src="js/serpapi.js?v=3"></script>
 <script src="js/keepa.js?v=24"></script>
 <script src="js/keepa-chart.js?v=13"></script>
-<script src="js/keepa-view.js?v=28"></script>
-<script src="js/palette.js?v=14"></script>
-<script src="js/insights.js?v=17"></script>
-<script src="js/lotes.js?v=135"></script>
-<script src="js/envios.js?v=14"></script>
-<script src="js/wishlist.js?v=14"></script>
-<script src="js/ofertas.js?v=25"></script>
-<script src="js/dashboard.js?v=165"></script>
-<script src="js/caja.js?v=22"></script>
-<script src="js/sync.js?v=22"></script>
-<script src="js/settings.js?v=25"></script>
-<script src="js/app.js?v=94"></script>
+<script src="js/keepa-view.js?v=30"></script>
+<script src="js/palette.js?v=17"></script>
+<script src="js/lotes.js?v=137"></script>
+<script src="js/wishlist.js?v=18"></script>
+<script src="js/ofertas.js?v=27"></script>
+<script src="js/dashboard.js?v=170"></script>
+<script src="js/caja.js?v=24"></script>
+<script src="js/sync.js?v=26"></script>
+<script src="js/settings.js?v=26"></script>
+<script src="js/app.js?v=100"></script>
 
 </body>
 </html>

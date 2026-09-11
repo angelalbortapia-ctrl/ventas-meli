@@ -782,10 +782,6 @@ const Sync = (() => {
             if (window.App?.refreshMarketplaceChrome) App.refreshMarketplaceChrome();
             if (window.SettingsView?.loadIntoForm) SettingsView.loadIntoForm();
             if (window.State.view === 'lotes' && window.LotesView?.render) LotesView.render();
-            if (window.State.view === 'dashboard' && window.DashboardView?.render) DashboardView.render();
-            if (window.State.view === 'insights' && window.InsightsView?.render) InsightsView.render();
-            if (window.State.view === 'envios' && window.EnviosView?.render) EnviosView.render();
-            if (window.State.view === 'wishlist' && window.WishlistView?.render) WishlistView.render();
             if (window.State.view === 'ofertas' && window.OfertasView?.render) OfertasView.render();
             if (window.State.view === 'keepa' && window.KeepaView?.render) KeepaView.render();
             if (window.State.view === 'caja' && window.CajaView?.render) CajaView.render();

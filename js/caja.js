@@ -10,6 +10,8 @@ const CajaView = (() => {
         filter: 'pendiente', // pendiente | hecho
         q: '',
         selected: new Set(), // ventaIds
+        freightForm: null, // 'charge' | 'payment' | null
+        freightSaving: false,
     };
 
     function esc(s) {
@@ -36,6 +38,316 @@ const CajaView = (() => {
             percents: { reinversion: 35, reserva: 20, ads: 15, insumos: 15, utilidad: 15 },
             buckets: { reinversion: 0, reserva: 0, ads: 0, insumos: 0, utilidad: 0 },
         };
+    }
+
+    function shortName(s, n = 28) {
+        const t = String(s || '').trim();
+        if (t.length <= n) return t;
+        return `${t.slice(0, n - 1)}…`;
+    }
+
+    function restockPicksForCaja(reinversion) {
+        const mp = window.State.marketplace === 'amazon' ? 'amazon' : 'meli';
+        const tagged = (window.State.lotes || []).map(l => ({ ...l, _mp: mp }));
+        const plan = Calc.collectRestockPlan?.(tagged, {
+            [mp]: window.State.settings || {},
+        }) || { buy: [], cashBuy: 0 };
+        let left = Math.max(0, Number(reinversion) || 0);
+        const picks = [];
+        for (const item of plan.buy || []) {
+            const costo = Number(item.costo) || 0;
+            if (!(costo > 0) || !(item.suggestUds > 0) || left < costo) continue;
+            const maxUds = Math.min(item.suggestUds, Math.floor(left / costo));
+            if (maxUds < 1) continue;
+            const fitCash = maxUds * costo;
+            picks.push({ ...item, fitUds: maxUds, fitCash });
+            left = Math.round((left - fitCash) * 100) / 100;
+            if (picks.length >= 3) break;
+        }
+        return { plan, picks, spend: picks.reduce((s, p) => s + p.fitCash, 0) };
+    }
+
+    function layReinversionBuyCard() {
+        const alloc = readAlloc();
+        const reinversion = Number(alloc.buckets?.reinversion) || 0;
+        const { plan, picks, spend } = restockPicksForCaja(reinversion);
+        const lead = reinversion > 0
+            ? (picks.length
+                ? `Puedes comprar hasta <strong class="mono">${Calc.fmtMXN(spend)}</strong> con Reinversión`
+                : ((plan.buy || []).length
+                    ? `Reinversión <strong class="mono">${Calc.fmtMXN(reinversion)}</strong> · sugerido ${Calc.fmtMXN(plan.cashBuy)} (arriba del saldo)`
+                    : `Reinversión <strong class="mono">${Calc.fmtMXN(reinversion)}</strong> · sin SKUs urgentes`))
+            : `Reinversión <strong class="mono">${Calc.fmtMXN(0)}</strong> · cobra ventas para llenarla`;
+
+        return `
+            <section class="card caja-reinvest">
+                <div class="caja-reinvest-head">
+                    <div>
+                        <p class="caja-reinvest-kicker">Reinversión</p>
+                        <p class="caja-reinvest-lead">${lead}</p>
+                    </div>
+                    <button type="button" class="btn ghost btn-sm" data-caja-goto-lotes>Productos</button>
+                </div>
+                ${picks.length ? `
+                    <ul class="caja-reinvest-list">
+                        ${picks.map(p => `
+                            <li>
+                                <button type="button" class="caja-reinvest-row" data-caja-restock="${esc(p.lote.id)}" data-caja-uds="${p.fitUds}">
+                                    <span class="caja-reinvest-name">${esc(shortName(p.lote.producto || p.lote.sku))}</span>
+                                    <span class="muted small">${esc(p.reason)} · +${p.fitUds} ud · ${Calc.fmtMXN(p.fitCash)}</span>
+                                </button>
+                                <button type="button" class="btn primary btn-sm" data-caja-restock="${esc(p.lote.id)}" data-caja-uds="${p.fitUds}">Reponer ${p.fitUds}</button>
+                            </li>
+                        `).join('')}
+                    </ul>
+                ` : `
+                    <p class="muted small caja-reinvest-empty">Marca cobros arriba: el % de Reinversión alimenta esta lista.</p>
+                `}
+            </section>
+        `;
+    }
+
+    function loteLabel(loteId) {
+        if (!loteId) return '';
+        const lote = (window.State.lotes || []).find(l => String(l.id) === String(loteId));
+        if (!lote) return 'Lote eliminado';
+        const name = lote.producto || 'Producto';
+        const sku = lote.sku ? ` · ${lote.sku}` : '';
+        const v = lote.variante ? ` · ${lote.variante}` : '';
+        return `${name}${v}${sku}`;
+    }
+
+    function fbaLoteOptionsHtml(selected = '') {
+        const lotes = (window.State.lotes || [])
+            .filter(l => String(l.tipo || '').toUpperCase() === 'FBA')
+            .slice()
+            .sort((a, b) => String(a.producto || '').localeCompare(String(b.producto || ''), 'es'));
+        const opts = lotes.map(l => {
+            const label = `${l.producto || 'Producto'}${l.variante ? ` · ${l.variante}` : ''} (${l.sku || 'sin SKU'})`;
+            const sel = String(l.id) === String(selected) ? ' selected' : '';
+            return `<option value="${esc(l.id)}"${sel}>${esc(label)}</option>`;
+        }).join('');
+        return `<option value="">Sin vincular a un lote</option>${opts}`;
+    }
+
+    function fmtFreightDate(at) {
+        try {
+            return new Date(at).toLocaleDateString('es-MX', {
+                year: 'numeric', month: 'short', day: 'numeric',
+            });
+        } catch {
+            return '';
+        }
+    }
+
+    /** Deuda flete inbound FBA — solo Amazon. */
+    function layFreightDebt() {
+        if (window.State.marketplace !== 'amazon' || !window.Freight) return '';
+        const state = Freight.readFreight();
+        const totals = Freight.freightTotals(state);
+        const sorted = state.ledger.slice().sort((a, b) => (b.at || 0) - (a.at || 0));
+        const formMode = local.freightForm;
+
+        const formHtml = formMode === 'charge' ? `
+            <form class="caja-freight-form" id="caja-freight-form" data-mode="charge">
+                <div class="caja-freight-form-grid">
+                    <label>
+                        <span>Monto del cargo (MXN)</span>
+                        <input type="number" min="0.01" step="0.01" name="amount" required placeholder="ej. 130" inputmode="decimal">
+                    </label>
+                    <label>
+                        <span>Nota (opcional)</span>
+                        <input type="text" name="note" maxlength="120" placeholder="histórico inbound, envío marzo…">
+                    </label>
+                    <label class="caja-freight-form-full">
+                        <span>Lote FBA (opcional)</span>
+                        <select name="loteId">${fbaLoteOptionsHtml()}</select>
+                    </label>
+                    <label class="caja-freight-form-full caja-freight-check">
+                        <input type="checkbox" name="allocateCost">
+                        <span>Repartir al costo/ud del lote</span>
+                    </label>
+                </div>
+                <div class="caja-freight-form-actions">
+                    <button type="submit" class="btn primary btn-sm">Guardar cargo</button>
+                    <button type="button" class="btn ghost btn-sm" data-freight-cancel>Cancelar</button>
+                </div>
+            </form>
+        ` : formMode === 'payment' ? `
+            <form class="caja-freight-form" id="caja-freight-form" data-mode="payment">
+                <div class="caja-freight-form-grid">
+                    <label>
+                        <span>Monto que pagaste (MXN)</span>
+                        <input type="number" min="0.01" step="0.01" name="amount" required placeholder="ej. 130" inputmode="decimal">
+                    </label>
+                    <label>
+                        <span>Nota (opcional)</span>
+                        <input type="text" name="note" maxlength="120" placeholder="pago tarjeta, descuento en payout…">
+                    </label>
+                </div>
+                <p class="muted small" style="margin:0 0 8px">Saldo actual: ${Calc.fmtMXN(totals.balanceDisplay)}. El pago baja lo que le debes.</p>
+                <div class="caja-freight-form-actions">
+                    <button type="submit" class="btn primary btn-sm">Registrar pago</button>
+                    <button type="button" class="btn ghost btn-sm" data-freight-cancel>Cancelar</button>
+                </div>
+            </form>
+        ` : '';
+
+        const listHtml = sorted.length ? `
+            <ul class="caja-freight-list">
+                ${sorted.map(e => {
+                    const isCharge = e.type === 'charge';
+                    const loteTxt = isCharge && e.loteId ? loteLabel(e.loteId) : '';
+                    return `
+                        <li class="caja-freight-row caja-freight-${esc(e.type)}">
+                            <div class="caja-freight-row-main">
+                                <span class="caja-freight-badge">${isCharge ? 'Cargo' : 'Pago'}</span>
+                                <span class="caja-freight-amt">${isCharge ? '+' : '−'}${Calc.fmtMXN(e.amount)}</span>
+                                <span class="caja-freight-date muted small">${esc(fmtFreightDate(e.at))}</span>
+                            </div>
+                            <div class="caja-freight-row-meta muted small">
+                                ${e.note ? `<span>${esc(e.note)}</span>` : ''}
+                                ${loteTxt ? `<span>${esc(loteTxt)}</span>` : ''}
+                                ${e.allocatedCost ? '<span>En costo/ud</span>' : ''}
+                                ${!e.note && !loteTxt && !e.allocatedCost ? '<span>—</span>' : ''}
+                            </div>
+                            <div class="caja-freight-row-actions">
+                                ${isCharge && e.loteId && !e.allocatedCost ? `
+                                    <button type="button" class="btn ghost btn-sm" data-freight-alloc="${esc(e.id)}">→ Costo/ud</button>
+                                ` : ''}
+                                <button type="button" class="btn ghost btn-sm"
+                                    data-freight-del="${esc(e.id)}" aria-label="Eliminar movimiento">Eliminar</button>
+                            </div>
+                        </li>
+                    `;
+                }).join('')}
+            </ul>
+        ` : `
+            <p class="muted small caja-freight-empty-hint">
+                Si Amazon ya te cobró envíos inbound, registra un cargo con el total (ej. $130).
+            </p>
+        `;
+
+        return `
+            <section class="card caja-freight" id="caja-freight" aria-label="Deuda de envío a FBA">
+                <div class="caja-freight-head">
+                    <div>
+                        <p class="caja-freight-kicker">Amazon FBA</p>
+                        <p class="caja-freight-title">Deuda envío a FBA</p>
+                        <p class="muted small" style="margin:4px 0 0">
+                            Flete de mandar inventario al almacén. Opcional: repartirlo al costo/ud.
+                        </p>
+                    </div>
+                    <div class="caja-freight-kpi${totals.balanceDisplay > 0 ? ' is-owe' : ''}">
+                        <div class="caja-freight-kpi-label">Le debes a Amazon</div>
+                        <div class="caja-freight-kpi-value"${UI.fxAttrs?.(totals.balanceDisplay, 'mxn') || ''}>${Calc.fmtMXN(totals.balanceDisplay)}</div>
+                        <div class="caja-freight-kpi-sub muted small">
+                            Cargos ${Calc.fmtMXN(totals.charges)} · Pagos ${Calc.fmtMXN(totals.payments)}
+                        </div>
+                    </div>
+                </div>
+                <div class="caja-freight-actions">
+                    <button type="button" class="btn primary btn-sm" data-freight-open="charge">+ Cargo</button>
+                    <button type="button" class="btn btn-sm" data-freight-open="payment"${totals.balanceDisplay > 0 ? '' : ' disabled'}>+ Pago</button>
+                </div>
+                ${formHtml}
+                ${listHtml}
+            </section>
+        `;
+    }
+
+    function bindFreight(root) {
+        root.querySelectorAll('[data-freight-open]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                local.freightForm = btn.dataset.freightOpen === 'payment' ? 'payment' : 'charge';
+                render();
+                document.querySelector('#caja-freight-form input[name="amount"]')?.focus();
+            });
+        });
+        root.querySelectorAll('[data-freight-cancel]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                local.freightForm = null;
+                render();
+            });
+        });
+        const form = root.querySelector('#caja-freight-form');
+        form?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (local.freightSaving) return;
+            local.freightSaving = true;
+            const submitBtn = form.querySelector('[type="submit"]');
+            if (submitBtn) submitBtn.disabled = true;
+            const mode = form.dataset.mode;
+            const amount = Freight.parseMoney(form.querySelector('[name="amount"]')?.value);
+            const note = form.querySelector('[name="note"]')?.value || '';
+            try {
+                if (mode === 'payment') {
+                    const entry = Freight.addPayment({ amount, note });
+                    UI.toast(`Pago ${Calc.fmtMXN(entry.amount)} registrado`);
+                } else {
+                    const loteId = form.querySelector('[name="loteId"]')?.value || null;
+                    const allocateCost = !!form.querySelector('[name="allocateCost"]')?.checked;
+                    if (allocateCost && !loteId) {
+                        throw new Error('Elige un lote FBA para repartir al costo');
+                    }
+                    const entry = Freight.addCharge({ amount, note, loteId, allocateCost });
+                    UI.toast(allocateCost
+                        ? `Cargo ${Calc.fmtMXN(entry.amount)} · sumado al costo/ud`
+                        : `Cargo ${Calc.fmtMXN(entry.amount)} registrado`);
+                }
+                local.freightForm = null;
+                render();
+                if (window.State.view === 'dashboard') DashboardView?.render?.();
+            } catch (err) {
+                UI.toast(err.message || 'No se pudo guardar', 'error');
+                if (submitBtn) submitBtn.disabled = false;
+            } finally {
+                local.freightSaving = false;
+            }
+        });
+        root.querySelectorAll('[data-freight-alloc]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const ok = await UI.confirm({
+                    title: 'Repartir flete al costo/ud',
+                    message: 'Suma (monto ÷ unidades del lote) al costo unitario. No se puede deshacer desde aquí.',
+                    primaryLabel: 'Sumar al costo',
+                });
+                if (!ok) return;
+                try {
+                    const res = Freight.allocateChargeToLoteCost(btn.dataset.freightAlloc);
+                    UI.toast(`+${Calc.fmtMXN(res.perUnit)}/ud → costo ${Calc.fmtMXN(res.nextCosto)}`);
+                    render();
+                    if (window.State.view === 'lotes') LotesView?.render?.();
+                } catch (err) {
+                    UI.toast(err.message || 'No se pudo repartir', 'error');
+                }
+            });
+        });
+        root.querySelectorAll('[data-freight-del]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const ok = await UI.confirm({
+                    title: 'Eliminar movimiento',
+                    message: 'Se quita de la deuda de envío a FBA. No se puede deshacer.',
+                    primaryLabel: 'Eliminar',
+                    danger: true,
+                });
+                if (!ok) return;
+                if (Freight.removeEntry(btn.dataset.freightDel)) {
+                    UI.toast('Movimiento eliminado');
+                    render();
+                    if (window.State.view === 'dashboard') DashboardView?.render?.();
+                }
+            });
+        });
+    }
+
+    function focusFreight() {
+        const el = document.getElementById('caja-freight');
+        if (!el) return false;
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        el.classList.add('is-flash');
+        setTimeout(() => el.classList.remove('is-flash'), 1200);
+        return true;
     }
 
     function splitByPercents(amount, percents) {
@@ -340,6 +652,9 @@ const CajaView = (() => {
                 </div>
             </div>
 
+            ${layReinversionBuyCard()}
+            ${layFreightDebt()}
+
             <div class="dash-seg caja-tabs" role="tablist" aria-label="Filtro Caja">
                 <button type="button" class="dash-seg-btn${showPending ? ' active' : ''}"
                     data-caja-filter="pendiente" role="tab" aria-selected="${showPending}">
@@ -386,6 +701,7 @@ const CajaView = (() => {
         `;
 
         bind(root, { pending, todayRows });
+        bindFreight(root);
         UI.countUp?.(root);
     }
 
@@ -454,6 +770,19 @@ const CajaView = (() => {
             const picked = pending.filter(r => local.selected.has(r.ventaId));
             markMany(picked);
         });
+
+        root.querySelector('[data-caja-goto-lotes]')?.addEventListener('click', () => {
+            window.App?.switchTab?.('lotes');
+        });
+
+        root.querySelectorAll('[data-caja-restock]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = btn.getAttribute('data-caja-restock');
+                const uds = Number(btn.getAttribute('data-caja-uds')) || 1;
+                if (!id) return;
+                await window.LotesView?.restock?.(id, { uds });
+            });
+        });
     }
 
     function init() {
@@ -467,6 +796,7 @@ const CajaView = (() => {
         render,
         open,
         pendingCount,
+        focusFreight,
     };
 })();
 window.CajaView = CajaView;

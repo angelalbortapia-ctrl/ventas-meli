@@ -1,6 +1,6 @@
 /* ==========================================================================
    Bootstrap + orquestación:
-     - navegación sidebar (dashboard, productos, envíos, caja, insights, ajustes)
+     - navegación sidebar (dashboard, productos, caja, ajustes)
      - marketplace Meli / Amazon / General
      - importar/exportar Excel (con wizard)
      - respaldo JSON (con dialog propio)
@@ -14,16 +14,17 @@ const App = (() => {
     const TAB_LABELS = {
         dashboard: 'Inicio',
         lotes: 'Productos',
-        envios: 'Envíos',
-        wishlist: 'Ofertas',
+        envios: 'Inicio', // alias legacy → Inicio (pestaña retirada)
+        wishlist: 'Ofertas', // alias legacy → Ofertas/Guardados
         ofertas: 'Ofertas',
         keepa: 'Keepa',
         caja: 'Caja',
-        insights: 'Insights',
+        insights: 'Inicio', // alias legacy → Inicio (pestaña retirada)
         settings: 'Ajustes',
     };
 
     let pageTxBusy = false;
+    let pageTxToken = 0;
 
     function prefersReducedMotion() {
         return !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
@@ -33,8 +34,23 @@ const App = (() => {
     function runPageTransition(kind, mutate) {
         const body = document.body;
         const root = document.documentElement;
-        if (prefersReducedMotion() || pageTxBusy) {
+        const token = ++pageTxToken;
+        const guarded = () => {
+            if (token !== pageTxToken) return;
             mutate();
+        };
+
+        if (prefersReducedMotion()) {
+            guarded();
+            return Promise.resolve();
+        }
+
+        // Si ya hay animación, gana la última navegación (la pendiente queda invalidada).
+        if (pageTxBusy) {
+            guarded();
+            delete body.dataset.pageTransition;
+            delete root.dataset.pageTransition;
+            body.classList.remove('is-page-exit', 'is-page-enter', 'is-mp-sky-shift');
             return Promise.resolve();
         }
 
@@ -43,7 +59,9 @@ const App = (() => {
         root.dataset.pageTransition = kind;
 
         const finish = () => {
+            // Siempre libera el lock; si hubo supersede, no toca clases de otra transición.
             pageTxBusy = false;
+            if (token !== pageTxToken) return;
             delete body.dataset.pageTransition;
             delete root.dataset.pageTransition;
             body.classList.remove('is-page-exit', 'is-page-enter', 'is-mp-sky-shift');
@@ -51,10 +69,10 @@ const App = (() => {
 
         if (typeof document.startViewTransition === 'function') {
             try {
-                const tx = document.startViewTransition(() => { mutate(); });
+                const tx = document.startViewTransition(() => { guarded(); });
                 return tx.finished.then(finish, finish);
             } catch (_) {
-                mutate();
+                guarded();
                 finish();
                 return Promise.resolve();
             }
@@ -64,7 +82,11 @@ const App = (() => {
         if (kind === 'channel') body.classList.add('is-mp-sky-shift');
         return new Promise((resolve) => {
             window.setTimeout(() => {
-                mutate();
+                guarded();
+                if (token !== pageTxToken) {
+                    resolve();
+                    return;
+                }
                 body.classList.remove('is-page-exit');
                 body.classList.add('is-page-enter');
                 window.setTimeout(() => {
@@ -84,20 +106,17 @@ const App = (() => {
                 tab = 'ofertas';
                 window.__ofertasOpenGuardados = true;
             }
-            // Envíos (deuda FBA + colas) solo en Amazon
-            if (tab === 'envios' && (!window.EnviosView || !window.EnviosView.canOpen?.())) {
-                if (window.State.marketplace !== 'amazon') {
-                    applyMarketplaceView('amazon', { toast: false, animate: false });
-                }
-                if (!window.EnviosView?.canOpen?.()) tab = 'settings';
-            }
+            // Insights retirado: alias a Inicio
+            if (tab === 'insights') tab = 'dashboard';
+            // Envíos retirado: alias a Inicio
+            if (tab === 'envios') tab = 'dashboard';
             if (['wishlist', 'ofertas', 'keepa'].includes(tab) && window.State.marketplace !== 'amazon') {
                 applyMarketplaceView('amazon', { toast: false, animate: false });
                 if (window.State.marketplace !== 'amazon') {
                     tab = 'lotes';
                 }
             }
-            if (['lotes', 'envios', 'wishlist', 'ofertas', 'keepa', 'insights'].includes(tab)
+            if (['lotes', 'wishlist', 'ofertas', 'keepa'].includes(tab)
                 && window.State.ui?.mpView === 'general') {
                 const real = Data.normalizeMarketplace(window.State.marketplace);
                 window.State.ui = { ...window.State.ui, mpView: real };
@@ -127,13 +146,7 @@ const App = (() => {
             UI.clearCountFx?.(view);
 
             if (tab === 'dashboard') DashboardView.render();
-            else if (tab === 'insights') InsightsView.render();
             else if (tab === 'lotes') LotesView.render();
-            else if (tab === 'envios') EnviosView.render();
-            else if (tab === 'wishlist') {
-                OfertasView.render();
-                OfertasView.showGuardados?.();
-            }
             else if (tab === 'ofertas') {
                 OfertasView.render();
                 if (window.__ofertasOpenGuardados) {
@@ -194,18 +207,7 @@ const App = (() => {
             });
             date.textContent = fmt.format(now);
         }
-        // Alerts bell — Insights + opcional permiso push
-        const bell = document.getElementById('tb-bell');
-        if (bell) {
-            bell.addEventListener('click', async () => {
-                if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-                    await requestOpsNotifyPermission();
-                } else {
-                    await maybeNotifyOpsAlerts();
-                }
-                switchTab('insights');
-            });
-        }
+        // Alertas ops (toasts / Notification API) — sin pestaña Insights
         refreshNavCounts();
         window.State.subscribe(refreshNavCounts);
 
@@ -309,28 +311,14 @@ const App = (() => {
      */
     function openMoreSheet() {
         const isAmazon = window.State.marketplace === 'amazon';
-        const prepOn = isAmazon && window.State.settings?.prepEnvioActivo !== false;
-        const pendingShip = window.EnviosView?.pendingCount?.() || 0;
-        const alerts = window.InsightsView?.alertCount?.() || 0;
 
         const items = [];
-        if (isAmazon) {
-            items.push({ id: 'envios', icon: 'envios', label: 'Envíos',
-                hint: prepOn ? 'FBA + FBM + deuda flete' : 'Deuda envío a FBA',
-                badge: pendingShip || null });
-        }
         if (isAmazon) {
             items.push({ id: 'ofertas', icon: 'ofertas', label: 'Ofertas',
                 hint: 'Radar + Guardados · → Producto',
                 badge: window.OfertasView?.pendingCount?.() || null });
             items.push({ id: 'keepa', icon: 'keepa', label: 'Keepa',
                 hint: 'Checar ASIN + alertas catálogo' });
-        }
-        // Slot Insights: en Amazon está fuera del tabbar → aparece en el sheet.
-        if (isAmazon) {
-            items.push({ id: 'insights', icon: 'insights', label: 'Insights',
-                hint: 'Alertas y recomendaciones',
-                badge: alerts || null });
         }
         items.push({ id: 'settings', icon: 'settings', label: 'Ajustes',
             hint: 'Sync, comisiones, umbrales' });
@@ -347,8 +335,13 @@ const App = (() => {
             title: 'Más opciones',
             items,
             onPick: id => {
-                if (['dashboard', 'lotes', 'envios', 'wishlist', 'ofertas', 'keepa', 'caja', 'insights', 'settings'].includes(id)) {
+                if (['dashboard', 'lotes', 'ofertas', 'keepa', 'caja', 'settings'].includes(id)) {
                     switchTab(id);
+                    return;
+                }
+                if (id === 'wishlist') {
+                    window.__ofertasOpenGuardados = true;
+                    switchTab('ofertas');
                     return;
                 }
                 if (id === 'import') document.getElementById('file-import')?.click();
@@ -371,32 +364,6 @@ const App = (() => {
             mLotes.hidden = nProd === 0;
         }
 
-        const alerts = window.InsightsView ? InsightsView.alertCount() : 0;
-        const bell = document.getElementById('tb-bell-count');
-        if (bell) {
-            bell.textContent = alerts;
-            bell.hidden = alerts === 0;
-        }
-        const sbIns = document.getElementById('sb-count-insights');
-        if (sbIns) {
-            sbIns.textContent = alerts;
-            sbIns.hidden = alerts === 0;
-            sbIns.classList.toggle('badge-alert', alerts > 0);
-        }
-        const mIns = document.getElementById('m-tab-insights');
-        if (mIns) {
-            mIns.textContent = alerts;
-            mIns.hidden = alerts === 0;
-        }
-
-        const pendingShip = window.EnviosView?.pendingCount?.() || 0;
-        const sbEnv = document.getElementById('sb-count-envios');
-        if (sbEnv) {
-            sbEnv.textContent = pendingShip;
-            sbEnv.hidden = pendingShip === 0;
-            sbEnv.classList.toggle('badge-alert', pendingShip > 0);
-        }
-
         const pendingOfertas = window.OfertasView?.pendingCount?.() || 0;
         const sbOfertas = document.getElementById('sb-count-ofertas');
         if (sbOfertas) {
@@ -407,13 +374,6 @@ const App = (() => {
         if (mOfertas) {
             mOfertas.textContent = pendingOfertas;
             mOfertas.hidden = pendingOfertas === 0;
-        }
-
-        const pendingWish = window.WishlistView?.pendingCount?.() || 0;
-        const sbWish = document.getElementById('sb-count-wishlist');
-        if (sbWish) {
-            sbWish.textContent = pendingWish;
-            sbWish.hidden = true; // tab legacy oculto
         }
 
         const pendingCaja = window.CajaView?.pendingCount?.() || 0;
@@ -429,28 +389,19 @@ const App = (() => {
             mCaja.hidden = pendingCaja === 0;
         }
 
-        // Badge del botón "Más": suma señales de los tabs escondidos dentro
-        // del sheet, respetando marketplace. Así no perdemos el rojo cuando
-        // Insights o Envíos quedan detrás del "⋯".
         const moreBadge = document.getElementById('m-tab-more-badge');
         if (moreBadge) {
-            const isAmz = window.State.marketplace === 'amazon';
-            const prepOn = isAmz && window.State.settings?.prepEnvioActivo !== false;
-            let moreCount = 0;
-            if (isAmz) moreCount += alerts;
-            if (prepOn) moreCount += pendingShip;
-            moreBadge.textContent = moreCount;
-            moreBadge.hidden = moreCount === 0;
-            moreBadge.classList.toggle('is-mute', !isAmz);
+            moreBadge.textContent = '0';
+            moreBadge.hidden = true;
         }
     }
 
     // ---- Excel ---------------------------------------------------------
     function initExcel() {
-        document.getElementById('btn-import').addEventListener('click', () => {
-            document.getElementById('file-import').click();
+        document.getElementById('btn-import')?.addEventListener('click', () => {
+            document.getElementById('file-import')?.click();
         });
-        document.getElementById('file-import').addEventListener('change', async e => {
+        document.getElementById('file-import')?.addEventListener('change', async e => {
             const file = e.target.files[0];
             if (!file) return;
             try {
@@ -496,7 +447,7 @@ const App = (() => {
             }
         });
 
-        document.getElementById('btn-export').addEventListener('click', () => exportExcel());
+        document.getElementById('btn-export')?.addEventListener('click', () => exportExcel());
     }
 
     function exportExcel() {
@@ -588,17 +539,17 @@ const App = (() => {
         if (!(ui.backupDirty || days >= 7)) return;
         sessionStorage.setItem('vm-backup-nag', '1');
         const msg = ui.backupDirty
-            ? 'Hay cambios sin respaldo JSON. En Meli/Amazon → Datos → Respaldo.'
+            ? 'Hay cambios sin respaldo JSON. Usa Más → Respaldo o ⌘K.'
             : (last
-                ? `Llevas ${days}d sin respaldo. En Meli/Amazon → Datos → Respaldo.`
-                : 'Aún no hay respaldo JSON. En Meli/Amazon → Datos → Respaldo.');
+                ? `Llevas ${days}d sin respaldo. Usa Más → Respaldo o ⌘K.`
+                : 'Aún no hay respaldo JSON. Usa Más → Respaldo o ⌘K.');
         UI.toast?.(msg, 'info', 4200);
     }
 
     // ---- Backup --------------------------------------------------------
     function initBackup() {
-        document.getElementById('btn-backup').addEventListener('click', openBackup);
-        document.getElementById('file-backup').addEventListener('change', async e => {
+        document.getElementById('btn-backup')?.addEventListener('click', openBackup);
+        document.getElementById('file-backup')?.addEventListener('change', async e => {
             const file = e.target.files[0];
             if (!file) return;
             try {
@@ -678,15 +629,12 @@ const App = (() => {
                 markBackupDone();
                 UI.toast('Respaldo restaurado');
                 window.State.notify();
-                // Refresca la vista abierta (wishlist/ofertas/caja incluidos)
-                if (window.State.view === 'wishlist') WishlistView?.render?.();
-                else if (window.State.view === 'ofertas') OfertasView?.render?.();
+                // Refresca la vista abierta
+                if (window.State.view === 'ofertas') OfertasView?.render?.();
                 else if (window.State.view === 'keepa') KeepaView?.render?.();
                 else if (window.State.view === 'caja') CajaView?.render?.();
                 else if (window.State.view === 'dashboard') DashboardView?.render?.();
                 else if (window.State.view === 'lotes') LotesView?.render?.();
-                else if (window.State.view === 'envios') EnviosView?.render?.();
-                else if (window.State.view === 'insights') InsightsView?.render?.();
                 refreshNavCounts();
             } catch (err) {
                 UI.toast('Error: ' + err.message, 'error');
@@ -1056,10 +1004,7 @@ const App = (() => {
             ? `Listo: ${ventasCleared} venta(s) borrada(s) · stock restaurado`
             : 'Stock restaurado (no había ventas)');
         if (window.State.view === 'dashboard') DashboardView.render();
-        else if (window.State.view === 'insights') InsightsView.render();
         else if (window.State.view === 'lotes') LotesView.render();
-        else if (window.State.view === 'envios') EnviosView.render();
-        else if (window.State.view === 'wishlist') WishlistView.render();
         else if (window.State.view === 'ofertas') OfertasView.render();
         else if (window.State.view === 'keepa') KeepaView.render();
         else if (window.State.view === 'caja') CajaView.render();
@@ -1156,21 +1101,12 @@ const App = (() => {
             gxItems.forEach(b => b.classList.remove('active'));
         }
         // Cards/flags por catálogo activo (incluso en General: Ajustes usa el MP subyacente).
-        // Envíos y similares se ocultan en General vía data-feature / data-hide-on-general.
         document.querySelectorAll('[data-mp-only]').forEach(el => {
             el.hidden = el.dataset.mpOnly !== mp;
         });
         document.querySelectorAll('[data-mp-field]').forEach(el => {
             el.hidden = el.dataset.mpField !== mp;
         });
-        // Envíos visible en Amazon (deuda FBA siempre; colas prep opcionales)
-        const enviosOn = !isGeneral && mp === 'amazon';
-        document.querySelectorAll('[data-feature="prep-envio"]').forEach(el => {
-            el.hidden = !enviosOn;
-        });
-        if (!isGeneral && window.State.view === 'envios' && !enviosOn) {
-            switchTab('lotes');
-        }
         if (!isGeneral && ['wishlist', 'ofertas', 'keepa'].includes(window.State.view) && mp !== 'amazon') {
             switchTab('lotes');
         }
@@ -1252,17 +1188,14 @@ const App = (() => {
             }
             refreshMarketplaceChrome();
             SettingsView.loadIntoForm();
-            ['view-lotes', 'view-envios', 'view-wishlist', 'view-ofertas', 'view-keepa', 'view-insights', 'view-caja']
+            ['view-lotes', 'view-ofertas', 'view-keepa', 'view-caja']
                 .forEach(id => {
                     const el = document.getElementById(id);
                     if (el && el.hidden) el.innerHTML = '';
                 });
             window.LotesView?.invalidate?.();
             if (window.State.view === 'dashboard') DashboardView.render();
-            else if (window.State.view === 'insights') InsightsView.render();
             else if (window.State.view === 'lotes') LotesView.render();
-            else if (window.State.view === 'envios') EnviosView.render();
-            else if (window.State.view === 'wishlist') WishlistView.render();
             else if (window.State.view === 'ofertas') OfertasView.render();
             else if (window.State.view === 'keepa') KeepaView.render();
             else if (window.State.view === 'caja') CajaView.render();
@@ -1441,12 +1374,10 @@ const App = (() => {
         window.Icons?.hydrate?.(document);
 
         LotesView.init();
-        EnviosView.init();
         WishlistView.init();
         OfertasView.init();
         CajaView.init();
         DashboardView.init();
-        InsightsView.init();
         SettingsView.init();
         Palette.init(App);
 

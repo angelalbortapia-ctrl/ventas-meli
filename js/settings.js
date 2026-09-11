@@ -23,7 +23,7 @@ const SettingsView = (() => {
     function loadIntoForm() {
         const s = window.State.settings;
         // Visibilidad data-mp-only / data-feature la controla App.refreshMarketplaceChrome
-        // (no pisar aquí: rompe Envíos y el modo General).
+        // (no pisar aquí: rompe Sync y el modo General).
 
         // Categorías Amazon en select de Ajustes
         const catSel = document.getElementById('set-amz-cat-default');
@@ -49,8 +49,6 @@ const SettingsView = (() => {
         if (tablaFba) tablaFba.checked = s.usarTablaFba !== false;
         const refSinIva = document.getElementById('set-amz-referido-sin-iva');
         if (refSinIva) refSinIva.checked = s.referidoSobreSinIVA !== false;
-        const prepEnvio = document.getElementById('set-amz-prep-envio');
-        if (prepEnvio) prepEnvio.checked = s.prepEnvioActivo !== false;
 
         const keepaKey = document.getElementById('set-keepa-key');
         if (keepaKey) {
@@ -107,13 +105,6 @@ const SettingsView = (() => {
             window.State.settings.usarTablaFba = !!el.checked;
         } else if (el.id === 'set-amz-referido-sin-iva') {
             window.State.settings.referidoSobreSinIVA = !!el.checked;
-        } else if (el.id === 'set-amz-prep-envio') {
-            window.State.settings.prepEnvioActivo = !!el.checked;
-            window.App?.refreshMarketplaceChrome?.();
-            window.App?.refreshNavCounts?.();
-            if (!el.checked && window.State.view === 'envios') {
-                window.App?.switchTab?.('lotes');
-            }
         }
         window.State.saveSettings();
         UI.toast('Ajustes guardados');
@@ -383,7 +374,6 @@ const SettingsView = (() => {
         document.getElementById('set-amz-tabla-cat')?.addEventListener('change', onAmzToggle);
         document.getElementById('set-amz-tabla-fba')?.addEventListener('change', onAmzToggle);
         document.getElementById('set-amz-referido-sin-iva')?.addEventListener('change', onAmzToggle);
-        document.getElementById('set-amz-prep-envio')?.addEventListener('change', onAmzToggle);
         document.getElementById('set-amz-cat-default')?.addEventListener('change', onAmzSelectChange);
         document.getElementById('set-amz-tamano')?.addEventListener('change', onAmzSelectChange);
         document.getElementById('btn-reset-settings')?.addEventListener('click', () => window.App && window.App.resetSettings());

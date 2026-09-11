@@ -4596,7 +4596,6 @@ input:focus, select:focus, textarea:focus {
 
 /* —— Bold system: cards / stats / shells en vistas —— */
 .card,
-.envios-card,
 .wl-card,
 .wl-form-card,
 .of-card,
@@ -5744,7 +5743,7 @@ body.resizing * { user-select: none !important; }
 .gx-hero-metric-value[data-fx-num].is-counting,
 .caja-kpi-n[data-fx-num].is-counting,
 .ins-kpi-value[data-fx-num].is-counting,
-.envios-freight-kpi-value[data-fx-num].is-counting,
+.caja-freight-kpi-value[data-fx-num].is-counting,
 .dash-bolsa-hero-value[data-fx-num].is-counting {
     display: block;
     width: 100%;
@@ -8394,7 +8393,7 @@ body[data-marketplace="amazon"] #view-lotes .prod-sales-panel {
 /* Hoy ops queue + Keepa slim alerts */
 .gx-hoy-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
 }
 @media (max-width: 900px) {
@@ -8423,6 +8422,71 @@ body[data-marketplace="amazon"] #view-lotes .prod-sales-panel {
     color: inherit;
 }
 .gx-hoy-row:hover { background: #fff; }
+.caja-reinvest {
+    margin: 0 0 14px;
+    padding: 14px 16px;
+}
+.caja-reinvest-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+.caja-reinvest-kicker {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.caja-reinvest-lead {
+    margin: 4px 0 0;
+    font-size: 14px;
+}
+.caja-reinvest-list {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.caja-reinvest-list li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: center;
+}
+.caja-reinvest-row {
+    appearance: none;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    background: rgba(255, 255, 255, 0.7);
+    border-radius: 12px;
+    padding: 10px 12px;
+    text-align: left;
+    cursor: pointer;
+    display: grid;
+    gap: 2px;
+    font: inherit;
+    color: inherit;
+}
+.caja-reinvest-row:hover { background: #fff; }
+.caja-reinvest-name { font-weight: 600; }
+.caja-reinvest-empty { margin: 10px 0 0; }
+.prod-restock-hint {
+    margin: 8px 0 0;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--success, #1a7f4b) 10%, transparent);
+    font-size: 13px;
+}
+.prod-restock-hint.is-no {
+    background: color-mix(in srgb, var(--danger, #c0392b) 10%, transparent);
+}
+.prod-restock-hint.muted {
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+}
 .gx-hoy-links {
     display: flex;
     flex-wrap: wrap;
@@ -8451,6 +8515,30 @@ body[data-marketplace="amazon"] #view-lotes .prod-sales-panel {
 }
 .of-guardados-lead { margin: 0 0 10px; }
 .wl-embedded-list .wl-card { margin-bottom: 8px; }
+.wl-discarded {
+    margin-top: 16px;
+    padding-top: 8px;
+    border-top: 1px solid var(--hairline, rgba(0,0,0,.08));
+}
+.wl-discarded > summary {
+    cursor: pointer;
+    list-style: none;
+    margin-bottom: 8px;
+}
+.wl-discarded > summary::-webkit-details-marker { display: none; }
+.wl-discarded-list { opacity: 0.85; }
+.of-archived {
+    margin-top: 16px;
+    padding-top: 8px;
+    border-top: 1px solid var(--hairline, rgba(0,0,0,.08));
+}
+.of-archived > summary {
+    cursor: pointer;
+    list-style: none;
+    margin-bottom: 8px;
+}
+.of-archived > summary::-webkit-details-marker { display: none; }
+.of-archived-list { opacity: 0.85; }
 
 /* Timeline (historial) */
 .timeline { list-style: none; padding: 0; margin: 0; }
@@ -9349,83 +9437,6 @@ button.ship-advance:hover {
     color: var(--primary);
 }
 
-/* ---- Vista Envíos (Amazon) ---- */
-.envios-stats {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 16px;
-}
-.envios-stat {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 18px;
-    min-width: 140px;
-}
-.envios-stat-n {
-    font-size: 28px;
-    font-weight: 700;
-    font-family: var(--mono); font-variant-numeric: tabular-nums;
-    line-height: 1.1;
-}
-.envios-stat-l {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 4px;
-}
-.envios-sub {
-    margin: 22px 0 6px;
-    font-size: 15px;
-}
-.envios-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-.envios-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-    flex-wrap: wrap;
-    padding: 18px 20px;
-    background: #ffffff;
-    border: 0;
-    border-radius: 24px;
-    box-shadow:
-        0 1px 0 rgba(0, 0, 0, 0.03),
-        0 12px 32px rgba(0, 0, 0, 0.045);
-}
-.envios-card-plain {
-    background: var(--surface-2, var(--bg));
-}
-.envios-card-title {
-    font-weight: 600;
-    margin-bottom: 4px;
-}
-.envios-card-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-bottom: 8px;
-}
-.envios-card-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-}
-.envios-empty,
-.envios-off {
-    padding: 20px;
-    max-width: 480px;
-}
-.envios-list-muted .envios-card {
-    opacity: 0.92;
-}
-
 .keepa-head-actions {
     display: flex;
     flex-wrap: wrap;
@@ -9444,15 +9455,12 @@ button.ship-advance:hover {
     min-width: 180px;
 }
 
-/* Deuda envío inbound a FBA */
-.envios-freight {
-    margin: 0 0 20px;
-    padding: 16px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
+/* Deuda envío inbound a FBA (Caja · Amazon) */
+.caja-freight {
+    margin: 0 0 14px;
+    padding: 14px 16px;
 }
-.envios-freight-head {
+.caja-freight-head {
     display: flex;
     flex-wrap: wrap;
     align-items: flex-start;
@@ -9460,62 +9468,71 @@ button.ship-advance:hover {
     gap: 14px;
     margin-bottom: 12px;
 }
-.envios-freight-title {
-    margin: 0 0 4px;
-    font-size: 16px;
+.caja-freight-kicker {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
 }
-.envios-freight-kpi {
+.caja-freight-title {
+    margin: 4px 0 0;
+    font-size: 15px;
+    font-weight: 600;
+}
+.caja-freight-kpi {
     text-align: right;
     min-width: 160px;
 }
-.envios-freight-kpi-label {
+.caja-freight-kpi-label {
     font-size: 12px;
     color: var(--text-muted);
 }
-.envios-freight-kpi-value {
-    font-size: 26px;
+.caja-freight-kpi-value {
+    font-size: 24px;
     font-weight: 700;
     font-family: var(--mono);
     font-variant-numeric: tabular-nums;
     line-height: 1.15;
 }
-.envios-freight-kpi.is-owe .envios-freight-kpi-value {
+.caja-freight-kpi.is-owe .caja-freight-kpi-value {
     color: var(--danger, #b42318);
 }
-.envios-freight-kpi-sub {
+.caja-freight-kpi-sub {
     margin-top: 2px;
 }
-.envios-freight-actions {
+.caja-freight-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 10px;
 }
-.envios-freight-form {
+.caja-freight-form {
     margin: 0 0 12px;
     padding: 12px;
     background: var(--surface-2, var(--bg));
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 12px;
 }
-.envios-freight-form-grid {
+.caja-freight-form-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
     margin-bottom: 10px;
 }
-.envios-freight-form-full {
+.caja-freight-form-full {
     grid-column: 1 / -1;
 }
-.envios-freight-form label {
+.caja-freight-form label {
     display: flex;
     flex-direction: column;
     gap: 4px;
     font-size: 12px;
     color: var(--text-muted);
 }
-.envios-freight-form input,
-.envios-freight-form select {
+.caja-freight-form input,
+.caja-freight-form select {
     font: inherit;
     padding: 8px 10px;
     border: 1px solid var(--border);
@@ -9523,12 +9540,12 @@ button.ship-advance:hover {
     background: var(--surface);
     color: var(--text);
 }
-.envios-freight-form-actions {
+.caja-freight-form-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
 }
-.envios-freight-list {
+.caja-freight-list {
     list-style: none;
     margin: 0;
     padding: 0;
@@ -9536,46 +9553,46 @@ button.ship-advance:hover {
     flex-direction: column;
     gap: 8px;
 }
-.envios-freight-row {
+.caja-freight-row {
     display: grid;
     grid-template-columns: 1fr auto;
     gap: 4px 10px;
     align-items: center;
     padding: 10px 12px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--surface-2, var(--bg));
 }
-.envios-freight-row-main {
+.caja-freight-row-main {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
     gap: 8px;
 }
-.envios-freight-badge {
+.caja-freight-badge {
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.02em;
     color: var(--text-muted);
 }
-.envios-freight-charge .envios-freight-amt {
+.caja-freight-charge .caja-freight-amt {
     color: var(--danger, #b42318);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
 }
-.envios-freight-payment .envios-freight-amt {
+.caja-freight-payment .caja-freight-amt {
     color: var(--success, #067647);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
 }
-.envios-freight-row-meta {
+.caja-freight-row-meta {
     grid-column: 1;
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
 }
-.envios-freight-row-actions {
+.caja-freight-row-actions {
     grid-column: 2;
     grid-row: 1 / span 2;
     align-self: center;
@@ -9584,23 +9601,26 @@ button.ship-advance:hover {
     gap: 4px;
     justify-content: flex-end;
 }
-.envios-freight-check {
+.caja-freight-check {
     flex-direction: row !important;
     align-items: center;
     gap: 8px !important;
     color: var(--text);
 }
-.envios-freight-check input {
+.caja-freight-check input {
     width: auto;
 }
-.envios-freight-empty-hint {
+.caja-freight-empty-hint {
     margin: 4px 0 0;
 }
+.caja-freight.is-flash {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary, #1d1d1f) 45%, transparent);
+}
 @media (max-width: 560px) {
-    .envios-freight-form-grid {
+    .caja-freight-form-grid {
         grid-template-columns: 1fr;
     }
-    .envios-freight-kpi {
+    .caja-freight-kpi {
         text-align: left;
         width: 100%;
     }
@@ -10652,6 +10672,20 @@ button.ship-advance:hover {
     border-radius: 999px;
     background: color-mix(in srgb, var(--text) 6%, transparent);
 }
+.of-status-pill {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+    color: var(--text-muted);
+}
+.of-status-pill.of-status-viable {
+    background: color-mix(in srgb, var(--success, #1a7f4b) 14%, transparent);
+    color: var(--success, #1a7f4b);
+}
+.of-status-pill.of-status-descartada {
+    opacity: 0.75;
+}
 .of-signal-pill.is-vende {
     background: color-mix(in srgb, var(--success, #1a7f4b) 14%, transparent);
     color: var(--success, #1a7f4b);
@@ -11627,7 +11661,7 @@ button.ship-advance:hover {
         padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
         box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.06);
     }
-    /* Slot 3 alterna Wishlist (Amazon) / Insights (Meli). En General el tabbar entero se oculta. */
+    /* Ofertas solo en Amazon. En General el tabbar se oculta. */
     body[data-marketplace="amazon"] .mobile-tab[data-mp-slot="non-amazon"] { display: none !important; }
     body:not([data-marketplace="amazon"]) .mobile-tab[data-mp-slot="amazon"] { display: none !important; }
     .mobile-tab {

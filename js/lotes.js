@@ -129,8 +129,7 @@ const LotesView = (() => {
     }
 
     function prepEnvioOn() {
-        // Controles de estatus en Productos: siempre en Amazon.
-        // El menú Envíos se puede apagar aparte (EnviosView.isEnabled).
+        // Controles de estatus FBM en Productos (Amazon). Sin pestaña Envíos.
         return isAmzMarketplace();
     }
 
@@ -1467,6 +1466,19 @@ const LotesView = (() => {
                     <button class="btn primary btn-sm" data-action="sale" data-id="${lote.id}">+ Registrar venta</button>
                 </div>
             </div>
+            ${(() => {
+                const sug = Calc.suggestRestock?.(lote, window.State.settings, { calc });
+                if (!sug) return '';
+                if (sug.action === 'buy') {
+                    return `<p class="prod-restock-hint">Reponer sugerido: <strong>+${sug.suggestUds} ud</strong> (~${Calc.fmtMXN(sug.cash)}) · ${esc(sug.reason)}</p>`;
+                }
+                if (sug.action === 'no') {
+                    return `<p class="prod-restock-hint is-no">No reponer · ${esc(sug.reason)}</p>`;
+                }
+                return sug.vendidas > 0
+                    ? `<p class="prod-restock-hint muted">${esc(sug.reason)}</p>`
+                    : '';
+            })()}
             ${prepEnvioOn() && String(lote.tipo || '').toUpperCase() === 'FBM' ? `
                 <p class="muted small ship-help">
                     FBM: en cada venta elige el <strong>estatus de envío al cliente</strong>.
@@ -3125,21 +3137,27 @@ const LotesView = (() => {
         }
     }
 
-    async function restock(id) {
+    async function restock(id, opts = {}) {
         const l = window.State.lotes.find(x => x.id === id);
         if (!l) return;
         const rango = Calc.rangoCompraIdeal(l, window.State.settings);
         const stock = Math.max(0, (Number(l.unidades) || 0) - Calc.syncVendidas(l));
+        const suggest = Calc.suggestRestock?.(l, window.State.settings) || null;
+        const preferUds = Math.max(1, Number(opts.uds) || Number(suggest?.suggestUds) || 1);
 
         const form = document.createElement('div');
         form.innerHTML = `
             <p class="dlg-msg">Sumas mercancía al <strong>mismo SKU</strong> <code>${esc(l.sku)}</code>${l.variante ? ` · ${esc(l.variante)}` : ''}. El costo se recalcula como <strong>promedio ponderado</strong>; las ventas previas se conservan.</p>
+            ${suggest ? `<div class="sale-stock-hint${suggest.action === 'no' ? ' is-warn' : ''}">
+                Reponer: <strong>${suggest.action === 'buy' ? `+${suggest.suggestUds} ud (~${Calc.fmtMXN(suggest.cash)})` : suggest.reason}</strong>
+                ${suggest.action === 'buy' ? ` · ${esc(suggest.reason)}` : ''}
+            </div>` : ''}
             <div class="sale-stock-hint">
                 Stock actual: <strong>${stock}</strong> disp. / ${l.unidades} del lote · costo hoy ${Calc.fmtMXN(l.costo)}
                 ${rango ? `<br>Compra ideal (margen 30%–20%): <strong>${Calc.fmtMXN(rango.min)} – ${Calc.fmtMXN(rango.max)}</strong>` : ''}
             </div>
             <div class="form-grid">
-                <label><span>Unidades a comprar</span><input type="number" id="r-uds" value="1" min="1" step="1"></label>
+                <label><span>Unidades a comprar</span><input type="number" id="r-uds" value="${preferUds}" min="1" step="1"></label>
                 <label><span>Costo unitario de esta compra (MXN)</span><input type="number" id="r-costo" value="${l.costo}" step="0.01" min="0"></label>
                 <label class="wide"><span>Notas (opcional)</span><input type="text" id="r-notas" placeholder="Ej. pedido proveedor #123"></label>
             </div>
@@ -3414,9 +3432,6 @@ const LotesView = (() => {
         window.State.lotes = Data.upsertLote(window.State.lotes, l);
         local.selected = familyKey(l);
         local.selectedVariant = l.id;
-        if (envioEstado && envioEstado !== 'enviado') {
-            // La cola vive en Envíos; no hace falta abrir inventario
-        }
         window.State.save();
 
         renderContent();
@@ -3424,7 +3439,7 @@ const LotesView = (() => {
         UI.playMoneySound?.();
         UI.burstConfetti?.();
         const shipMsg = envioEstado && envioEstado !== 'enviado'
-            ? ' · quedó en Envíos'
+            ? ' · por enviar'
             : '';
         const cajaMsg = ' · por cobrar en Caja';
         UI.toast(multi
@@ -3810,6 +3825,6 @@ const LotesView = (() => {
         render();
     }
 
-    return { init, render, invalidate, openModal, selectAndGo, createFromWishlist };
+    return { init, render, invalidate, openModal, selectAndGo, createFromWishlist, restock };
 })();
 window.LotesView = LotesView;

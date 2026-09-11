@@ -770,21 +770,13 @@ const DashboardView = (() => {
         const guardados = (Array.isArray(window.State.ui?.wishlistAmazon) ? window.State.ui.wishlistAmazon : [])
             .filter(i => i && i.status === 'listo')
             .slice(0, 5);
-        let envios = [];
-        try {
-            if (window.EnviosView?.listHoy) envios = EnviosView.listHoy().slice(0, 5);
-            else if (window.EnviosView?.pendingCount) {
-                const n = EnviosView.pendingCount() || 0;
-                if (n > 0) envios = [{ id: 'env-summary', title: `${n} envío${n === 1 ? '' : 's'} pendiente${n === 1 ? '' : 's'}`, sub: 'Abrir Envíos' }];
-            }
-        } catch (_) { /* ignore */ }
 
-        const empty = !keepaAlerts.length && !ofertas.length && !guardados.length && !envios.length;
+        const empty = !keepaAlerts.length && !ofertas.length && !guardados.length;
         return `
             <section class="dash-section dash-section-rise" id="gx-hoy-ops">
                 <div class="dash-section-copy">
                     <h2 class="dash-section-title">Cola de hoy</h2>
-                    <p class="dash-section-lead">Recompras · ofertas · guardados · envíos · alertas Keepa</p>
+                    <p class="dash-section-lead">Ofertas · guardados · alertas Keepa</p>
                 </div>
                 <div class="gx-hoy-grid">
                     <div class="dash-panel gx-panel dash-panel-quiet">
@@ -818,21 +810,9 @@ const DashboardView = (() => {
                                 </button></li>`).join('')}
                         </ul>` : '<p class="muted small">Nada viable ni guardado.</p>'}
                     </div>
-                    <div class="dash-panel gx-panel dash-panel-quiet">
-                        <div class="gx-panel-head">
-                            <h3>Envíos</h3>
-                            <button type="button" class="btn ghost btn-sm" data-hoy-goto="envios">Envíos</button>
-                        </div>
-                        ${envios.length ? `<ul class="gx-hoy-list">${envios.map(e => `
-                            <li><button type="button" class="gx-hoy-row" data-hoy-goto="envios">
-                                <strong>${esc(e.title || e.label || 'Pendiente')}</strong>
-                                <span class="muted">${esc(e.sub || e.detail || '')}</span>
-                            </button></li>`).join('')}</ul>` : '<p class="muted small">Sin envíos pendientes.</p>'}
-                    </div>
                 </div>
                 ${empty ? '' : ''}
                 <div class="gx-hoy-links">
-                    <button type="button" class="btn ghost btn-sm" data-hoy-goto="insights">Insights</button>
                     <button type="button" class="btn ghost btn-sm" data-hoy-goto="caja">Caja</button>
                     <button type="button" class="btn ghost btn-sm" data-hoy-goto="lotes">Productos</button>
                 </div>
@@ -975,10 +955,80 @@ const DashboardView = (() => {
                 </ul>
                 <p class="muted small" style="margin-top:10px">
                     Disponible para comprar (reinversión): <strong class="mono">${Calc.fmtMXN(st.buckets.reinversion || 0)}</strong>
+                    ${layReinversionTopLine(st.buckets.reinversion || 0, true)}
                 </p>
             </div>
             ${layAsignacionDualReadonly()}
         `;
+    }
+
+    /** Línea corta: top SKUs acotados al cash de reinversión (General o canal). */
+    function layReinversionTopLine(reinversion, bothMp = false) {
+        const plan = restockPlanForView(bothMp);
+        const budget = Math.max(0, Number(reinversion) || 0);
+        const picks = pickRestockWithinBudget(plan.buy || [], budget).slice(0, 3);
+        if (!picks.length) {
+            if (budget <= 0) return ' · cobra ventas para llenar Reinversión';
+            if ((plan.buy || []).length) return ` · sugerido ${Calc.fmtMXN(plan.cashBuy)} (arriba del saldo)`;
+            return ' · sin SKUs urgentes a reponer';
+        }
+        const names = picks.map(p => `${short(p.lote.producto || p.lote.sku, 22)} +${p.fitUds}`).join(' · ');
+        const spend = picks.reduce((s, p) => s + p.fitCash, 0);
+        return ` · hasta ${Calc.fmtMXN(spend)}: ${esc(names)}`;
+    }
+
+    function restockPlanForView(bothMp) {
+        if (bothMp && Data.loadBothCatalogs) {
+            const both = Data.loadBothCatalogs();
+            const tagged = [
+                ...(both.meli.lotes || []).map(l => ({ ...l, _mp: 'meli' })),
+                ...(both.amazon.lotes || []).map(l => ({ ...l, _mp: 'amazon' })),
+            ];
+            return Calc.collectRestockPlan?.(tagged, {
+                meli: both.meli.settings || {},
+                amazon: both.amazon.settings || {},
+            }) || { buy: [], cashBuy: 0 };
+        }
+        const mp = window.State.marketplace === 'amazon' ? 'amazon' : 'meli';
+        const tagged = (window.State.lotes || []).map(l => ({ ...l, _mp: mp }));
+        return Calc.collectRestockPlan?.(tagged, {
+            [mp]: window.State.settings || {},
+        }) || { buy: [], cashBuy: 0 };
+    }
+
+    function pickRestockWithinBudget(buyList, budget) {
+        let left = Math.max(0, Number(budget) || 0);
+        const out = [];
+        for (const item of buyList || []) {
+            const costo = Number(item.costo) || 0;
+            if (!(costo > 0) || !(item.suggestUds > 0)) continue;
+            if (left < costo) continue;
+            const maxUds = Math.min(item.suggestUds, Math.floor(left / costo));
+            if (maxUds < 1) continue;
+            const fitCash = maxUds * costo;
+            out.push({ ...item, fitUds: maxUds, fitCash });
+            left = Math.round((left - fitCash) * 100) / 100;
+            if (out.length >= 3) break;
+        }
+        return out;
+    }
+
+    function reinversionBuyMeta(reinversion, unitCost, reinvestUds) {
+        const plan = restockPlanForView(false);
+        const picks = pickRestockWithinBudget(plan.buy || [], reinversion);
+        if (!(reinversion > 0)) return 'Cobra ventas → aquí se junta la recompra';
+        if (!picks.length) {
+            const avg = unitCost > 0 && reinvestUds > 0
+                ? `≈ ${reinvestUds.toFixed(1)} uds al costo avg`
+                : '';
+            if ((plan.buy || []).length) {
+                return `Sugerido ${Calc.fmtMXN(plan.cashBuy)} (arriba del saldo)${avg ? ` · ${avg}` : ''}`;
+            }
+            return avg || 'Sin SKUs urgentes a reponer';
+        }
+        const spend = picks.reduce((s, p) => s + p.fitCash, 0);
+        const names = picks.map(p => `${short(p.lote.producto || p.lote.sku, 18)} +${p.fitUds}`).join(' · ');
+        return `Puedes comprar hasta ${Calc.fmtMXN(spend)} · ${names}`;
     }
 
     function bindHoyOps(root) {
@@ -990,7 +1040,7 @@ const DashboardView = (() => {
                     window.OfertasView?.showGuardados?.();
                     return;
                 }
-                if (go === 'ofertas' || go === 'keepa' || go === 'envios' || go === 'insights' || go === 'caja' || go === 'lotes') {
+                if (go === 'ofertas' || go === 'keepa' || go === 'caja' || go === 'lotes') {
                     window.App?.switchTab?.(go);
                 }
             });
@@ -1486,14 +1536,10 @@ const DashboardView = (() => {
      * Hero KPIs en una sola banda ordenada:
      *   Bruta → Fees → Neta → Cobrado → Costo → Ganancia → Bonif → Resultado → (Deuda FBA)
      */
-    /** Resumen deuda flete inbound FBA (Amazon Inicio). Ledger completo en Envíos. */
+    /** Resumen deuda flete inbound FBA (Amazon Inicio). Ledger en Freight. */
     function readAmazonFreightBalance() {
         if (typeof window.Freight?.balance === 'function') {
             const n = Number(window.Freight.balance());
-            if (Number.isFinite(n)) return round2(n);
-        }
-        if (typeof window.EnviosView?.balance === 'function') {
-            const n = Number(window.EnviosView.balance());
             if (Number.isFinite(n)) return round2(n);
         }
         return 0;
@@ -1613,8 +1659,8 @@ const DashboardView = (() => {
                 name: 'Deuda FBA',
                 value: freightBal,
                 tone: freightBal > 0 ? 'neg' : '',
-                clickAttr: 'data-dash-goto-envios',
-                note: freightBal > 0 ? 'Pendiente' : (ledgerLen ? 'Al día' : 'Envíos'),
+                clickAttr: 'data-dash-goto-caja-freight',
+                note: freightBal > 0 ? 'Pendiente · Caja' : (ledgerLen ? 'Al día · Caja' : 'Registrar en Caja'),
                 noteTone: freightBal > 0 ? 'neg' : '',
             });
         }
@@ -3227,8 +3273,8 @@ const DashboardView = (() => {
         const bolsitasCards = ALLOC_BUCKETS.map((b, i) => {
             const val = buckets[b.key] || 0;
             const share = shareOf(val);
-            const extra = b.key === 'reinversion' && unitCost > 0 && val > 0
-                ? `≈ ${reinvestUds.toFixed(1)} uds al costo avg`
+            const extra = b.key === 'reinversion'
+                ? reinversionBuyMeta(val, unitCost, reinvestUds)
                 : esc(b.hint);
             return `
                 <div class="dash-bolsa alloc-${b.key}" data-bolsa="${b.key}" style="--bolsa-i:${i}">
@@ -3579,9 +3625,13 @@ const DashboardView = (() => {
                 else document.querySelector(`.sb-mp [data-marketplace="${mp}"]`)?.click();
             });
         });
-        root.querySelectorAll('[data-dash-goto-envios]').forEach(btn => {
+        root.querySelectorAll('[data-dash-goto-caja-freight]').forEach(btn => {
             btn.addEventListener('click', () => {
-                window.App?.switchTab?.('envios');
+                if (window.State.marketplace !== 'amazon') {
+                    window.App?.applyMarketplaceView?.('amazon', { toast: false, animate: false });
+                }
+                window.App?.switchTab?.('caja');
+                setTimeout(() => window.CajaView?.focusFreight?.(), 80);
             });
         });
         root.querySelectorAll('[data-dash-open-bonif]').forEach(btn => {

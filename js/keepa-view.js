@@ -487,7 +487,6 @@ const KeepaView = (() => {
                             </li>
                         `).join('')}
                     </ul>
-                    <p class="muted small" style="margin-top:12px">También aparecen en Insights. <button type="button" class="btn ghost sm" data-kv-action="goto-insights">Abrir Insights</button></p>
                 ` : `
                     <div class="card keepa-empty">
                         <p>Sin alertas guardadas. Escanea el catálogo para detectar caídas de precio, BSR flojo o restocks.</p>
@@ -551,7 +550,7 @@ const KeepaView = (() => {
             : `<button type="button" class="btn primary sm" data-kv-asin="${esc(asin)}">Investigar</button>
                <button type="button" class="btn ghost sm" data-kv-wishlist="${esc(asin)}"
                    data-kv-wish-title="${esc(row.title || '')}"
-                   data-kv-wish-price="${price != null ? esc(String(price)) : ''}">+ Wishlist</button>`;
+                   data-kv-wish-price="${price != null ? esc(String(price)) : ''}">+ Guardar</button>`;
         const stale = opts.mode === 'library' && row.at && (Date.now() - row.at > 7 * 86400000);
         return `
             <article class="keepa-vitrine-card ${vitrineTone(i)}${stale ? ' is-stale' : ''}${opts.bare ? ' is-bare' : ''}">
@@ -1055,7 +1054,7 @@ const KeepaView = (() => {
                                     <strong>${esc(deal.title || deal.product?.title || 'Producto Keepa')}</strong>
                                     <span class="muted">${price == null ? 'Precio al investigar' : mxn(price)}</span>
                                 </button>
-                                ${asin ? `<button type="button" class="btn ghost btn-sm" data-kv-wishlist="${esc(asin)}" data-kv-wish-title="${esc(deal.title || deal.product?.title || '')}" data-kv-wish-price="${price != null ? price : ''}">+ Wishlist</button>` : ''}
+                                ${asin ? `<button type="button" class="btn ghost btn-sm" data-kv-wishlist="${esc(asin)}" data-kv-wish-title="${esc(deal.title || deal.product?.title || '')}" data-kv-wish-price="${price != null ? price : ''}">+ Guardar</button>` : ''}
                             </div>`;
                     }).join('')}
                 </div>
@@ -1484,7 +1483,7 @@ const KeepaView = (() => {
                     asin,
                     title,
                     precio,
-                    note: 'Desde Keepa Lab',
+                    note: 'Desde Keepa',
                 });
             });
         });
@@ -1502,9 +1501,6 @@ const KeepaView = (() => {
                     btn.disabled = false;
                 }
             });
-        });
-        root.querySelectorAll('[data-kv-action="goto-insights"]').forEach(btn => {
-            btn.addEventListener('click', () => window.App?.switchTab?.('insights'));
         });
         root.querySelectorAll('[data-kv-open-asin]').forEach(btn => {
             btn.addEventListener('click', () => {

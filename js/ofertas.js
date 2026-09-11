@@ -15,7 +15,7 @@ const OfertasView = (() => {
     const DRAFT_KEY = 'vm:ofertaDraft';
 
     const local = {
-        filter: 'vigilando',
+        filter: 'revisar',
         editingId: null,
         /** Prefill desde bookmarklet / hash #oferta=… */
         draft: null,
@@ -2131,7 +2131,7 @@ const OfertasView = (() => {
         if (!d) return false;
         local.editingId = null;
         local.draft = d;
-        local.filter = 'vigilando';
+        local.filter = 'revisar';
         try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
         return true;
     }
@@ -2284,7 +2284,7 @@ const OfertasView = (() => {
             }
             return;
         }
-        UI.toast('Wishlist no disponible', 'error');
+        UI.toast('Guardados no disponible', 'error');
     }
 
     function convertToProduct(id) {
@@ -2403,6 +2403,7 @@ const OfertasView = (() => {
                         <div class="of-card-meta">
                             ${item.tienda ? `<span class="of-store">${esc(item.tienda)}</span>` : ''}
                             ${item.asin ? `<code>${esc(item.asin)}</code>` : ''}
+                            <span class="of-status-pill of-status-${esc(item.status)}">${esc(STATUSES[item.status]?.label || item.status)}</span>
                             <span class="of-signal-pill is-${esc(sig.key)}">${esc(sig.label)}</span>
                         </div>
                     </div>
@@ -2449,18 +2450,30 @@ const OfertasView = (() => {
 
         const items = loadItems();
         const guardadosN = window.WishlistView?.pendingCount?.() || 0;
+        // Legacy filters → Por revisar
+        if (local.filter === 'vigilando' || local.filter === 'viable' || local.filter === 'descartada') {
+            local.filter = 'revisar';
+        }
         const counts = {
-            vigilando: items.filter(i => i.status === 'vigilando').length,
-            viable: items.filter(i => i.status === 'viable').length,
+            revisar: items.filter(i => i.status === 'vigilando' || i.status === 'viable').length,
             guardados: guardadosN,
             descartada: items.filter(i => i.status === 'descartada').length,
         };
         const isGuardados = local.filter === 'guardados';
+        const isRevisar = local.filter === 'revisar';
         const shown = isGuardados
             ? []
             : items
-                .filter(i => i.status === local.filter)
-                .sort((a, b) => metricsFor(b).roi - metricsFor(a).roi);
+                .filter(i => i.status === 'vigilando' || i.status === 'viable')
+                .sort((a, b) => {
+                    const va = a.status === 'viable' ? 0 : 1;
+                    const vb = b.status === 'viable' ? 0 : 1;
+                    if (va !== vb) return va - vb;
+                    return metricsFor(b).roi - metricsFor(a).roi;
+                });
+        const descartadas = items
+            .filter(i => i.status === 'descartada')
+            .sort((a, b) => metricsFor(b).roi - metricsFor(a).roi);
 
         const editing = local.editingId
             ? items.find(i => i.id === local.editingId)
@@ -2487,17 +2500,15 @@ const OfertasView = (() => {
                 <div class="of-section-head">
                     <div>
                         <p class="of-eyebrow">Seguimiento</p>
-                        <h3>Radar guardado</h3>
-                        <p class="muted small">Ofertas que ya marcaste (manual o desde Shopping).</p>
+                        <h3>Radar</h3>
+                        <p class="muted small">Por revisar · Guardados. Descartadas quedan archivadas abajo.</p>
                     </div>
                 </div>
                 <div class="of-toolbar">
                     <div class="dash-seg" role="tablist" aria-label="Filtro">
                         ${[
-                            ['vigilando', 'Vigilando', counts.vigilando],
-                            ['viable', 'Viables', counts.viable],
+                            ['revisar', 'Por revisar', counts.revisar],
                             ['guardados', 'Guardados', counts.guardados],
-                            ['descartada', 'Descartadas', counts.descartada],
                         ].map(([k, label, n]) => `
                             <button type="button" class="dash-seg-btn${local.filter === k ? ' active' : ''}"
                                 data-of-filter="${k}" role="tab">${label} ${n}</button>
@@ -2508,10 +2519,13 @@ const OfertasView = (() => {
                     ? `<div id="of-guardados-host" class="of-guardados-host"></div>`
                     : (shown.length
                         ? `<div class="of-list">${shown.map(card).join('')}</div>`
-                        : `<p class="muted small of-empty">${local.filter === 'vigilando'
-                            ? 'Nada en el radar todavía.'
-                            : 'Nada aquí todavía.'}</p>`)
+                        : `<p class="muted small of-empty">Nada por revisar todavía.</p>`)
                 }
+                ${isRevisar && descartadas.length ? `
+                    <details class="of-archived">
+                        <summary class="muted small">Descartadas (${descartadas.length})</summary>
+                        <div class="of-list of-archived-list">${descartadas.map(card).join('')}</div>
+                    </details>` : ''}
             </section>
 
             ${draftHint}
@@ -2738,7 +2752,7 @@ const OfertasView = (() => {
 
         root.querySelectorAll('[data-of-filter]').forEach(btn => {
             btn.addEventListener('click', () => {
-                local.filter = btn.getAttribute('data-of-filter') || 'vigilando';
+                local.filter = btn.getAttribute('data-of-filter') || 'revisar';
                 render();
             });
         });

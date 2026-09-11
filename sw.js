@@ -1,6 +1,6 @@
 /* Service worker: network-first local (evita CSS/JS viejos), fallback a cache offline. */
 
-const VERSION = 'vm-v445';
+const VERSION = 'vm-v455';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -21,8 +21,6 @@ const STATIC_ASSETS = [
     './js/keepa-chart.js',
     './js/keepa-view.js',
     './js/palette.js',
-    './js/insights.js',
-    './js/envios.js',
     './js/wishlist.js',
     './js/ofertas.js',
     './js/lotes.js',

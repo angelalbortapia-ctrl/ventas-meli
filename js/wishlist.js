@@ -199,6 +199,22 @@ const WishlistView = (() => {
         });
     }
 
+    function refreshGuardadosUI() {
+        window.App?.refreshNavCounts?.();
+        if (window.State.view === 'ofertas') {
+            const host = document.getElementById('of-guardados-host');
+            if (host) {
+                renderEmbedded(host);
+                return;
+            }
+            window.OfertasView?.showGuardados?.();
+            return;
+        }
+        // Si estamos fuera, abre Ofertas → Guardados sin recursión rara
+        window.__ofertasOpenGuardados = true;
+        window.App?.switchTab?.('ofertas');
+    }
+
     function upsert(item, status) {
         const next = { ...item, status, updatedAt: new Date().toISOString() };
         const items = loadItems();
@@ -209,7 +225,7 @@ const WishlistView = (() => {
         local.editingId = null;
         local.filter = status === 'no_procede' ? 'no_procede'
             : (status === 'comprado' ? 'comprado' : 'listo');
-        render();
+        refreshGuardadosUI();
         UI.toast(status === 'no_procede'
             ? 'Marcado: no procede'
             : (idx >= 0 ? 'Guardado' : 'Agregado'));
@@ -241,7 +257,8 @@ const WishlistView = (() => {
                 loteId: lote.id,
             });
             UI.toast(`Inbound listo · cargo ${Calc.fmtMXN(entry.amount)}`);
-            window.App?.switchTab?.('envios');
+            window.App?.switchTab?.('lotes');
+            if (lote?.id) LotesView.openModal?.(lote.id);
         } catch (err) {
             UI.toast(err.message || 'No se pudo registrar el flete', 'error');
         }
@@ -299,8 +316,8 @@ const WishlistView = (() => {
             local.filter = existing.status === 'comprado' ? 'comprado' : 'listo';
             local.editingId = existing.id;
             if (!silent) {
+                window.__ofertasOpenGuardados = true;
                 window.App?.switchTab?.('ofertas');
-                window.OfertasView?.showGuardados?.();
                 UI.toast('Ya estaba en Guardados');
             }
             return existing;
@@ -325,8 +342,8 @@ const WishlistView = (() => {
         local.filter = 'listo';
         local.editingId = next.id;
         if (!silent) {
+            window.__ofertasOpenGuardados = true;
             window.App?.switchTab?.('ofertas');
-            window.OfertasView?.showGuardados?.();
             UI.toast('Guardado · completa el costo');
         }
         return next;
@@ -342,8 +359,8 @@ const WishlistView = (() => {
         if (idx < 0) return;
         items[idx] = { ...items[idx], status, updatedAt: new Date().toISOString() };
         saveItems(items);
-        if (window.State.view === 'ofertas') window.OfertasView?.render?.();
-        else render();
+        if (window.State.view === 'ofertas') refreshGuardadosUI();
+        else window.App?.refreshNavCounts?.();
     }
 
     function removeItem(id) {
@@ -352,16 +369,16 @@ const WishlistView = (() => {
         if (!target) return;
         saveItems(before.filter(i => i.id !== id));
         if (local.editingId === id) local.editingId = null;
-        if (window.State.view === 'ofertas') window.OfertasView?.render?.();
-        else render();
+        if (window.State.view === 'ofertas') refreshGuardadosUI();
+        else window.App?.refreshNavCounts?.();
         const label = target.titulo || target.asin || 'ítem';
         UI.toast(`Eliminado · ${label}`, 'success', {
             action: {
                 label: 'Deshacer',
                 handler: () => {
                     saveItems(before);
-                    if (window.State.view === 'ofertas') window.OfertasView?.render?.();
-                    else render();
+                    if (window.State.view === 'ofertas') refreshGuardadosUI();
+                    else window.App?.refreshNavCounts?.();
                     UI.toast('Guardados restaurados');
                 },
             },
@@ -437,53 +454,124 @@ const WishlistView = (() => {
         };
     }
 
+    /** Solo pinta si Ofertas → Guardados está montado (ya no hay pestaña propia). */
     function render() {
-        // Wishlist vive dentro de Ofertas → Guardados
-        if (window.State.view === 'wishlist') {
-            window.App?.switchTab?.('ofertas');
-            window.OfertasView?.showGuardados?.();
-            return;
-        }
+        if (window.State.view !== 'ofertas') return;
         const host = document.getElementById('of-guardados-host');
-        if (host) {
-            renderEmbedded(host);
-            return;
-        }
-        const root = document.getElementById('view-wishlist');
-        if (root) {
-            root.innerHTML = `
-                <div class="view-head">
-                    <div>
-                        <h2>Guardados</h2>
-                        <p class="muted">Se movió a <strong>Ofertas → Guardados</strong>.</p>
-                    </div>
-                    <button type="button" class="btn primary" data-wl-goto-ofertas>Abrir Guardados</button>
-                </div>`;
-            root.querySelector('[data-wl-goto-ofertas]')?.addEventListener('click', () => {
-                window.App?.switchTab?.('ofertas');
-                window.OfertasView?.showGuardados?.();
-            });
-        }
+        if (host) renderEmbedded(host);
     }
 
     function renderEmbedded(host) {
         if (!host) return;
-        const items = loadItems().filter(i => i.status === 'listo' || i.status === 'comprado');
-        const listo = items.filter(i => i.status === 'listo');
-        const comprado = items.filter(i => i.status === 'comprado');
-        const shown = [...listo, ...comprado];
+        if (!isAmazonView()) {
+            host.innerHTML = `<p class="muted small">Cambia a Amazon para usar Guardados.</p>`;
+            return;
+        }
+        const items = loadItems();
+        const shown = items
+            .filter(i => i.status === 'listo' || i.status === 'comprado')
+            .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+        const descartados = items
+            .filter(i => i.status === 'no_procede')
+            .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+        const d = formDefaults();
+        const previewItem = {
+            costo: Number(d.costo) || 0,
+            precioMercado: Number(d.precioMercado) || 0,
+            tipo: d.tipo || 'FBA',
+            categoriaAmazon: d.categoriaAmazon || window.State.settings?.categoriaDefault || '',
+        };
+        const storeHint = d.tienda || detectStore(d.linkCompra || '').label || '';
+
         host.innerHTML = `
             <div class="of-guardados-panel">
-                <p class="muted small of-guardados-lead">Prospectos listos para comprar o convertir a producto (ASIN + costo + FBA/FBM).</p>
+                <div class="card wl-form-card of-guardados-form">
+                    ${local.editingId ? `<p class="wl-editing muted small">Editando prospecto</p>` : ''}
+                    <div class="form-grid wl-form">
+                        <label class="wide">
+                            <span>Link compra</span>
+                            <input type="text" id="wl-link-compra" inputmode="url" autocomplete="off"
+                                placeholder="Costco, Sam's, Walmart…" value="${esc(d.linkCompra || '')}">
+                            <span class="wl-detect" id="wl-detect-tienda">${storeHint
+                                ? `<span class="wl-store">${esc(storeHint)}</span>`
+                                : `<span class="muted small">La tienda aparece al pegar el link</span>`}</span>
+                        </label>
+                        <label class="wide">
+                            <span>Link Amazon / ASIN</span>
+                            <input type="text" id="wl-link-amazon" inputmode="url" autocomplete="off"
+                                placeholder="ASIN o amazon.com.mx/dp/…" value="${esc(d.linkAmazon || d.asin || '')}">
+                            <span class="wl-detect" id="wl-detect-asin">${d.asin
+                                ? `<code>${esc(d.asin)}</code>`
+                                : `<span class="muted small">El ASIN aparece al pegar el link</span>`}</span>
+                        </label>
+                        <label class="wide">
+                            <span>Nombre <small>opcional</small></span>
+                            <input type="text" id="wl-titulo" placeholder="Cómo lo reconoces" value="${esc(d.titulo || '')}">
+                        </label>
+                        <label>
+                            <span>Costo compra (MXN)</span>
+                            <input type="number" id="wl-costo" min="0" step="0.01" inputmode="decimal" placeholder="Ej. 180" value="${d.costo !== '' && d.costo != null ? esc(d.costo) : ''}">
+                        </label>
+                        <label>
+                            <span>Precio Amazon (MXN)</span>
+                            <input type="number" id="wl-precio" min="0" step="0.01" inputmode="decimal" placeholder="Ej. 449" value="${d.precioMercado !== '' && d.precioMercado != null ? esc(d.precioMercado) : ''}">
+                        </label>
+                    </div>
+                    <div id="wl-live-preview">${previewHtml(previewItem)}</div>
+                    <div class="wl-form-actions">
+                        <button type="button" class="btn primary" id="wl-save-listo">${local.editingId ? 'Guardar cambios' : 'Agregar a Guardados'}</button>
+                        ${local.editingId ? `<button type="button" class="btn ghost" id="wl-cancel-edit">Cancelar</button>` : ''}
+                    </div>
+                </div>
+
+                <p class="muted small of-guardados-lead">${shown.length} guardado${shown.length === 1 ? '' : 's'} · convierte a producto cuando tengas ASIN + costo</p>
                 ${shown.length
                     ? `<div class="of-list wl-embedded-list">${shown.map(card).join('')}</div>`
-                    : `<p class="muted small of-empty">Nada guardado. Desde el radar usa <strong>Guardar</strong>.</p>`}
+                    : `<p class="muted small of-empty">Nada todavía. Agrega arriba o usa <strong>Guardar</strong> desde el radar.</p>`}
+                ${descartados.length ? `
+                    <details class="wl-discarded">
+                        <summary class="muted small">No proceden (${descartados.length})</summary>
+                        <div class="of-list wl-embedded-list wl-discarded-list">${descartados.map(card).join('')}</div>
+                    </details>` : ''}
             </div>`;
         bindEmbedded(host);
         if (window.Keepa?.hydrate) Keepa.hydrate(host);
     }
 
     function bindEmbedded(root) {
+        const onPreview = () => refreshPreview(root);
+        const bindLive = (el) => {
+            if (!el) return;
+            el.addEventListener('input', onPreview);
+            el.addEventListener('change', onPreview);
+            el.addEventListener('paste', () => setTimeout(onPreview, 0));
+            el.addEventListener('keyup', onPreview);
+        };
+        ['wl-link-compra', 'wl-link-amazon', 'wl-costo', 'wl-precio'].forEach(id => {
+            bindLive(root.querySelector(`#${id}`));
+        });
+
+        root.querySelector('#wl-save-listo')?.addEventListener('click', () => {
+            const item = readForm(root);
+            if (!item.linkCompra && !item.linkAmazon && !item.asin) {
+                UI.toast('Pega al menos un link', 'error');
+                return;
+            }
+            if (!(item.costo > 0) || !(item.precioMercado > 0)) {
+                UI.toast('Faltan costo y precio Amazon', 'error');
+                return;
+            }
+            const status = local.editingId
+                ? (loadItems().find(i => i.id === local.editingId)?.status || 'listo')
+                : 'listo';
+            upsert(item, status);
+        });
+
+        root.querySelector('#wl-cancel-edit')?.addEventListener('click', () => {
+            local.editingId = null;
+            refreshGuardadosUI();
+        });
+
         root.querySelectorAll('[data-wl-status]').forEach(btn => {
             btn.addEventListener('click', () => {
                 setStatus(btn.getAttribute('data-id'), btn.getAttribute('data-wl-status'));
@@ -494,7 +582,8 @@ const WishlistView = (() => {
                 const id = btn.getAttribute('data-wl-open-lote');
                 if (!id) return;
                 window.App?.switchTab?.('lotes');
-                window.LotesView?.openModal?.(id);
+                if (window.LotesView?.selectAndGo) LotesView.selectAndGo(id);
+                else window.LotesView?.openModal?.(id);
             });
         });
         root.querySelectorAll('[data-wl-del]').forEach(btn => {
@@ -511,8 +600,9 @@ const WishlistView = (() => {
         root.querySelectorAll('[data-wl-edit]').forEach(btn => {
             btn.addEventListener('click', () => {
                 local.editingId = btn.getAttribute('data-wl-edit');
-                // Abrir Ofertas form no aplica; toast to edit via full modal later
-                UI.toast('Edita costo/ASIN al convertir, o desde Keepa');
+                refreshGuardadosUI();
+                root.querySelector('#wl-link-compra')?.focus();
+                root.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
             });
         });
     }
@@ -546,90 +636,13 @@ const WishlistView = (() => {
         });
     }
 
-    function bind(root) {
-        const onPreview = () => refreshPreview(root);
-        const bindLive = (el) => {
-            if (!el) return;
-            el.addEventListener('input', onPreview);
-            el.addEventListener('change', onPreview);
-            el.addEventListener('paste', () => setTimeout(onPreview, 0));
-            el.addEventListener('keyup', onPreview);
-        };
-        ['wl-link-compra', 'wl-link-amazon', 'wl-costo', 'wl-precio'].forEach(id => {
-            bindLive(root.querySelector(`#${id}`));
-        });
-
-        root.querySelector('#wl-save-listo')?.addEventListener('click', () => {
-            const item = readForm(root);
-            if (!item.linkCompra && !item.linkAmazon && !item.asin) {
-                UI.toast('Pega al menos un link', 'error');
-                return;
-            }
-            if (!(item.costo > 0) || !(item.precioMercado > 0)) {
-                UI.toast('Faltan costo y precio', 'error');
-                return;
-            }
-            const status = local.editingId
-                ? (loadItems().find(i => i.id === local.editingId)?.status || 'listo')
-                : 'listo';
-            upsert(item, status);
-        });
-
-        root.querySelector('#wl-cancel-edit')?.addEventListener('click', () => {
-            local.editingId = null;
-            render();
-        });
-
-        root.querySelectorAll('[data-wl-filter]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                local.filter = btn.getAttribute('data-wl-filter') || 'listo';
-                render();
-            });
-        });
-
-        root.querySelectorAll('[data-wl-edit]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                local.editingId = btn.getAttribute('data-wl-edit');
-                render();
-                root.querySelector('#wl-link-compra')?.focus();
-                root.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            });
-        });
-
-        root.querySelectorAll('[data-wl-status]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                setStatus(btn.getAttribute('data-id'), btn.getAttribute('data-wl-status'));
-            });
-        });
-
-        root.querySelectorAll('[data-wl-open-lote]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const id = btn.getAttribute('data-wl-open-lote');
-                window.App?.switchTab('lotes');
-                // Ver = abrir la ficha, no el formulario de edición.
-                if (LotesView.selectAndGo) LotesView.selectAndGo(id);
-                else LotesView.openModal(id);
-            });
-        });
-
-        root.querySelectorAll('[data-wl-del]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const ok = await UI.confirm({
-                    title: 'Eliminar de Wishlist',
-                    message: 'Se eliminará este producto de la Wishlist. ¿Continuar?',
-                    primaryLabel: 'Eliminar',
-                    danger: true,
-                });
-                if (ok) removeItem(btn.getAttribute('data-wl-del'));
-            });
-        });
-    }
-
     function init() {
         window.State.subscribe(() => {
             if (window.State.view !== 'ofertas') return;
             const host = document.getElementById('of-guardados-host');
             if (!host) return;
+            // No pisar el form mientras se escribe
+            if (host.contains(document.activeElement) || formIsDirty(host)) return;
             renderEmbedded(host);
         });
     }
