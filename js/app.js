@@ -1443,8 +1443,29 @@ const App = (() => {
         switchTab('dashboard');
         openOfertasDraft();
 
-        // ?clearVentas=1 → limpia después del pull de Sync
+        // Tras Sync: recargar catálogo (iPhone a menudo aplicaba la nube DESPUÉS del primer paint)
         syncReady.finally(() => {
+            try {
+                const mp = Data.normalizeMarketplace(window.State.marketplace);
+                const ui = Data.loadUI();
+                if (ui?.mpView) {
+                    window.State.ui = { ...window.State.ui, ...ui };
+                }
+                window.State.marketplace = Data.normalizeMarketplace(
+                    window.State.ui?.marketplace || window.State.ui?.mpView || mp
+                );
+                if (window.State.ui?.mpView === 'amazon' || window.State.ui?.mpView === 'meli') {
+                    window.State.marketplace = window.State.ui.mpView;
+                }
+                window.State.lotes = Data.loadLotes(window.State.marketplace);
+                window.State.settings = Data.loadSettings(window.State.marketplace);
+                window.State.notify();
+                App.refreshMarketplaceChrome?.();
+                App.refreshNavCounts?.();
+                switchTab(window.State.view || 'dashboard');
+            } catch (err) {
+                console.warn('[sync] post-init refresh', err);
+            }
             maybeClearVentasFromUrl().catch(err => console.warn('[clearVentas]', err));
             maybeDiagSalesDump().catch(err => console.warn('[diagSales]', err));
         });

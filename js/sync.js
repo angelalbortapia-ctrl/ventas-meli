@@ -5,6 +5,7 @@
 
 const Sync = (() => {
     const CFG_KEY = 'ventas-meli:supabase:v1';
+    const PENDING_REMOTE_KEY = 'ventas-meli:pending-remote:v1';
     const TABLE = 'ventas_meli_state';
 
     let client = null;
@@ -218,6 +219,68 @@ const Sync = (() => {
         return true;
     }
 
+    function queuePendingRemote(row) {
+        try {
+            if (row && Array.isArray(row.lotes)) {
+                localStorage.setItem(PENDING_REMOTE_KEY, JSON.stringify(row));
+            }
+        } catch (_) { /* ignore quota */ }
+    }
+
+    function consumePendingRemote() {
+        try {
+            const raw = localStorage.getItem(PENDING_REMOTE_KEY);
+            if (!raw) return null;
+            localStorage.removeItem(PENDING_REMOTE_KEY);
+            const row = JSON.parse(raw);
+            return row && Array.isArray(row.lotes) ? row : null;
+        } catch {
+            try { localStorage.removeItem(PENDING_REMOTE_KEY); } catch (_) { /* ignore */ }
+            return null;
+        }
+    }
+
+    /** REST pull sin supabase-js (más fiable en Safari iPhone). */
+    async function fetchRemoteRow(accessToken, userId) {
+        const cfg = loadConfig();
+        if (!cfg.url || !cfg.anonKey || !accessToken || !userId) return null;
+        const res = await fetch(
+            `${cfg.url}/rest/v1/${TABLE}?select=lotes,settings,updated_at&user_id=eq.${encodeURIComponent(userId)}`,
+            {
+                headers: {
+                    apikey: cfg.anonKey,
+                    Authorization: `Bearer ${accessToken}`,
+                    Accept: 'application/json',
+                },
+                cache: 'no-store',
+            }
+        );
+        if (!res.ok) throw new Error(`Pull HTTP ${res.status}`);
+        const rows = await res.json();
+        return Array.isArray(rows) && rows[0] ? rows[0] : null;
+    }
+
+    function tokenUserId(accessToken) {
+        try {
+            const payload = JSON.parse(atob(accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+            return payload.sub || '';
+        } catch {
+            return '';
+        }
+    }
+
+    function refreshOpenViews() {
+        if (window.App?.refreshMarketplaceChrome) App.refreshMarketplaceChrome();
+        if (window.App?.refreshNavCounts) App.refreshNavCounts();
+        if (window.SettingsView?.loadIntoForm) SettingsView.loadIntoForm();
+        const view = window.State?.view;
+        if (view === 'dashboard' && window.DashboardView?.render) DashboardView.render();
+        if (view === 'lotes' && window.LotesView?.render) LotesView.render();
+        if (view === 'ofertas' && window.OfertasView?.render) OfertasView.render();
+        if (view === 'keepa' && window.KeepaView?.render) KeepaView.render();
+        if (view === 'caja' && window.CajaView?.render) CajaView.render();
+    }
+
     async function configure({ url, anonKey }) {
         const cleanUrl = normalizeUrl(url);
         const key = String(anonKey || '').trim();
@@ -340,13 +403,21 @@ const Sync = (() => {
     async function firstSyncChoice() {
         const c = ensureClient();
         if (!c) return;
-        const { data: { user } } = await c.auth.getUser();
+        const { data: { session } } = await c.auth.getSession();
+        const user = session?.user;
         if (!user) return;
 
-        const { data: row, error } = await c.from(TABLE).select('lotes, settings, updated_at').eq('user_id', user.id).maybeSingle();
-        if (error) {
-            console.warn('[sync] pull', error);
-            return;
+        let row = null;
+        try {
+            row = await fetchRemoteRow(session.access_token, user.id);
+        } catch (err) {
+            console.warn('[sync] raw pull', err);
+            const { data, error } = await c.from(TABLE).select('lotes, settings, updated_at').eq('user_id', user.id).maybeSingle();
+            if (error) {
+                console.warn('[sync] pull', error);
+                return;
+            }
+            row = data;
         }
 
         // Persistir catálogo activo antes de contar
@@ -367,12 +438,18 @@ const Sync = (() => {
             return;
         }
 
-        if (local.total === 0 && remote.total > 0) {
-            applyRemote(row, { silent: true });
+        // iPhone vacío / sin Amazon / nube más completa → traer nube sin preguntar
+        const phoneNeedsCloud = (local.amazon === 0 && remote.amazon > 0)
+            || (local.total === 0 && remote.total > 0)
+            || (remote.total > local.total);
+        if (phoneNeedsCloud) {
+            queuePendingRemote(row);
+            applyRemote(row, { silent: false });
+            refreshOpenViews();
             return;
         }
 
-        // Ambos tienen data: preguntar con desglose Meli / Amazon
+        // Ambos tienen data comparable: preguntar con desglose Meli / Amazon
         if (local.total > 0 && remote.total > 0) {
             const amzWarn = local.amazon > 0 && remote.amazon === 0
                 ? `<p class="dlg-msg"><strong>⚠️ La nube trae Amazon vacío</strong> (${local.amazon} aquí). Aunque elijas nube, se conservan los productos Amazon de este dispositivo y se re-suben.</p>`
@@ -388,8 +465,12 @@ const Sync = (() => {
                     { label: 'Subir este dispositivo → nube', variant: 'primary', value: 'push' },
                 ],
             });
-            if (choice === 'pull') applyRemote(row, { silent: false });
-            else await pushNow();
+            if (choice === 'pull') {
+                applyRemote(row, { silent: false });
+                refreshOpenViews();
+            } else {
+                await pushNow();
+            }
         }
     }
 
@@ -547,16 +628,31 @@ const Sync = (() => {
     async function pullAndSubscribe() {
         const c = ensureClient();
         if (!c) return;
-        const { data: { user } } = await c.auth.getUser();
+        const { data: { session } } = await c.auth.getSession();
+        const user = session?.user;
         if (!user) return;
 
-        const { data: row, error } = await c.from(TABLE).select('lotes, settings, updated_at').eq('user_id', user.id).maybeSingle();
-        if (!error && row && Date.now() >= holdRemoteUntil) {
-            // Solo aplicar si remoto es más nuevo o aún no tenemos marca
+        let row = null;
+        try {
+            row = await fetchRemoteRow(session.access_token, user.id);
+        } catch (err) {
+            console.warn('[sync] raw pull', err);
+            const { data, error } = await c.from(TABLE).select('lotes, settings, updated_at').eq('user_id', user.id).maybeSingle();
+            if (!error) row = data;
+        }
+
+        if (row && Date.now() >= holdRemoteUntil) {
+            const local = localCatalogCounts();
+            const remote = remoteCatalogCounts(row);
             const remoteTs = row.updated_at ? new Date(row.updated_at).getTime() : 0;
             const localTs = lastRemoteAt ? new Date(lastRemoteAt).getTime() : 0;
-            if (!lastRemoteAt || remoteTs > localTs) {
+            const needsCloud = (local.amazon === 0 && remote.amazon > 0)
+                || (remote.total > local.total)
+                || !lastRemoteAt
+                || remoteTs > localTs;
+            if (needsCloud) {
                 applyRemote(row, { silent: true });
+                refreshOpenViews();
             }
         }
 
@@ -576,16 +672,17 @@ const Sync = (() => {
                 },
                 (payload) => {
                     if (pushing) return;
-                    const row = payload.new;
-                    if (!row) return;
-                    handleIncomingRemote(row, { fromRealtime: true }).catch(console.warn);
+                    const incoming = payload.new;
+                    if (!incoming) return;
+                    handleIncomingRemote(incoming, { fromRealtime: true }).catch(console.warn);
                 }
             )
             .subscribe((s) => {
                 if (s === 'SUBSCRIBED') {
+                    const counts = localCatalogCounts();
                     setStatus({
                         state: 'synced',
-                        detail: 'Realtime activo',
+                        detail: `Nube OK · Meli ${counts.meli} · Amazon ${counts.amazon}`,
                         email: user.email || status.email,
                     });
                 }
@@ -831,13 +928,7 @@ const Sync = (() => {
                 },
             });
             window.State.notify();
-            if (window.App?.refreshMarketplaceChrome) App.refreshMarketplaceChrome();
-            if (window.SettingsView?.loadIntoForm) SettingsView.loadIntoForm();
-            if (window.State.view === 'lotes' && window.LotesView?.render) LotesView.render();
-            if (window.State.view === 'ofertas' && window.OfertasView?.render) OfertasView.render();
-            if (window.State.view === 'keepa' && window.KeepaView?.render) KeepaView.render();
-            if (window.State.view === 'caja' && window.CajaView?.render) CajaView.render();
-            if (window.App?.refreshNavCounts) App.refreshNavCounts();
+            refreshOpenViews();
             restoreScroll(scrollSnap);
 
             const counts = {
@@ -881,6 +972,14 @@ const Sync = (() => {
             return;
         }
         ensureClient();
+
+        // Fila bajada por iphone-sync.html (o login forzado) — aplicar ya
+        const pending = consumePendingRemote();
+        if (pending) {
+            applyRemote(pending, { silent: false });
+            refreshOpenViews();
+        }
+
         await bootSession();
 
         // Hook saves
@@ -915,6 +1014,7 @@ const Sync = (() => {
         bootSession,
         // expuesto para depuración / tests
         packStateForSync,
+        queuePendingRemote,
     };
 })();
 
