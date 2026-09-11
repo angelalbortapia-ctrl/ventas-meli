@@ -930,7 +930,8 @@ const App = (() => {
     function initPWA() {
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js').catch(() => {});
+                // Query bust: GitHub Pages / Safari a veces se quedan con un sw.js viejo.
+                navigator.serviceWorker.register('sw.js?v=457').catch(() => {});
             });
         }
     }

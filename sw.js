@@ -1,6 +1,6 @@
 /* Service worker: network-first local (evita CSS/JS viejos), fallback a cache offline. */
 
-const VERSION = 'vm-v456';
+const VERSION = 'vm-v457';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -8,6 +8,7 @@ const STATIC_ASSETS = [
     './clear-cache.html',
     './manifest.json',
     './css/styles.css',
+    './vendor/supabase.min.js',
     './js/calc.js',
     './js/data.js',
     './js/excel.js',

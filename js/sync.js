@@ -199,6 +199,25 @@ const Sync = (() => {
         return u;
     }
 
+    function networkHint(err) {
+        const msg = String(err?.message || err || '');
+        if (/load failed|failed to fetch|networkerror|network request failed/i.test(msg)) {
+            return 'Safari no llegó a Supabase (Load failed). Abre clear-cache.html, cierra la app de inicio y reintenta. Si usas bloqueador de contenido, apágalo para esta página.';
+        }
+        return msg || 'Error de red';
+    }
+
+    async function pingProject(url, anonKey) {
+        const endpoint = `${url}/auth/v1/health`;
+        const res = await fetch(endpoint, {
+            method: 'GET',
+            headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+            cache: 'no-store',
+        });
+        if (!res.ok) throw new Error(`Supabase respondió ${res.status}`);
+        return true;
+    }
+
     async function configure({ url, anonKey }) {
         const cleanUrl = normalizeUrl(url);
         const key = String(anonKey || '').trim();
@@ -212,17 +231,25 @@ const Sync = (() => {
                 return { ok: false, error: 'Quita /rest/v1/ de la URL. Solo: https://xxxx.supabase.co' };
             }
         }
+        try {
+            await pingProject(cleanUrl, key);
+        } catch (err) {
+            const detail = networkHint(err);
+            setStatus({ state: 'error', detail });
+            return { ok: false, error: detail };
+        }
         saveConfig({ url: cleanUrl, anonKey: key });
         resetClient();
         const c = ensureClient();
-        if (!c) return { ok: false, error: 'No se pudo crear el cliente Supabase' };
+        if (!c) return { ok: false, error: 'No se pudo crear el cliente Supabase (recarga la página)' };
         try {
             // Ping ligero de auth (no requiere login)
             const { error } = await c.auth.getSession();
             if (error) throw error;
         } catch (err) {
-            setStatus({ state: 'error', detail: err.message || 'URL o key inválidos' });
-            return { ok: false, error: err.message || 'URL o key inválidos' };
+            const detail = networkHint(err);
+            setStatus({ state: 'error', detail });
+            return { ok: false, error: detail };
         }
         await bootSession();
         return { ok: true, url: cleanUrl };
@@ -267,12 +294,16 @@ const Sync = (() => {
     async function signIn(email, password) {
         const c = ensureClient();
         if (!c) throw new Error('Configura Supabase primero');
-        const { data, error } = await c.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        setStatus({ state: 'signed_in', email: data.user?.email || email });
-        await firstSyncChoice();
-        await pullAndSubscribe();
-        return data;
+        try {
+            const { data, error } = await c.auth.signInWithPassword({ email, password });
+            if (error) throw error;
+            setStatus({ state: 'signed_in', email: data.user?.email || email });
+            await firstSyncChoice();
+            await pullAndSubscribe();
+            return data;
+        } catch (err) {
+            throw new Error(networkHint(err));
+        }
     }
 
     async function signOut() {

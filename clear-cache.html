@@ -3,20 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-store">
   <title>Limpiar caché — Ventas Meli</title>
   <style>
     body { font-family: Calibri, Carlito, Candara, 'Segoe UI', Arial, sans-serif; max-width: 420px; margin: 48px auto; padding: 0 16px; color: #1a2332; }
     h1 { font-size: 1.25rem; }
     p { color: #5a6a7a; line-height: 1.45; }
-    #log { margin-top: 16px; font-family: Calibri, Carlito, Candara, 'Segoe UI', Arial, sans-serif; font-size: 12px; white-space: pre-wrap; background: #f4f6f8; padding: 12px; border-radius: 8px; }
+    #log { margin-top: 16px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; background: #f4f6f8; padding: 12px; border-radius: 8px; }
+    a.btn {
+      display: inline-block; margin-top: 18px; padding: 12px 16px; border-radius: 10px;
+      background: #1a2332; color: #fff; text-decoration: none; font-weight: 600;
+    }
+    a.btn[hidden] { display: none; }
   </style>
 </head>
 <body>
   <h1>Limpiando caché…</h1>
-  <p>Esto borra el Service Worker y recarga la app con CSS/JS frescos.</p>
+  <p>Borra el Service Worker viejo (causa habitual de <em>Load failed</em> en iPhone) y deja la app lista para Sync.</p>
   <div id="log">Iniciando…</div>
+  <a class="btn" id="open-app" hidden href="./?fresh=1">Abrir app</a>
   <script>
     const log = (m) => { document.getElementById('log').textContent += '\n' + m; };
+    const openBtn = document.getElementById('open-app');
     (async () => {
       try {
         const regs = await navigator.serviceWorker?.getRegistrations?.() || [];
@@ -24,16 +32,19 @@
           await r.unregister();
           log('SW desregistrado');
         }
+        if (!regs.length) log('Sin SW registrado');
         const keys = await caches.keys();
         await Promise.all(keys.map(k => caches.delete(k)));
         log('Caches borrados: ' + (keys.join(', ') || '(ninguno)'));
       } catch (e) {
         log('Error: ' + (e && e.message));
       }
-      log('Redirigiendo…');
-      setTimeout(() => {
-        location.replace('./?fresh=' + Date.now());
-      }, 400);
+      const fresh = './?fresh=' + Date.now();
+      openBtn.href = fresh;
+      openBtn.hidden = false;
+      log('Listo. Toca «Abrir app» (no uses la app de pantalla de inicio hasta probar Sync).');
+      // Auto-abrir tras 1.2s; el botón queda por si Safari bloquea el redirect.
+      setTimeout(() => { location.replace(fresh); }, 1200);
     })();
   </script>
 </body>
