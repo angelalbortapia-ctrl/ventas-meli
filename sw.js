@@ -1,6 +1,6 @@
 /* Service worker: network-first local (evita CSS/JS viejos), fallback a cache offline. */
 
-const VERSION = 'vm-v455';
+const VERSION = 'vm-v456';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -51,12 +51,9 @@ self.addEventListener('fetch', event => {
     if (req.method !== 'GET') return;
 
     const url = new URL(req.url);
-    if (url.origin !== self.location.origin) {
-        event.respondWith(
-            fetch(req).catch(() => caches.match(req).then(c => c || Response.error()))
-        );
-        return;
-    }
+    // No interceptar cross-origin (Supabase, jsDelivr, etc.).
+    // En Safari iOS, re-fetch vía SW suele dar TypeError: Load failed.
+    if (url.origin !== self.location.origin) return;
 
     // Keepa y SerpAPI: datos vivos — nunca cachear
     if (url.pathname.startsWith('/api/keepa/') || url.pathname.startsWith('/api/serpapi/')) {
