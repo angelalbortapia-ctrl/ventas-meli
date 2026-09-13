@@ -30,6 +30,12 @@ const App = (() => {
         return !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
     }
 
+    function isIOSSafari() {
+        const ua = String(navigator.userAgent || '');
+        const iOS = /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        return iOS;
+    }
+
     /** Transición preciosa entre canal o vista (View Transitions API + fallback). */
     function runPageTransition(kind, mutate) {
         const body = document.body;
@@ -40,8 +46,12 @@ const App = (() => {
             mutate();
         };
 
-        if (prefersReducedMotion()) {
+        // iOS Safari: View Transitions / fade a veces deja la UI borrosa o en blanco.
+        if (prefersReducedMotion() || isIOSSafari()) {
             guarded();
+            body.classList.remove('is-page-exit', 'is-page-enter', 'is-mp-sky-shift');
+            delete body.dataset.pageTransition;
+            delete root.dataset.pageTransition;
             return Promise.resolve();
         }
 
@@ -70,7 +80,8 @@ const App = (() => {
         if (typeof document.startViewTransition === 'function') {
             try {
                 const tx = document.startViewTransition(() => { guarded(); });
-                return tx.finished.then(finish, finish);
+                const timeout = new Promise(resolve => window.setTimeout(resolve, 900));
+                return Promise.race([tx.finished.catch(() => {}), timeout]).then(finish, finish);
             } catch (_) {
                 guarded();
                 finish();
@@ -945,8 +956,10 @@ const App = (() => {
     }
 
     function initPWA() {
-        // Refuerzo en load por si quedó un SW a medias
         if (!('serviceWorker' in navigator)) return;
+        navigator.serviceWorker.addEventListener?.('message', ev => {
+            if (ev.data?.type === 'vm-sw-off') killServiceWorkers();
+        });
         window.addEventListener('load', () => { killServiceWorkers(); });
     }
 

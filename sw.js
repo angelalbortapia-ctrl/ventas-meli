@@ -1,8 +1,7 @@
-/* Service worker: auto-desregistro.
-   Safari iOS + SW rompía Sync (Load failed). La app ya no registra SW;
-   este archivo solo limpia instalaciones viejas si el navegador lo actualiza. */
+/* Service worker: solo limpia instalaciones viejas. No intercepta red ni recarga pestañas.
+   (Safari iOS + clients.navigate dejaba la PWA en blanco.) */
 
-const VERSION = 'vm-v458-off';
+const VERSION = 'vm-v459-off';
 
 self.addEventListener('install', event => {
     self.skipWaiting();
@@ -18,11 +17,11 @@ self.addEventListener('activate', event => {
         try {
             await self.registration.unregister();
         } catch (_) { /* ignore */ }
-        const clientsList = await self.clients.matchAll({ type: 'window' });
-        for (const client of clientsList) {
-            try { client.navigate(client.url); } catch (_) { /* ignore */ }
-        }
+        try {
+            const clientsList = await self.clients.matchAll({ type: 'window' });
+            for (const client of clientsList) {
+                client.postMessage({ type: 'vm-sw-off', version: VERSION });
+            }
+        } catch (_) { /* ignore */ }
     })());
 });
-
-// No interceptar fetch: dejar la red al navegador.
