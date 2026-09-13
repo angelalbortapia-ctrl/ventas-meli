@@ -47,7 +47,6 @@
       border-radius: 12px; background: #15202b; color: #fff; font-size: 15px; font-weight: 700;
       text-align: center; text-decoration: none;
     }
-    button.secondary, .filebtn.secondary { background: #3d4f63; }
     button.ghost { background: #fff; color: #15202b; border: 1px solid #cfd7e0; }
     button:disabled { opacity: .5; }
     #log, #log2 {
@@ -57,12 +56,11 @@
     }
     .err { color: #9b1c2c !important; background: #fff1f2 !important; border-color: #f0c7cd !important; }
     .counts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
-    .counts div {
-      background: #f4f6f8; border-radius: 10px; padding: 10px; text-align: center;
-    }
+    .counts div { background: #f4f6f8; border-radius: 10px; padding: 10px; text-align: center; }
     .counts strong { display: block; font-size: 1.4rem; }
     .hidden { display: none !important; }
     input[type="file"] { width: 100%; font-size: 14px; }
+    code { font-size: 0.85em; }
   </style>
 </head>
 <body>
@@ -74,7 +72,7 @@
 
     <div class="card">
       <h1>Instalar datos en este iPhone</h1>
-      <p class="lead">Hazlo en Safari. Opción A (más fácil): importa el JSON del Mac. Opción B: baja desde la nube.</p>
+      <p class="lead">Usa Safari. Opción A (recomendada): importa el JSON del Mac. Opción B: baja desde la nube con la misma cuenta Sync.</p>
       <div class="counts" id="now-counts">
         <div><strong id="now-meli">—</strong>Meli ahora</div>
         <div><strong id="now-amz">—</strong>Amazon ahora</div>
@@ -83,7 +81,7 @@
 
     <div class="card">
       <h2>A · Importar archivo del Mac</h2>
-      <p>En el Mac ya está en el Escritorio: <code>ventas-meli-para-iphone.json</code>. AirDrop → Archivos → elige aquí.</p>
+      <p>AirDrop <code>ventas-meli-para-iphone.json</code> (o Respaldo JSON) → Archivos → elige aquí.</p>
       <input id="file" type="file" accept="application/json,.json">
       <button type="button" id="btn-file">Instalar archivo</button>
       <div id="log2"></div>
@@ -92,13 +90,13 @@
     <div class="card">
       <h2>B · Bajar desde la nube</h2>
       <label for="url">Project URL</label>
-      <input id="url" type="url" value="https://xbdvplolnnfwewmntsjq.supabase.co" autocomplete="off" spellcheck="false">
-      <label for="key">Key</label>
-      <input id="key" type="text" value="sb_publishable_tTM7lp-xqUpc8tBwOAfMdA_qkNHhJlh" autocomplete="off" spellcheck="false">
+      <input id="url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" spellcheck="false">
+      <label for="key">anon / publishable key</label>
+      <input id="key" type="password" placeholder="Pega la key de Ajustes → Sync" autocomplete="off" spellcheck="false">
       <label for="email">Email</label>
-      <input id="email" type="email" value="angelalbortapia@gmail.com" autocomplete="username">
+      <input id="email" type="email" placeholder="tu@email.com" autocomplete="username">
       <label for="password">Contraseña</label>
-      <input id="password" type="password" autocomplete="current-password" placeholder="VentasMeli2026!">
+      <input id="password" type="password" autocomplete="current-password" placeholder="Contraseña Sync">
       <button type="button" id="go">Bajar nube</button>
       <div id="log"></div>
     </div>
@@ -109,7 +107,7 @@
         <div><strong id="ok-meli">0</strong>Meli</div>
         <div><strong id="ok-amz">0</strong>Amazon</div>
       </div>
-      <p class="lead" style="margin-top:12px">No uses el ícono viejo de inicio. Abre la app en esta misma pestaña de Safari:</p>
+      <p class="lead" style="margin-top:12px">No uses el ícono viejo de inicio. Abre la app en esta misma pestaña:</p>
       <a class="filebtn" id="open-app" href="./?installed=1">Abrir Ventas Meli</a>
       <button type="button" class="ghost" id="recheck">Volver a contar este teléfono</button>
     </div>
@@ -117,9 +115,16 @@
 
   <script>
     const PENDING = 'ventas-meli:pending-remote:v1';
+    const CFG_KEY = 'ventas-meli:supabase:v1';
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches
       || window.navigator.standalone === true;
     if (isStandalone) document.getElementById('standalone-warn').classList.remove('hidden');
+
+    try {
+      const cfg = JSON.parse(localStorage.getItem(CFG_KEY) || '{}') || {};
+      if (cfg.url) document.getElementById('url').value = cfg.url;
+      if (cfg.anonKey) document.getElementById('key').value = cfg.anonKey;
+    } catch (_) {}
 
     function readCounts() {
       const count = (key) => {
@@ -159,11 +164,20 @@
 
     function writeCatalog({ meliLotes, meliSettings, amazonLotes, amazonSettings, ui, syncCfg, session, pendingRow }) {
       try {
-        if (syncCfg) localStorage.setItem('ventas-meli:supabase:v1', JSON.stringify(syncCfg));
+        if (syncCfg) localStorage.setItem(CFG_KEY, JSON.stringify(syncCfg));
         if (session) {
           const url = (syncCfg && syncCfg.url) || '';
-          const projectRef = (url.match(/^https:\/\/([a-z0-9-]+)\.supabase\.co/i) || [])[1] || 'xbdvplolnnfwewmntsjq';
-          localStorage.setItem('sb-' + projectRef + '-auth-token', JSON.stringify(session));
+          const projectRef = (url.match(/^https:\/\/([a-z0-9-]+)\.supabase\.co/i) || [])[1] || '';
+          if (projectRef) {
+            localStorage.setItem('sb-' + projectRef + '-auth-token', JSON.stringify({
+              access_token: session.access_token,
+              refresh_token: session.refresh_token,
+              expires_at: session.expires_at,
+              expires_in: session.expires_in,
+              token_type: session.token_type || 'bearer',
+              user: session.user,
+            }));
+          }
         }
         if (pendingRow) localStorage.setItem(PENDING, JSON.stringify(pendingRow));
 
@@ -174,11 +188,12 @@
 
         const cleanUi = Object.assign({ mpView: 'amazon', marketplace: 'amazon' }, ui || {});
         delete cleanUi.keepaApiKey; delete cleanUi.keepaCache; delete cleanUi.keepaLibrary;
+        delete cleanUi.serpApiKey;
         cleanUi.mpView = 'amazon';
         cleanUi.marketplace = 'amazon';
         localStorage.setItem('ventas-meli:ui:v1', JSON.stringify(cleanUi));
       } catch (e) {
-        throw new Error('No se pudo guardar en el iPhone (' + (e && e.message) + '). ¿Safari privado?');
+        throw new Error('No se pudo guardar (' + (e && e.message) + '). ¿Safari privado?');
       }
 
       const verify = readCounts();
@@ -199,7 +214,6 @@
         amazonSettings = stripMeta((data.stores.amazon && data.stores.amazon.settings) || {});
         ui = data.ui || {};
       } else if (Array.isArray(data.lotes)) {
-        // legacy single-MP
         if (data.marketplace === 'amazon') {
           amazonLotes = data.lotes; amazonSettings = stripMeta(data.settings || {});
         } else {
@@ -271,7 +285,8 @@
       const email = document.getElementById('email').value.trim();
       const password = document.getElementById('password').value;
       try {
-        if (!password) throw new Error('Falta la contraseña');
+        if (!url || !key) throw new Error('Faltan URL o key (cópialas de Ajustes → Sync en el Mac)');
+        if (!email || !password) throw new Error('Faltan email o contraseña');
         const loginRes = await fetch(url + '/auth/v1/token?grant_type=password', {
           method: 'POST',
           headers: { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },

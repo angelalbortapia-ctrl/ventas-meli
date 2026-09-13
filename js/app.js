@@ -5,7 +5,7 @@
      - importar/exportar Excel (con wizard)
      - respaldo JSON (con dialog propio)
      - command palette (⌘K)
-     - PWA service worker registration
+     - PWA: desregistrar Service Worker (Safari Sync)
      - sincronización de topbar (breadcrumb + fecha)
    ========================================================================== */
 
@@ -838,7 +838,8 @@ const App = (() => {
             sessionStorage.setItem(notifiedTodayKey(a.id), '1');
             if (perm === 'granted') {
                 try {
-                    const reg = await navigator.serviceWorker?.ready;
+                    // No await serviceWorker.ready: sin SW nunca resuelve.
+                    const reg = await navigator.serviceWorker?.getRegistration?.();
                     if (reg?.showNotification) {
                         await reg.showNotification(a.title, {
                             body: a.body,
@@ -927,18 +928,25 @@ const App = (() => {
     }
 
     // ---- PWA -----------------------------------------------------------
-    function initPWA() {
-        // En iPhone el SW interceptaba Supabase/CDN y Safari devolvía "Load failed".
-        // Por ahora: desregistrar cualquier SW viejo y NO registrar uno nuevo.
+    /** Quita SW/cachés viejos YA (antes de Sync). No registrar uno nuevo. */
+    async function killServiceWorkers() {
         if (!('serviceWorker' in navigator)) return;
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.getRegistrations?.().then(regs => {
-                regs.forEach(r => r.unregister().catch(() => {}));
-            }).catch(() => {});
+        try {
+            const regs = await navigator.serviceWorker.getRegistrations?.() || [];
+            await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+        } catch (_) { /* ignore */ }
+        try {
             if (window.caches?.keys) {
-                caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).catch(() => {});
+                const keys = await caches.keys();
+                await Promise.all(keys.map(k => caches.delete(k)));
             }
-        });
+        } catch (_) { /* ignore */ }
+    }
+
+    function initPWA() {
+        // Refuerzo en load por si quedó un SW a medias
+        if (!('serviceWorker' in navigator)) return;
+        window.addEventListener('load', () => { killServiceWorkers(); });
     }
 
     /**
@@ -1439,10 +1447,12 @@ const App = (() => {
             }
         };
 
-        // Sync Supabase (después de wrap de dirty, Sync vuelve a envolver saves)
-        const syncReady = window.Sync
-            ? Sync.init().catch(err => console.warn('[sync] init', err))
-            : Promise.resolve();
+        // Sync Supabase: primero matar SW (Safari), luego init
+        const syncReady = killServiceWorkers()
+            .catch(() => {})
+            .then(() => (window.Sync
+                ? Sync.init().catch(err => console.warn('[sync] init', err))
+                : Promise.resolve()));
 
         refreshBackupHint();
         // Más tarde: da tiempo a Sync.init() a restaurar sesión Supabase

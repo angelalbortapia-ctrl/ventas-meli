@@ -10,7 +10,7 @@ Espeja y automatiza tu Excel `Negocio.xlsx` (pestañas `Lotes_Operaciones` + `Re
 - **Tope máximo de CPA** (Ads) calculado como % de la utilidad para productos "Escalar".
 - **Registro de ventas individuales** con precio real por evento (no solo un contador).
 - **Historial (audit log)** de cambios y ventas por lote.
-- **Insights**: Matriz (margen×rotación), Comprar / no comprar, Estancados y Precios vs competencia. Badge de alertas en campana.
+- **Caja**: bolsitas, reinversión/restock y deuda flete FBA (Amazon).
 - **Command palette** (⌘K / Ctrl+K) para navegar y ejecutar acciones al vuelo.
 - **Productos** tipo Inbox + Split con detalle en tabs (Rentabilidad · Inventario · Recomendación · Historial).
 - **Split redimensionable** con drag persistente en localStorage.
@@ -96,8 +96,11 @@ También puedes **instalarla como PWA** (Chrome: menú → Instalar Ventas Meli)
 ```
 ventas-meli/
 ├── index.html              layout + tabs + modal
+├── iphone-sync.html        instalar catálogo en iPhone (archivo o nube)
+├── clear-cache.html        desregistrar SW / limpiar caché
 ├── manifest.json           PWA manifest
-├── sw.js                   Service worker (network-first + cache offline)
+├── sw.js                   auto-desregistro (Sync en Safari no usa SW)
+├── vendor/supabase.min.js  cliente Supabase local (sin CDN)
 ├── css/styles.css          Temas Meli / Amazon / General
 ├── js/
 │   ├── calc.js             Motor de cálculo
@@ -105,8 +108,8 @@ ventas-meli/
 │   ├── excel.js            Import/Export SheetJS
 │   ├── ui.js               Modales, dialogs, prompt, toast
 │   ├── palette.js          Command palette ⌘K
-│   ├── insights.js         Reglas de negocio + alertas
-│   ├── envios.js           Prep. envíos Amazon
+│   ├── freight.js          Deuda flete FBA
+│   ├── caja.js             Caja + reinversión + flete
 │   ├── lotes.js            Vista productos
 │   ├── dashboard.js        Inicio + consola General
 │   ├── sync.js             Sync Supabase
@@ -123,7 +126,8 @@ Todo se guarda en `localStorage`. Para llevártelo a otro equipo:
 
 - **Respaldo JSON** — botón Respaldo → elige exportar / importar.
 - **Excel** — botón Exportar Excel (compatible con `Negocio.xlsx` + hoja Ventas).
-- **Sync Supabase** — Ajustes → pega URL + anon key → ejecuta `supabase/schema.sql` → mismo login en Mac e iPhone.
+- **Sync Supabase** — Ajustes → URL + anon/publishable key → `supabase/schema.sql` → mismo login en Mac e iPhone.
+- **iPhone** — Safari → `clear-cache.html` → `iphone-sync.html` (AirDrop del JSON o login nube). El ícono de pantalla de inicio **no** comparte datos con Safari.
 
 ## Roadmap
 

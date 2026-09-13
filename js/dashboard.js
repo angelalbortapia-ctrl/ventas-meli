@@ -775,7 +775,7 @@ const DashboardView = (() => {
         return `
             <section class="dash-section dash-section-rise" id="gx-hoy-ops">
                 <div class="dash-section-copy">
-                    <h2 class="dash-section-title">Cola de hoy</h2>
+                    <h2 class="dash-section-title">Hoy</h2>
                     <p class="dash-section-lead">Ofertas · guardados · alertas Keepa</p>
                 </div>
                 <div class="gx-hoy-grid">

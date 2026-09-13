@@ -18,6 +18,7 @@ const Sync = (() => {
     let conflictBusy = false;   // evita diálogos apilados
     let holdRemoteUntil = 0;    // tras reset local forzado, ignora pull/realtime un rato
     let lastAppliedFingerprint = ''; // contenido real aplicado/pushed (ignora updated_at)
+    let skipPullApplyOnce = false;   // pending-remote ya aplicado en init
     let status = { state: 'off', detail: 'Sin configurar', email: '' };
     const listeners = new Set();
 
@@ -203,7 +204,7 @@ const Sync = (() => {
     function networkHint(err) {
         const msg = String(err?.message || err || '');
         if (/load failed|failed to fetch|networkerror|network request failed/i.test(msg)) {
-            return 'Safari no llegó a Supabase (Load failed). Abre clear-cache.html, cierra la app de inicio y reintenta. Si usas bloqueador de contenido, apágalo para esta página.';
+            return 'Safari no llegó a Supabase. Abre clear-cache.html y luego iphone-sync.html (en Safari, no el ícono de inicio). Si usas bloqueador de contenido, apágalo.';
         }
         return msg || 'Error de red';
     }
@@ -438,12 +439,10 @@ const Sync = (() => {
             return;
         }
 
-        // iPhone vacío / sin Amazon / nube más completa → traer nube sin preguntar
-        const phoneNeedsCloud = (local.amazon === 0 && remote.amazon > 0)
-            || (local.total === 0 && remote.total > 0)
-            || (remote.total > local.total);
+        // iPhone vacío o sin Amazon → traer nube. Si ambos tienen data, preguntar.
+        const phoneNeedsCloud = (local.total === 0 && remote.total > 0)
+            || (local.amazon === 0 && remote.amazon > 0);
         if (phoneNeedsCloud) {
-            queuePendingRemote(row);
             applyRemote(row, { silent: false });
             refreshOpenViews();
             return;
@@ -553,7 +552,8 @@ const Sync = (() => {
     async function pushNow({ force = false } = {}) {
         const c = ensureClient();
         if (!c || applyingRemote) return;
-        const { data: { user } } = await c.auth.getUser();
+        const { data: { session } } = await c.auth.getSession();
+        const user = session?.user;
         if (!user) return;
         if (force) holdRemote(20000);
 
@@ -582,15 +582,26 @@ const Sync = (() => {
         const updated_at = new Date().toISOString();
         const packed = packStateForSync();
 
-        // Nunca pisar en la nube un catálogo con productos usando un paquete vacío
+        // Nunca pisar la nube con un paquete vacío si no pudimos leer el remoto
+        let mergeOk = false;
         try {
             const { data: remoteRow } = await c.from(TABLE)
                 .select('lotes, settings, updated_at')
                 .eq('user_id', user.id)
                 .maybeSingle();
             if (remoteRow) mergeNonEmptyRemoteIntoPack(packed, remoteRow);
+            mergeOk = true;
         } catch (err) {
             console.warn('[sync] merge remoto antes de push', err);
+            mergeOk = false;
+        }
+
+        const packedCounts = remoteCatalogCounts({ lotes: packed.lotes, settings: packed.settings });
+        if (packedCounts.total === 0 && !mergeOk) {
+            pushing = false;
+            setStatus({ state: 'error', detail: 'No subí: no pude verificar la nube' });
+            if (window.UI) UI.toast('Sync: no subí vacío (sin verificar nube)', 'error');
+            return;
         }
 
         const payload = {
@@ -642,17 +653,28 @@ const Sync = (() => {
         }
 
         if (row && Date.now() >= holdRemoteUntil) {
-            const local = localCatalogCounts();
-            const remote = remoteCatalogCounts(row);
-            const remoteTs = row.updated_at ? new Date(row.updated_at).getTime() : 0;
-            const localTs = lastRemoteAt ? new Date(lastRemoteAt).getTime() : 0;
-            const needsCloud = (local.amazon === 0 && remote.amazon > 0)
-                || (remote.total > local.total)
-                || !lastRemoteAt
-                || remoteTs > localTs;
-            if (needsCloud) {
-                applyRemote(row, { silent: true });
-                refreshOpenViews();
+            if (skipPullApplyOnce) {
+                skipPullApplyOnce = false;
+                lastRemoteAt = row.updated_at || lastRemoteAt || new Date().toISOString();
+                const counts = remoteCatalogCounts(row);
+                setStatus({
+                    state: 'synced',
+                    detail: `Nube OK · Meli ${counts.meli} · Amazon ${counts.amazon}`,
+                    email: user.email || status.email,
+                });
+            } else {
+                const local = localCatalogCounts();
+                const remote = remoteCatalogCounts(row);
+                const remoteTs = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+                const localTs = lastRemoteAt ? new Date(lastRemoteAt).getTime() : 0;
+                const needsCloud = (local.total === 0 && remote.total > 0)
+                    || (local.amazon === 0 && remote.amazon > 0)
+                    || !lastRemoteAt
+                    || remoteTs > localTs;
+                if (needsCloud) {
+                    applyRemote(row, { silent: true });
+                    refreshOpenViews();
+                }
             }
         }
 
@@ -735,10 +757,11 @@ const Sync = (() => {
         const out = { ...(ui || {}) };
         delete out.backupDirty;
         delete out.lastBackupAt;
-        // Key de Keepa y caché de tokens: solo en este dispositivo
+        // Secrets y caché: solo en este dispositivo
         delete out.keepaApiKey;
         delete out.keepaCache;
         delete out.keepaLibrary;
+        delete out.serpApiKey;
         return out;
     }
 
@@ -855,6 +878,7 @@ const Sync = (() => {
                 delete remoteUI.keepaApiKey;
                 delete remoteUI.keepaCache;
                 delete remoteUI.keepaLibrary;
+                delete remoteUI.serpApiKey;
             }
             const meliSettings = stripSyncMeta(rawSettings);
 
@@ -973,11 +997,12 @@ const Sync = (() => {
         }
         ensureClient();
 
-        // Fila bajada por iphone-sync.html (o login forzado) — aplicar ya
+        // Fila bajada por iphone-sync.html — aplicar ya y no re-aplicar en pull
         const pending = consumePendingRemote();
         if (pending) {
             applyRemote(pending, { silent: false });
             refreshOpenViews();
+            skipPullApplyOnce = true;
         }
 
         await bootSession();

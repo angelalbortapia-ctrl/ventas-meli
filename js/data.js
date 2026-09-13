@@ -1686,7 +1686,7 @@ window.State = {
         Data.saveLotes(this.lotes, this.marketplace);
         Data.saveSettings(this.settings, this.marketplace);
         this.marketplace = next;
-        this.ui = { ...this.ui, marketplace: next };
+        this.ui = { ...this.ui, marketplace: next, mpView: next };
         this.saveUI();
         this.lotes = Data.loadLotes(next);
         this.settings = Data.loadSettings(next);
