@@ -48,7 +48,7 @@ const App = (() => {
 
         // iOS Safari: View Transitions / fade a veces deja la UI borrosa o en blanco.
         if (prefersReducedMotion() || isIOSSafari()) {
-            guarded();
+            try { guarded(); } catch (err) { console.warn('[pageTx]', err); }
             body.classList.remove('is-page-exit', 'is-page-enter', 'is-mp-sky-shift');
             delete body.dataset.pageTransition;
             delete root.dataset.pageTransition;
@@ -93,8 +93,13 @@ const App = (() => {
         if (kind === 'channel') body.classList.add('is-mp-sky-shift');
         return new Promise((resolve) => {
             window.setTimeout(() => {
-                guarded();
+                try {
+                    guarded();
+                } catch (err) {
+                    console.warn('[pageTx]', err);
+                }
                 if (token !== pageTxToken) {
+                    pageTxBusy = false;
                     resolve();
                     return;
                 }
@@ -1483,26 +1488,22 @@ const App = (() => {
         } catch (_) { /* ignore */ }
         openOfertasDraft();
 
-        // Tras Sync: recargar catálogo (iPhone a menudo aplicaba la nube DESPUÉS del primer paint)
+        // Tras Sync: recargar el catálogo activo (no pisar un cambio Meli/Amazon/General en vivo)
         syncReady.finally(() => {
             try {
                 const mp = Data.normalizeMarketplace(window.State.marketplace);
-                const ui = Data.loadUI();
-                if (ui?.mpView) {
-                    window.State.ui = { ...window.State.ui, ...ui };
-                }
-                window.State.marketplace = Data.normalizeMarketplace(
-                    window.State.ui?.marketplace || window.State.ui?.mpView || mp
-                );
-                if (window.State.ui?.mpView === 'amazon' || window.State.ui?.mpView === 'meli') {
-                    window.State.marketplace = window.State.ui.mpView;
-                }
-                window.State.lotes = Data.loadLotes(window.State.marketplace);
-                window.State.settings = Data.loadSettings(window.State.marketplace);
+                window.State.lotes = Data.loadLotes(mp);
+                window.State.settings = Data.loadSettings(mp);
                 window.State.notify();
                 App.refreshMarketplaceChrome?.();
                 App.refreshNavCounts?.();
-                switchTab(window.State.view || 'dashboard');
+                const view = window.State.view || 'dashboard';
+                if (view === 'dashboard') DashboardView.render();
+                else if (view === 'lotes') LotesView.render();
+                else if (view === 'ofertas') OfertasView.render();
+                else if (view === 'keepa') KeepaView.render();
+                else if (view === 'caja') CajaView.render();
+                else if (view === 'settings') SettingsView.loadIntoForm();
             } catch (err) {
                 console.warn('[sync] post-init refresh', err);
             }

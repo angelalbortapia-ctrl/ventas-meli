@@ -2301,8 +2301,10 @@ const DashboardView = (() => {
                     : (window.State.ui?.mpView || window.State.marketplace)
             ) || window.State.marketplace;
             if (mp !== curView || mp !== window.State.marketplace) {
-                if (window.App?.applyMarketplaceView) window.App.applyMarketplaceView(mp, { toast: false });
-                else {
+                // Sin animación: selectAndGo necesita el catálogo ya cargado.
+                if (window.App?.applyMarketplaceView) {
+                    window.App.applyMarketplaceView(mp, { toast: false, animate: false });
+                } else {
                     window.State.ui = { ...window.State.ui, mpView: mp };
                     window.State.saveUI();
                     window.State.switchMarketplace(mp);

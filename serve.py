@@ -256,8 +256,9 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=ROOT, **kwargs)
 
     def end_headers(self):
-        # PWA local: no cachear HTML agresivamente
-        if self.path.endswith(".html") or self.path in ("/", ""):
+        # PWA local: no cachear HTML (path sin query: /?installed=… también)
+        path = urllib.parse.urlparse(self.path).path
+        if path.endswith(".html") or path in ("/", ""):
             self.send_header("Cache-Control", "no-store")
         super().end_headers()
 

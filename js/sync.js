@@ -209,13 +209,20 @@ const Sync = (() => {
         return msg || 'Error de red';
     }
 
+    function fetchOpts(extra = {}) {
+        const opts = { cache: 'no-store', ...extra };
+        if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+            opts.signal = extra.signal || AbortSignal.timeout(15000);
+        }
+        return opts;
+    }
+
     async function pingProject(url, anonKey) {
         const endpoint = `${url}/auth/v1/health`;
-        const res = await fetch(endpoint, {
+        const res = await fetch(endpoint, fetchOpts({
             method: 'GET',
             headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
-            cache: 'no-store',
-        });
+        }));
         if (!res.ok) throw new Error(`Supabase respondió ${res.status}`);
         return true;
     }
@@ -247,14 +254,13 @@ const Sync = (() => {
         if (!cfg.url || !cfg.anonKey || !accessToken || !userId) return null;
         const res = await fetch(
             `${cfg.url}/rest/v1/${TABLE}?select=lotes,settings,updated_at&user_id=eq.${encodeURIComponent(userId)}`,
-            {
+            fetchOpts({
                 headers: {
                     apikey: cfg.anonKey,
                     Authorization: `Bearer ${accessToken}`,
                     Accept: 'application/json',
                 },
-                cache: 'no-store',
-            }
+            })
         );
         if (!res.ok) throw new Error(`Pull HTTP ${res.status}`);
         const rows = await res.json();
@@ -360,16 +366,15 @@ const Sync = (() => {
         if (!cfg.url || !cfg.anonKey) throw new Error('Configura Supabase primero');
         try {
             // fetch directo: en Safari iOS el cliente supabase-js a veces tira "Load failed"
-            const res = await fetch(`${cfg.url}/auth/v1/token?grant_type=password`, {
+            const res = await fetch(`${cfg.url}/auth/v1/token?grant_type=password`, fetchOpts({
                 method: 'POST',
                 headers: {
                     apikey: cfg.anonKey,
                     Authorization: `Bearer ${cfg.anonKey}`,
                     'Content-Type': 'application/json',
                 },
-                cache: 'no-store',
                 body: JSON.stringify({ email, password }),
-            });
+            }));
             const body = await res.json().catch(() => ({}));
             if (!res.ok) {
                 throw new Error(body.error_description || body.msg || body.error || `Login HTTP ${res.status}`);
