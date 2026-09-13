@@ -551,7 +551,7 @@ const Sync = (() => {
 
     async function pushNow({ force = false } = {}) {
         const c = ensureClient();
-        if (!c || applyingRemote) return;
+        if (!c || applyingRemote || pushing) return;
         const { data: { session } } = await c.auth.getSession();
         const user = session?.user;
         if (!user) return;
@@ -559,81 +559,123 @@ const Sync = (() => {
 
         // Antes de pisar: si la nube avanzó y nosotros también, preguntar
         if (!force) {
-            const { data: remote } = await c.from(TABLE).select('updated_at').eq('user_id', user.id).maybeSingle();
-            if (remote?.updated_at && lastRemoteAt && remote.updated_at !== lastRemoteAt) {
-                const remoteTs = new Date(remote.updated_at).getTime();
-                const knownTs = new Date(lastRemoteAt).getTime();
-                if (remoteTs > knownTs && localDirtyAt >= knownTs - 500) {
-                    const { data: full } = await c.from(TABLE).select('lotes, settings, updated_at').eq('user_id', user.id).maybeSingle();
-                    if (full) {
-                        const choice = await resolveConflict(full);
-                        if (choice === 'remote') {
-                            applyRemote(full, { silent: false });
-                            localDirtyAt = 0;
-                            return;
+            try {
+                const { data: remote } = await c.from(TABLE).select('updated_at').eq('user_id', user.id).maybeSingle();
+                if (remote?.updated_at && lastRemoteAt && remote.updated_at !== lastRemoteAt) {
+                    const remoteTs = new Date(remote.updated_at).getTime();
+                    const knownTs = new Date(lastRemoteAt).getTime();
+                    if (remoteTs > knownTs && localDirtyAt >= knownTs - 500) {
+                        const { data: full } = await c.from(TABLE).select('lotes, settings, updated_at').eq('user_id', user.id).maybeSingle();
+                        if (full) {
+                            const choice = await resolveConflict(full);
+                            if (choice === 'remote') {
+                                applyRemote(full, { silent: false });
+                                localDirtyAt = 0;
+                                return;
+                            }
                         }
                     }
                 }
+            } catch (err) {
+                console.warn('[sync] pre-push conflict check', err);
             }
         }
 
         pushing = true;
         setStatus({ state: 'syncing', detail: 'Subiendo…' });
-        const updated_at = new Date().toISOString();
-        const packed = packStateForSync();
-
-        // Nunca pisar la nube con un paquete vacío si no pudimos leer el remoto
-        let mergeOk = false;
         try {
-            const { data: remoteRow } = await c.from(TABLE)
-                .select('lotes, settings, updated_at')
-                .eq('user_id', user.id)
-                .maybeSingle();
-            if (remoteRow) mergeNonEmptyRemoteIntoPack(packed, remoteRow);
-            mergeOk = true;
+            const updated_at = new Date().toISOString();
+            const packed = packStateForSync();
+
+            // Nunca pisar la nube con un paquete vacío si no pudimos leer el remoto
+            let mergeOk = false;
+            try {
+                const { data: remoteRow } = await c.from(TABLE)
+                    .select('lotes, settings, updated_at')
+                    .eq('user_id', user.id)
+                    .maybeSingle();
+                if (remoteRow) mergeNonEmptyRemoteIntoPack(packed, remoteRow);
+                mergeOk = true;
+            } catch (err) {
+                console.warn('[sync] merge remoto antes de push', err);
+                mergeOk = false;
+            }
+
+            const packedCounts = remoteCatalogCounts({ lotes: packed.lotes, settings: packed.settings });
+            if (packedCounts.total === 0 && !mergeOk) {
+                setStatus({ state: 'error', detail: 'No subí: no pude verificar la nube' });
+                if (window.UI) UI.toast('Sync: no subí vacío (sin verificar nube)', 'error');
+                return;
+            }
+
+            const payload = {
+                user_id: user.id,
+                lotes: packed.lotes,
+                settings: packed.settings,
+                updated_at,
+            };
+            const { error } = await c.from(TABLE).upsert(payload, { onConflict: 'user_id' });
+            if (error) {
+                console.error('[sync] push', error);
+                setStatus({ state: 'error', detail: error.message });
+                if (window.UI) UI.toast('Sync: ' + error.message, 'error');
+                return;
+            }
+            lastRemoteAt = updated_at;
+            localDirtyAt = 0;
+            lastAppliedFingerprint = contentFingerprint({ lotes: packed.lotes, settings: packed.settings });
+            // Evita que el eco realtime del propio upsert re-aplique y resetee el scroll.
+            holdRemote(2500);
+            const counts = remoteCatalogCounts({ lotes: packed.lotes, settings: packed.settings });
+            setStatus({
+                state: 'synced',
+                detail: `Nube OK · Meli ${counts.meli} · Amazon ${counts.amazon}`,
+                email: user.email || status.email,
+            });
+            if (window.App?.markBackupDone) {
+                window.__skipBackupDirty = true;
+                App.markBackupDone();
+                window.__skipBackupDirty = false;
+            }
         } catch (err) {
-            console.warn('[sync] merge remoto antes de push', err);
-            mergeOk = false;
-        }
-
-        const packedCounts = remoteCatalogCounts({ lotes: packed.lotes, settings: packed.settings });
-        if (packedCounts.total === 0 && !mergeOk) {
+            console.error('[sync] push', err);
+            setStatus({ state: 'error', detail: networkHint(err) });
+            if (window.UI) UI.toast('Sync: ' + networkHint(err), 'error');
+        } finally {
             pushing = false;
-            setStatus({ state: 'error', detail: 'No subí: no pude verificar la nube' });
-            if (window.UI) UI.toast('Sync: no subí vacío (sin verificar nube)', 'error');
-            return;
         }
+    }
 
-        const payload = {
-            user_id: user.id,
-            lotes: packed.lotes,
-            settings: packed.settings,
-            updated_at,
-        };
-        const { error } = await c.from(TABLE).upsert(payload, { onConflict: 'user_id' });
-        pushing = false;
-        if (error) {
-            console.error('[sync] push', error);
-            setStatus({ state: 'error', detail: error.message });
-            if (window.UI) UI.toast('Sync: ' + error.message, 'error');
-            return;
+    /** Baja la nube a este dispositivo (manual, con confirmación en UI). */
+    async function pullNow({ force = false } = {}) {
+        const c = ensureClient();
+        if (!c) throw new Error('Configura Supabase primero');
+        const { data: { session } } = await c.auth.getSession();
+        const user = session?.user;
+        if (!user) throw new Error('Inicia sesión primero');
+
+        let row = null;
+        try {
+            row = await fetchRemoteRow(session.access_token, user.id);
+        } catch (err) {
+            const { data, error } = await c.from(TABLE).select('lotes, settings, updated_at').eq('user_id', user.id).maybeSingle();
+            if (error) throw error;
+            row = data;
         }
-        lastRemoteAt = updated_at;
-        localDirtyAt = 0;
-        lastAppliedFingerprint = contentFingerprint({ lotes: packed.lotes, settings: packed.settings });
-        // Evita que el eco realtime del propio upsert re-aplique y resetee el scroll.
-        holdRemote(2500);
-        const counts = remoteCatalogCounts({ lotes: packed.lotes, settings: packed.settings });
-        setStatus({
-            state: 'synced',
-            detail: `Nube OK · Meli ${counts.meli} · Amazon ${counts.amazon}`,
-            email: user.email || status.email,
-        });
-        if (window.App?.markBackupDone) {
-            window.__skipBackupDirty = true;
-            App.markBackupDone();
-            window.__skipBackupDirty = false;
+        if (!row) throw new Error('Nube vacía para este usuario');
+
+        const local = localCatalogCounts();
+        const remote = remoteCatalogCounts(row);
+        if (!force && local.total > 0 && remote.total > 0) {
+            const choice = await resolveConflict(row);
+            if (choice !== 'remote') {
+                await pushNow({ force: true });
+                return { ok: true, pushed: true };
+            }
         }
+        applyRemote(row, { silent: false });
+        refreshOpenViews();
+        return { ok: true, pulled: true, counts: remote };
     }
 
     async function pullAndSubscribe() {
@@ -665,15 +707,57 @@ const Sync = (() => {
             } else {
                 const local = localCatalogCounts();
                 const remote = remoteCatalogCounts(row);
+                const remoteFp = contentFingerprint(row);
+                const sameContent = !!(remoteFp && remoteFp === lastAppliedFingerprint);
                 const remoteTs = row.updated_at ? new Date(row.updated_at).getTime() : 0;
                 const localTs = lastRemoteAt ? new Date(lastRemoteAt).getTime() : 0;
-                const needsCloud = (local.total === 0 && remote.total > 0)
-                    || (local.amazon === 0 && remote.amazon > 0)
-                    || !lastRemoteAt
-                    || remoteTs > localTs;
+                const localDirty = localDirtyAt > 0;
+
+                // Vacío local / sin Amazon → traer nube. No pisar edits locales solo porque lastRemoteAt es null.
+                let needsCloud = (local.total === 0 && remote.total > 0)
+                    || (local.amazon === 0 && remote.amazon > 0);
+
+                if (!needsCloud && !sameContent && lastRemoteAt && remoteTs > localTs) {
+                    if (localDirty) {
+                        const choice = await resolveConflict(row);
+                        needsCloud = choice === 'remote';
+                        if (choice === 'local') {
+                            await pushNow({ force: true });
+                        }
+                    } else {
+                        needsCloud = true;
+                    }
+                } else if (!needsCloud && !lastRemoteAt && remote.total > 0 && local.total > 0) {
+                    // Primera carga de esta pestaña: comparar contenido, no pisar a ciegas
+                    const localPack = packStateForSync();
+                    const localFp = contentFingerprint({
+                        lotes: localPack.lotes,
+                        settings: localPack.settings,
+                    });
+                    if (localFp && remoteFp && localFp === remoteFp) {
+                        lastRemoteAt = row.updated_at || new Date().toISOString();
+                        lastAppliedFingerprint = remoteFp;
+                    } else if (localDirty) {
+                        const choice = await resolveConflict(row);
+                        if (choice === 'remote') {
+                            applyRemote(row, { silent: true });
+                            refreshOpenViews();
+                        } else {
+                            await pushNow({ force: true });
+                        }
+                    } else {
+                        // Sin dirty: anclar marca sin overwrite (el usuario puede “Bajar nube”)
+                        lastRemoteAt = row.updated_at || new Date().toISOString();
+                        lastAppliedFingerprint = localFp || remoteFp || lastAppliedFingerprint;
+                    }
+                }
+
                 if (needsCloud) {
                     applyRemote(row, { silent: true });
                     refreshOpenViews();
+                } else if (!lastRemoteAt && row.updated_at) {
+                    lastRemoteAt = row.updated_at;
+                    if (remoteFp) lastAppliedFingerprint = remoteFp;
                 }
             }
         }
@@ -1032,6 +1116,7 @@ const Sync = (() => {
         signIn,
         signOut,
         pushNow,
+        pullNow,
         schedulePush,
         holdRemote,
         getStatus,

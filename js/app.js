@@ -697,13 +697,14 @@ const App = (() => {
             const stored = JSON.parse(raw);
             const ui = stored?.data?.ui;
             if (!ui || typeof ui !== 'object') return;
-            if (!('keepaApiKey' in ui) && !('keepaCache' in ui) && !('keepaLibrary' in ui)) return;
+            if (!('keepaApiKey' in ui) && !('keepaCache' in ui) && !('keepaLibrary' in ui) && !('serpApiKey' in ui)) return;
             delete ui.keepaApiKey;
             delete ui.keepaCache;
             delete ui.keepaLibrary;
+            delete ui.serpApiKey;
             localStorage.setItem('vm.autoBackup', JSON.stringify(stored));
         } catch (err) {
-            console.warn('[backup] no se pudo sanear Keepa', err);
+            console.warn('[backup] no se pudo sanear secrets', err);
         }
     }
 

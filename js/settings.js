@@ -235,10 +235,29 @@ const SettingsView = (() => {
 
         document.getElementById('btn-sync-now')?.addEventListener('click', async () => {
             try {
-                await S.pushNow();
+                await S.pushNow({ force: true });
                 UI.toast('Subido a Supabase', 'success', { pulse: true });
+                paintSyncStatus(S.getStatus());
             } catch (err) {
                 UI.toast(err.message || 'Error al subir', 'error');
+            }
+        });
+
+        document.getElementById('btn-sync-pull')?.addEventListener('click', async () => {
+            try {
+                if (!S.pullNow) throw new Error('Recarga la app (Cmd+Shift+R)');
+                const ok = await UI.confirm({
+                    title: 'Bajar nube',
+                    message: 'Se traerán Meli + Amazon desde Supabase. Si hay conflicto, te preguntará qué conservar.',
+                    primaryLabel: 'Bajar nube',
+                });
+                if (!ok) return;
+                const r = await S.pullNow();
+                if (r?.pushed) UI.toast('Conservé local y subí a la nube');
+                else UI.toast('Nube aplicada en este dispositivo', 'success', { pulse: true });
+                paintSyncStatus(S.getStatus());
+            } catch (err) {
+                UI.toast(err.message || 'Error al bajar', 'error');
             }
         });
     }
